@@ -1,0 +1,1177 @@
+import time
+import asyncio
+import functools
+import hashlib
+import inspect
+import logging
+from logging.handlers import RotatingFileHandler
+import sys
+import os
+import re
+import math
+import shutil
+import uuid
+from collections import OrderedDict, defaultdict
+from urllib.parse import urlparse
+from typing import Any, Optional, Dict, List, Tuple, Callable, Awaitable
+from config import Config
+try:
+    from pyrogram.errors import FloodWait, MessageNotModified
+except ImportError:
+    FloodWait = type("FloodWait", (Exception,), {})
+    MessageNotModified = type("MessageNotModified", (Exception,), {})
+
+# ==================== 1. SMALLCAPS STYLISH FONT & EMOJIS ====================
+
+SMALLCAPS_MAP = {
+    'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ',
+    'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ',
+    'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 's', 't': 'ᴛ', 'u': 'ᴜ',
+    'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ',
+    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ',
+    'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ',
+    'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 's', 'T': 'ᴛ', 'U': 'ᴜ',
+    'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ',
+    '0': '𝟶', '1': '𝟷', '2': '𝟸', '3': '𝟹', '4': '𝟺',
+    '5': '𝟻', '6': '𝟼', '7': '𝟽', '8': '𝟾', '9': '𝟿'
+}
+
+ALPHA_SMALLCAPS_MAP = {k: v for k, v in SMALLCAPS_MAP.items() if k.isalpha()}
+
+def to_smallcaps(text: str, convert_digits: bool = False) -> str:
+    """Converts text into clean smallcap stylish font while preserving URLs, HTML tags, @mentions, and /commands."""
+    if not text:
+        return ""
+    cmap = SMALLCAPS_MAP if convert_digits else ALPHA_SMALLCAPS_MAP
+    tokens = re.split(r'(<[^>]+>|https?://\S+|@\w+|/[a-zA-Z0-9_]+|\{[a-zA-Z0-9_:.]*\})', str(text))
+    out = []
+    for idx, tok in enumerate(tokens):
+        if idx % 2 == 1:
+            out.append(tok)
+        else:
+            out.append("".join(cmap.get(c, c) for c in tok))
+    return "".join(out)
+
+sc = to_smallcaps
+to_small_caps = to_smallcaps
+to_smallcap = to_smallcaps
+stylish = to_smallcaps
+
+def style_text(header: str, items: dict = None) -> str:
+    out = f"✦ **{to_smallcaps(header)}** ✦\n\n"
+    if items:
+        for k, v in items.items():
+            out += f"• **{to_smallcaps(k)}** : `{v}`\n"
+        out += "\n"
+    out += f"⚡ **{to_smallcaps('powered by')}** : [{Config.WATERMARK}]({Config.WATERMARK_URL})"
+    return out
+
+def format_watermark() -> str:
+    return f"\n\n📢 **{to_smallcaps('join')}** : [{Config.WATERMARK}]({Config.WATERMARK_URL})"
+
+def format_watermark_html() -> str:
+    return f"\n\n📢 <b>{to_smallcaps('join')}:</b> <a href='{Config.WATERMARK_URL}'>{Config.WATERMARK}</a>"
+
+
+# ==================== 2. DETAILED UNIFIED LOGGER ====================
+
+LOG_FILE_PATH = "TelegramBot.txt"
+MEMORY_LOGS: List[str] = []
+
+_SECRET_PATTERNS = [
+    re.compile(r"mongodb(?:\+srv)?://[^\s\"'<>]+", re.IGNORECASE),
+    re.compile(r"\b\d{8,12}:[A-Za-z0-9_-]{30,50}\b"),
+    re.compile(r"(?i)(token|secret|password)\s*[=:]\s*[^\s,;\"']+"),
+]
+
+def redact_secrets(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = str(text)
+    for secret_val in (Config.BOT_TOKEN, Config.API_HASH, Config.MONGO_URI):
+        if secret_val and len(str(secret_val)) > 6:
+            cleaned = cleaned.replace(str(secret_val), "[REDACTED]")
+    for pat in _SECRET_PATTERNS:
+        cleaned = pat.sub("[REDACTED]", cleaned)
+    return cleaned
+
+class RedactSecretsFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if record.args:
+                record.msg = redact_secrets(record.getMessage())
+                record.args = ()
+            else:
+                record.msg = redact_secrets(record.msg)
+        except Exception:
+            pass
+        return True
+
+FLOODWAIT_STATS: Dict[str, Any] = {
+    "total_events": 0,
+    "total_slept_seconds": 0,
+    "last_wait_seconds": 0,
+    "last_method": "None",
+    "last_timestamp": 0.0,
+    "deduplicated_edits": 0,
+    "coalesced_progress_edits": 0,
+    "scheduled_resumed_edits": 0,
+}
+
+class MemoryLogHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            MEMORY_LOGS.append(msg)
+            if len(MEMORY_LOGS) > 2000:
+                del MEMORY_LOGS[: len(MEMORY_LOGS) - 2000]
+        except Exception:
+            pass
+
+def setup_logger(name: str = "MMW_PRO") -> logging.Logger:
+    root_logger = logging.getLogger()
+    if not getattr(root_logger, "_mmw_unified_configured", False):
+        root_logger.setLevel(logging.INFO)
+        root_logger.handlers.clear()
+
+        redact_filter = RedactSecretsFilter()
+        detailed_formatter = logging.Formatter(
+            fmt="⚡ %(asctime)s 🕒 │ %(levelname)-7s 🏷️ │ %(name)-18s 📦 │ %(funcName)s:%(lineno)d 📍 │ %(message)s",
+            datefmt="%d-%m-%Y %H:%M:%S"
+        )
+
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setLevel(logging.INFO)
+        stream_handler.setFormatter(detailed_formatter)
+        stream_handler.addFilter(redact_filter)
+        root_logger.addHandler(stream_handler)
+
+        try:
+            file_handler = RotatingFileHandler(
+                LOG_FILE_PATH,
+                mode="a",
+                maxBytes=10 * 1024 * 1024,
+                backupCount=5,
+                encoding="utf-8",
+            )
+            file_handler.setLevel(logging.INFO)
+            file_handler.setFormatter(detailed_formatter)
+            file_handler.addFilter(redact_filter)
+            root_logger.addHandler(file_handler)
+        except Exception:
+            pass
+
+        mem_handler = MemoryLogHandler()
+        mem_handler.setLevel(logging.INFO)
+        mem_handler.setFormatter(detailed_formatter)
+        mem_handler.addFilter(redact_filter)
+        root_logger.addHandler(mem_handler)
+
+        for noisy in ("pyrogram.session", "pyrogram.connection", "aiohttp.access"):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
+
+        setattr(root_logger, "_mmw_unified_configured", True)
+        setattr(root_logger, "_goku_configured", True)
+
+    return logging.getLogger(name)
+
+logger = setup_logger()
+
+
+# ==================== 2B. CENTRALIZED TELEGRAM API RATE-LIMIT MANAGER ====================
+
+def _flood_wait_seconds(error: Exception) -> int:
+    """Extract exact server-provided wait duration from Pyrogram FloodWait exceptions."""
+    try:
+        val = getattr(error, "value", None)
+        if val is None:
+            val = getattr(error, "x", None)
+        if val is None:
+            m = re.search(r"(\d+)\s*seconds", str(error), re.IGNORECASE)
+            if not m:
+                m = re.search(r"FLOOD_WAIT_(\d+)", str(error), re.IGNORECASE)
+            val = int(m.group(1)) if m else 1
+        return max(1, int(val))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _compute_edit_signature(text: str, reply_markup: Any = None) -> str:
+    """Compute a deterministic hash signature of message text + inline keyboard markup."""
+    markup_str = ""
+    if reply_markup is not None:
+        try:
+            rows = getattr(reply_markup, "inline_keyboard", None)
+            if rows:
+                parts = []
+                for r in rows:
+                    for b in r:
+                        parts.append(f"{getattr(b, 'text', '')}:{getattr(b, 'callback_data', '')}:{getattr(b, 'url', '')}")
+                markup_str = "|".join(parts)
+            else:
+                markup_str = str(reply_markup)
+        except Exception:
+            markup_str = str(reply_markup)
+    raw = f"{text or ''}||{markup_str}"
+    return hashlib.md5(raw.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _extract_msg_identity(message: Any) -> Tuple[int, int]:
+    if message is None:
+        return (0, 0)
+    chat = getattr(message, "chat", None)
+    chat_id = int(getattr(chat, "id", 0) or getattr(message, "chat_id", 0) or 0)
+    msg_id = int(getattr(message, "id", 0) or getattr(message, "message_id", 0) or 0)
+    return (chat_id, msg_id)
+
+
+class TelegramRateLimitManager:
+    """
+    Production-Grade Centralized Telegram API Rate-Limit Manager:
+    - Per-client and per-chat FloodWait cooldown tracking using server-provided durations.
+    - Non-blocking asynchronous token-bucket & interval pacing per chat and globally.
+    - Message-edit content deduplication (skips unchanged edits with 0 API calls).
+    - Concurrent edit coalescing & automatic deferred execution for essential updates.
+    - Telemetry tracking (`last_rpc_success_ts`, `active_cooldown_seconds`) for KeepAlive health.
+    """
+    def __init__(self):
+        self._global_lock = asyncio.Lock()
+        self._last_global_write_ts: float = 0.0
+        self._client_cooldown_until: float = 0.0
+        self._progress_block_until: float = 0.0
+
+        self._chat_locks: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._chat_cooldown_until: Dict[int, float] = defaultdict(float)
+        self._chat_last_write_ts: Dict[int, float] = defaultdict(float)
+        self._chat_last_edit_ts: Dict[int, float] = defaultdict(float)
+
+        self._msg_locks: Dict[Tuple[int, int], asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._msg_last_edit_ts: Dict[Tuple[int, int], float] = {}
+        self._msg_last_sig: Dict[Tuple[int, int], str] = {}
+        self._msg_pending_edit: Dict[Tuple[int, int], Dict[str, Any]] = {}
+        self._msg_flush_tasks: Dict[Tuple[int, int], asyncio.Task] = {}
+
+        self.last_rpc_success_ts: float = time.time()
+        self.last_floodwait_ts: float = 0.0
+
+    def record_rpc_success(self) -> None:
+        self.last_rpc_success_ts = time.time()
+
+    def is_in_cooldown(self, chat_id: int = 0) -> bool:
+        now = time.time()
+        if now < self._client_cooldown_until:
+            return True
+        if chat_id and now < self._chat_cooldown_until.get(int(chat_id), 0.0):
+            return True
+        return False
+
+    def active_cooldown_seconds(self, chat_id: int = 0) -> float:
+        now = time.time()
+        rem = max(0.0, self._client_cooldown_until - now)
+        if chat_id:
+            rem = max(rem, self._chat_cooldown_until.get(int(chat_id), 0.0) - now)
+        return round(rem, 2)
+
+    async def notify_floodwait(self, method_name: str, wait_s: int, chat_id: int = 0) -> None:
+        now = time.time()
+        eff_wait = max(1, int(wait_s))
+        self.last_floodwait_ts = now
+        self._client_cooldown_until = max(self._client_cooldown_until, now + eff_wait)
+        self._progress_block_until = max(self._progress_block_until, now + eff_wait + 2.0)
+        if chat_id:
+            self._chat_cooldown_until[int(chat_id)] = max(
+                self._chat_cooldown_until.get(int(chat_id), 0.0),
+                now + eff_wait + 1.0,
+            )
+
+    async def wait_for_write_slot(
+        self,
+        rpc_name: str = "SendMessage",
+        chat_id: int = 0,
+        is_edit: bool = False,
+        is_optional_progress: bool = False,
+    ) -> bool:
+        """
+        Acquire a rate-limited write slot for Telegram RPCs.
+        Returns False if `is_optional_progress` is True and a cooldown or throttle window is active.
+        """
+        now = time.time()
+        if is_optional_progress:
+            if now < self._progress_block_until or self.is_in_cooldown(chat_id):
+                FLOODWAIT_STATS["coalesced_progress_edits"] += 1
+                return False
+
+        # Wait out any active client-wide or chat-specific FloodWait cooldown
+        while True:
+            rem = self.active_cooldown_seconds(chat_id)
+            if rem <= 0:
+                break
+            if is_optional_progress:
+                FLOODWAIT_STATS["coalesced_progress_edits"] += 1
+                return False
+            await asyncio.sleep(min(rem + 0.1, 5.0))
+
+        # Per-chat pacing
+        if chat_id:
+            async with self._chat_locks[int(chat_id)]:
+                now_m = time.monotonic()
+                if is_edit:
+                    min_chat_gap = getattr(Config, "PER_CHAT_EDIT_INTERVAL_SEC", 1.2)
+                    # Only enforce strict gap for consecutive edits in the same chat
+                    elapsed = now_m - self._chat_last_edit_ts.get(int(chat_id), 0.0)
+                    if elapsed < min_chat_gap:
+                        if is_optional_progress:
+                            FLOODWAIT_STATS["coalesced_progress_edits"] += 1
+                            return False
+                else:
+                    min_chat_gap = 1.0 / max(1.0, float(getattr(Config, "PER_CHAT_RPC_RATE_PER_SEC", 2.5)))
+                    elapsed = now_m - self._chat_last_write_ts.get(int(chat_id), 0.0)
+                    if elapsed < min_chat_gap:
+                        await asyncio.sleep(min_chat_gap - elapsed)
+                self._chat_last_write_ts[int(chat_id)] = time.monotonic()
+                if is_edit:
+                    self._chat_last_edit_ts[int(chat_id)] = time.monotonic()
+
+        # Global outbound pacer
+        async with self._global_lock:
+            now_m = time.monotonic()
+            global_gap = 1.0 / max(5.0, float(getattr(Config, "GLOBAL_RPC_RATE_PER_SEC", 24.0)))
+            gap = global_gap - (now_m - self._last_global_write_ts)
+            if gap > 0:
+                await asyncio.sleep(gap)
+            self._last_global_write_ts = time.monotonic()
+
+        return True
+
+    def check_and_record_signature(self, chat_id: int, msg_id: int, sig: str) -> bool:
+        """Returns True if signature is unchanged (duplicate edit), False if new."""
+        if not chat_id or not msg_id:
+            return False
+        key = (int(chat_id), int(msg_id))
+        if self._msg_last_sig.get(key) == sig:
+            FLOODWAIT_STATS["deduplicated_edits"] += 1
+            return True
+        return False
+
+    def commit_signature(self, chat_id: int, msg_id: int, sig: str) -> None:
+        if chat_id and msg_id:
+            key = (int(chat_id), int(msg_id))
+            self._msg_last_sig[key] = sig
+            self._msg_last_edit_ts[key] = time.monotonic()
+            # Keep signature cache bounded
+            if len(self._msg_last_sig) > 4000:
+                oldest = next(iter(self._msg_last_sig))
+                self._msg_last_sig.pop(oldest, None)
+                self._msg_last_edit_ts.pop(oldest, None)
+
+    def get_stats(self) -> Dict[str, Any]:
+        return {
+            **FLOODWAIT_STATS,
+            "active_cooldown_s": self.active_cooldown_seconds(),
+            "last_rpc_success_age_s": round(max(0.0, time.time() - self.last_rpc_success_ts), 1),
+            "tracked_message_signatures": len(self._msg_last_sig),
+        }
+
+
+rate_limit_manager = TelegramRateLimitManager()
+
+_TELEGRAM_WRITE_BLOCK_UNTIL = 0.0
+_PROGRESS_EDIT_BLOCK_UNTIL = 0.0
+_TELEGRAM_WRITE_LOCK = asyncio.Lock()
+
+
+async def _set_write_cooldown(until: float) -> None:
+    global _TELEGRAM_WRITE_BLOCK_UNTIL
+    async with _TELEGRAM_WRITE_LOCK:
+        _TELEGRAM_WRITE_BLOCK_UNTIL = max(_TELEGRAM_WRITE_BLOCK_UNTIL, until)
+        rate_limit_manager._client_cooldown_until = max(rate_limit_manager._client_cooldown_until, until)
+
+
+def record_floodwait_event(method_name: str, wait_s: int) -> None:
+    FLOODWAIT_STATS["total_events"] = int(FLOODWAIT_STATS.get("total_events", 0)) + 1
+    FLOODWAIT_STATS["total_slept_seconds"] = int(FLOODWAIT_STATS.get("total_slept_seconds", 0)) + int(wait_s)
+    FLOODWAIT_STATS["last_wait_seconds"] = int(wait_s)
+    FLOODWAIT_STATS["last_method"] = str(method_name)
+    FLOODWAIT_STATS["last_timestamp"] = float(time.time())
+
+
+async def pro_floodwait_sleep(wait_s: int, context_label: str = "TelegramRPC", chat_id: int = 0) -> None:
+    """Pro FloodWait sleep helper using asyncio.sleep() with accurate server duration and chunked cancellation."""
+    total_wait = max(1, int(wait_s)) + 1
+    record_floodwait_event(context_label, total_wait)
+    await rate_limit_manager.notify_floodwait(context_label, total_wait, chat_id=chat_id)
+    logger.warning(
+        "🌊 [ᴘʀᴏ ғʟᴏᴏᴅᴡᴀɪᴛ sᴏʟᴠᴇʀ] %s › sleeping %ss via asyncio.sleep() (total_events=%s)",
+        context_label,
+        total_wait,
+        FLOODWAIT_STATS["total_events"],
+    )
+    remaining = float(total_wait)
+    while remaining > 0:
+        step = min(remaining, 10.0)
+        await asyncio.sleep(step)
+        remaining -= step
+
+
+async def execute_with_floodwait(
+    coro_func,
+    *args,
+    max_retries: int = 6,
+    max_wait_seconds: int = 3600,
+    **kwargs
+):
+    """
+    Centralized FloodWait & RPC retry wrapper for critical Telegram operations
+    (uploads, downloads, copies, forwards, and moderation actions).
+    Respects exact FloodWait duration returned by Telegram, sleeps asynchronously,
+    and prevents infinite retry loops.
+    """
+    last_exc = None
+    chat_id = int(kwargs.get("chat_id", 0) or 0)
+    fn_label = getattr(coro_func, "__name__", str(coro_func))
+    for attempt in range(max(1, int(max_retries))):
+        try:
+            await rate_limit_manager.wait_for_write_slot(rpc_name=fn_label, chat_id=chat_id)
+            res = await coro_func(*args, **kwargs)
+            rate_limit_manager.record_rpc_success()
+            return res
+        except FloodWait as fw:
+            wait_s = _flood_wait_seconds(fw)
+            await _set_write_cooldown(time.time() + min(wait_s, 60))
+            if wait_s > max_wait_seconds or attempt >= max_retries - 1:
+                logger.warning(
+                    "🌊 ғʟᴏᴏᴅᴡᴀɪᴛ (%ss) ᴇxᴄᴇᴇᴅᴇᴅ ᴍᴀx_ᴡᴀɪᴛ/ʀᴇᴛʀɪᴇs (ᴀᴛᴛᴇᴍᴘᴛ %s/%s) ғᴏʀ %s",
+                    wait_s,
+                    attempt + 1,
+                    max_retries,
+                    fn_label,
+                )
+                raise
+            await pro_floodwait_sleep(wait_s, f"{fn_label}#{attempt+1}/{max_retries}", chat_id=chat_id)
+            last_exc = fw
+        except MessageNotModified:
+            rate_limit_manager.record_rpc_success()
+            return None
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            last_exc = exc
+            err_name = type(exc).__name__.lower()
+            if any(k in err_name for k in ("timeout", "connection", "network", " brokenpipe", "oserror")) and attempt < max_retries - 1:
+                await asyncio.sleep(1.5 * (attempt + 1))
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+    return None
+
+
+async def safe_edit_text(message: Any, text: str, **kwargs: Any) -> Any:
+    """
+    Centralized, deduplicated, and coalesced message editor:
+    - Avoids editing unchanged messages (content + reply_markup signature check).
+    - Prevents duplicate concurrent edits on the same message via per-message lock & coalescing.
+    - Gracefully skips optional intermediate progress edits during FloodWait cooldowns or high load.
+    - Automatically resumes pending essential updates when Telegram cooldowns expire.
+    """
+    global _TELEGRAM_WRITE_BLOCK_UNTIL, _PROGRESS_EDIT_BLOCK_UNTIL
+    if message is None:
+        return None
+
+    chat_id, msg_id = _extract_msg_identity(message)
+    reply_markup = kwargs.get("reply_markup")
+    sig = _compute_edit_signature(text, reply_markup)
+
+    # 1. Fast deduplication: skip if message already has identical text and buttons
+    if rate_limit_manager.check_and_record_signature(chat_id, msg_id, sig):
+        return message
+
+    now = time.time()
+    is_progress = ("▰" in str(text) or "▱" in str(text)) and reply_markup is None
+    is_final_progress = is_progress and ("100.0%" in str(text) or "100%" in str(text))
+    is_optional_progress = is_progress and not is_final_progress
+
+    if is_optional_progress:
+        if now < _PROGRESS_EDIT_BLOCK_UNTIL or rate_limit_manager.is_in_cooldown(chat_id):
+            FLOODWAIT_STATS["coalesced_progress_edits"] += 1
+            return message
+        # Dynamic per-message progress throttle scaled by active concurrent tasks
+        last_edit_m = rate_limit_manager._msg_last_edit_ts.get((chat_id, msg_id), 0.0)
+        active_tasks = max(1, task_manager.active_count)
+        min_edit_gap = max(
+            float(getattr(Config, "PROGRESS_EDIT_MIN_INTERVAL_SEC", 3.5)),
+            min(15.0, 2.0 * active_tasks),
+        )
+        if (time.monotonic() - last_edit_m) < min_edit_gap:
+            FLOODWAIT_STATS["coalesced_progress_edits"] += 1
+            return message
+
+    msg_key = (chat_id, msg_id)
+    msg_lock = rate_limit_manager._msg_locks[msg_key]
+
+    # If another coroutine is already editing this exact message:
+    if msg_lock.locked():
+        if is_optional_progress:
+            FLOODWAIT_STATS["coalesced_progress_edits"] += 1
+            return message
+        # Coalesce essential update so the latest state wins without stacking N redundant edits
+        rate_limit_manager._msg_pending_edit[msg_key] = {"text": text, "kwargs": dict(kwargs), "sig": sig}
+
+    async with msg_lock:
+        # Check if a newer essential edit superseded us while waiting for msg_lock
+        pending = rate_limit_manager._msg_pending_edit.pop(msg_key, None)
+        if pending is not None:
+            text = pending["text"]
+            kwargs = pending["kwargs"]
+            sig = pending["sig"]
+            FLOODWAIT_STATS["scheduled_resumed_edits"] += 1
+
+        if rate_limit_manager.check_and_record_signature(chat_id, msg_id, sig):
+            return message
+
+        slot_ok = await rate_limit_manager.wait_for_write_slot(
+            rpc_name="EditMessage",
+            chat_id=chat_id,
+            is_edit=True,
+            is_optional_progress=is_optional_progress,
+        )
+        if not slot_ok:
+            return message
+
+        for attempt in range(4):
+            try:
+                has_media = getattr(message, "media", None) is not None and getattr(message, "text", None) is None
+                if has_media:
+                    client = getattr(message, "_client", None)
+                    if client and getattr(message, "chat", None):
+                        sent = await client.send_message(chat_id=message.chat.id, text=text, **kwargs)
+                        try:
+                            await message.delete()
+                        except Exception:
+                            pass
+                        rate_limit_manager.record_rpc_success()
+                        if sent:
+                            s_chat, s_id = _extract_msg_identity(sent)
+                            rate_limit_manager.commit_signature(s_chat, s_id, sig)
+                        return sent
+                edited = await message.edit_text(text=text, **kwargs)
+                rate_limit_manager.record_rpc_success()
+                rate_limit_manager.commit_signature(chat_id, msg_id, sig)
+                return edited or message
+            except FloodWait as error:
+                wait_for = _flood_wait_seconds(error)
+                _PROGRESS_EDIT_BLOCK_UNTIL = max(_PROGRESS_EDIT_BLOCK_UNTIL, time.time() + wait_for + 2.0)
+                await rate_limit_manager.notify_floodwait("safe_edit_text", wait_for, chat_id=chat_id)
+                if is_optional_progress:
+                    record_floodwait_event("safe_edit_progress_skip", wait_for)
+                    logger.warning(f"🌊 ᴘʀᴏɢʀᴇss ᴇᴅɪᴛ ғʟᴏᴏᴅᴡᴀɪᴛ ({wait_for}s) › deferring intermediate bar edit")
+                    return message
+                if attempt >= 3:
+                    return message
+                await pro_floodwait_sleep(min(wait_for, 120), "safe_edit_text", chat_id=chat_id)
+            except MessageNotModified:
+                rate_limit_manager.record_rpc_success()
+                rate_limit_manager.commit_signature(chat_id, msg_id, sig)
+                return message
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.debug(f"⚠️ ᴏᴘᴛɪᴏɴᴀʟ ᴛᴇʟᴇɢʀᴀᴍ sᴛᴀᴛᴜs ᴇᴅɪᴛ sᴋɪᴘᴘᴇᴅ: {error}")
+                return message
+        return message
+
+
+async def safe_reply_text(target: Any, text: str, **kwargs: Any) -> Any:
+    """Reliable reply creation with centralized rate-limit pacing, FloodWait retry, and send_message fallback."""
+    global _TELEGRAM_WRITE_BLOCK_UNTIL
+    if target is None:
+        return None
+    chat_id, _ = _extract_msg_identity(target)
+    for attempt in range(4):
+        try:
+            await rate_limit_manager.wait_for_write_slot(rpc_name="SendMessage", chat_id=chat_id)
+            sent = await target.reply_text(text, **kwargs)
+            rate_limit_manager.record_rpc_success()
+            if sent:
+                s_chat, s_id = _extract_msg_identity(sent)
+                rate_limit_manager.commit_signature(s_chat, s_id, _compute_edit_signature(text, kwargs.get("reply_markup")))
+            return sent
+        except FloodWait as error:
+            wait_for = _flood_wait_seconds(error)
+            await _set_write_cooldown(time.time() + min(wait_for, 60))
+            if attempt < 3:
+                await pro_floodwait_sleep(wait_for, "safe_reply_text", chat_id=chat_id)
+                continue
+            break
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.debug(f"⚠️ ᴛᴇʟᴇɢʀᴀᴍ ʀᴇᴘʟʏ ғᴀʟʟʙᴀᴄᴋ: {error}")
+            break
+    client = getattr(target, "_client", None)
+    chat = getattr(target, "chat", None)
+    if client and chat:
+        try:
+            send_kw = {k: v for k, v in kwargs.items() if k != "quote"}
+            return await safe_send_message(client, chat_id=chat.id, text=text, **send_kw)
+        except Exception:
+            pass
+    return None
+
+
+async def safe_send_message(client: Any, **kwargs: Any) -> Any:
+    """Reliable message send with centralized rate-limit pacing and FloodWait retry."""
+    global _TELEGRAM_WRITE_BLOCK_UNTIL
+    chat_id = int(kwargs.get("chat_id", 0) or 0)
+    for attempt in range(4):
+        try:
+            await rate_limit_manager.wait_for_write_slot(rpc_name="SendMessage", chat_id=chat_id)
+            sent = await client.send_message(**kwargs)
+            rate_limit_manager.record_rpc_success()
+            return sent
+        except FloodWait as error:
+            wait_for = _flood_wait_seconds(error)
+            await _set_write_cooldown(time.time() + min(wait_for, 60))
+            if attempt < 3:
+                await pro_floodwait_sleep(wait_for, "safe_send_message", chat_id=chat_id)
+                continue
+            return None
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.debug(f"⚠️ ᴛᴇʟᴇɢʀᴀᴍ ᴍᴇssᴀɢᴇ sᴇɴᴅ sᴋɪᴘᴘᴇᴅ: {error}")
+            return None
+    return None
+
+
+async def safe_forward_message(message: Any, chat_id: Any) -> Any:
+    """Forward for indexing with bounded FloodWait retry and safe fallback."""
+    global _TELEGRAM_WRITE_BLOCK_UNTIL
+    target_cid = int(chat_id) if str(chat_id).lstrip("-").isdigit() else 0
+    for attempt in range(3):
+        try:
+            await rate_limit_manager.wait_for_write_slot(rpc_name="ForwardMessages", chat_id=target_cid)
+            fwd = await message.forward(chat_id)
+            rate_limit_manager.record_rpc_success()
+            return fwd
+        except FloodWait as error:
+            wait_for = _flood_wait_seconds(error)
+            await _set_write_cooldown(time.time() + min(wait_for, 60))
+            if wait_for <= 60 and attempt < 2:
+                await pro_floodwait_sleep(wait_for, "safe_forward_message", chat_id=target_cid)
+                continue
+            logger.warning(f"🌊 ᴛᴇʟᴇɢʀᴀᴍ ғᴏʀᴡᴀʀᴅ ᴄᴏᴏʟᴅᴏᴡɴ ᴀᴄᴛɪᴠᴇ ғᴏʀ {wait_for}s; ɪɴᴅᴇxɪɴɢ ᴏʀɪɢɪɴᴀʟ ᴍsɢ")
+            return message
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.debug(f"⚠️ ᴏᴘᴛɪᴏɴᴀʟ ᴛᴇʟᴇɢʀᴀᴍ ғᴏʀᴡᴀʀᴅ sᴋɪᴘᴘᴇᴅ: {error}")
+            return message
+    return message
+
+
+async def safe_delete_messages(client: Any, chat_id: Any, message_ids: Any) -> bool:
+    """Delete message batches with bounded FloodWait retry."""
+    global _TELEGRAM_WRITE_BLOCK_UNTIL
+    target_cid = int(chat_id) if str(chat_id).lstrip("-").isdigit() else 0
+    for attempt in range(3):
+        try:
+            await client.delete_messages(chat_id=chat_id, message_ids=message_ids)
+            rate_limit_manager.record_rpc_success()
+            return True
+        except FloodWait as error:
+            wait_for = _flood_wait_seconds(error)
+            await _set_write_cooldown(time.time() + min(wait_for, 60))
+            if wait_for <= 60 and attempt < 2:
+                await pro_floodwait_sleep(wait_for, "safe_delete_messages", chat_id=target_cid)
+                continue
+            logger.warning(f"🌊 ᴛᴇʟᴇɢʀᴀᴍ ᴅᴇʟᴇᴛᴇ ᴄᴏᴏʟᴅᴏᴡɴ ᴀᴄᴛɪᴠᴇ ғᴏʀ {wait_for}s; ᴅᴇғᴇʀʀɪɴɢ ᴀᴜᴛᴏ-ᴅᴇʟᴇᴛᴇ ʙᴀᴛᴄʜ")
+            return False
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.debug(f"⚠️ ᴏᴘᴛɪᴏɴᴀʟ ᴛᴇʟᴇɢʀᴀᴍ ᴅᴇʟᴇᴛᴇ sᴋɪᴘᴘᴇᴅ: {error}")
+            return False
+    return False
+
+
+# ==================== 3. ULTRA-FAST O(1) LRU TTL CACHE ====================
+
+class FastMemoryCache:
+    """
+    High-performance bounded O(1) LRU + TTL in-memory caching engine.
+    Eliminates duplicate DB roundtrips for user settings, chat configs, stream tokens, and file lookups.
+    """
+    def __init__(self, default_ttl: Optional[int] = None, max_entries: Optional[int] = None):
+        self._cache: OrderedDict[str, Any] = OrderedDict()
+        self._expires: Dict[str, float] = {}
+        self._default_ttl = default_ttl if default_ttl is not None else getattr(Config, "CACHE_TTL", 900)
+        self._max_entries = max_entries if max_entries is not None else getattr(Config, "CACHE_MAX_ENTRIES", 5000)
+        self._lock = asyncio.Lock()
+        self._hits = 0
+        self._misses = 0
+
+    async def get(self, key: str) -> Optional[Any]:
+        async with self._lock:
+            if key not in self._cache:
+                self._misses += 1
+                return None
+            curr_now = float(time.time())
+            if curr_now > self._expires.get(key, 0):
+                self._cache.pop(key, None)
+                self._expires.pop(key, None)
+                self._misses += 1
+                return None
+            self._cache.move_to_end(key)
+            self._hits += 1
+            return self._cache[key]
+
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None):
+        async with self._lock:
+            curr_now = float(time.time())
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            elif len(self._cache) >= self._max_entries:
+                expired_keys = [k for k, exp in list(self._expires.items()) if curr_now > exp]
+                for k in expired_keys:
+                    self._cache.pop(k, None)
+                    self._expires.pop(k, None)
+                if len(self._cache) >= self._max_entries:
+                    oldest_key, _ = self._cache.popitem(last=False)
+                    self._expires.pop(oldest_key, None)
+
+            self._cache[key] = value
+            effective_ttl = ttl if ttl is not None else self._default_ttl
+            self._expires[key] = curr_now + float(effective_ttl)
+
+    async def delete(self, key: str) -> bool:
+        async with self._lock:
+            existed = key in self._cache
+            self._cache.pop(key, None)
+            self._expires.pop(key, None)
+            return existed
+
+    async def clear(self):
+        async with self._lock:
+            self._cache.clear()
+            self._expires.clear()
+
+    async def get_stats(self) -> Dict[str, Any]:
+        async with self._lock:
+            total_requests = self._hits + self._misses
+            hit_ratio = (self._hits / total_requests * 100) if total_requests > 0 else 100.0
+            return {
+                "cached_keys": len(self._cache),
+                "max_entries": self._max_entries,
+                "hits": self._hits,
+                "misses": self._misses,
+                "hit_ratio_percent": round(hit_ratio, 2)
+            }
+
+cache = FastMemoryCache()
+
+
+# ==================== 4. HELPERS & AUTH ====================
+
+DEVIL_MODE_ACTIVE: bool = False
+
+def is_devil_mode_active() -> bool:
+    return DEVIL_MODE_ACTIVE
+
+def set_devil_mode(state: bool) -> bool:
+    global DEVIL_MODE_ACTIVE
+    DEVIL_MODE_ACTIVE = bool(state)
+    return DEVIL_MODE_ACTIVE
+
+def get_current_timestamp() -> float:
+    return float(time.time())
+
+async def is_admin(*args, **kwargs) -> bool:
+    user_id = kwargs.get("user_id")
+    if user_id is None and args:
+        user_id = args[-1]
+    if not user_id:
+        return False
+    try:
+        return int(user_id) in Config.ADMINS
+    except (ValueError, TypeError):
+        return False
+
+async def check_admin(client: Any, message: Any) -> bool:
+    user_id = message.from_user.id if message.from_user else 0
+    if not await is_admin(client, user_id):
+        await safe_reply_text(
+            message,
+            f"🚫 **{to_smallcaps('access denied!')}**\n\n"
+            f"🔒 {to_smallcaps('this command is restricted to bot admins only.')}"
+            f"{format_watermark()}"
+        )
+        return False
+    return True
+
+def humanbytes(size: Optional[int]) -> str:
+    if not size or size <= 0:
+        return "0 B"
+    num_size = float(size)
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if num_size < 1024.0:
+            break
+        num_size /= 1024.0
+    return f"{num_size:.2f} {unit}"
+
+def time_formatter(milliseconds: int = 0, seconds: Optional[int] = None) -> str:
+    if seconds is not None:
+        total_seconds = int(seconds)
+    elif milliseconds:
+        total_seconds = int(milliseconds / 1000)
+    else:
+        total_seconds = 0
+
+    if total_seconds < 0:
+        total_seconds = 0
+
+    minutes, secs = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    days, hours = divmod(hours, 24)
+    res = ""
+    if days > 0:
+        res += f"{days}d "
+    if hours > 0:
+        res += f"{hours}h "
+    if minutes > 0:
+        res += f"{minutes}m "
+    res += f"{secs}s"
+    return res.strip() or "0s"
+
+def is_valid_url(url: str) -> bool:
+    try:
+        result = urlparse(url)
+        return all([result.scheme in ["http", "https"], result.netloc])
+    except Exception:
+        return False
+
+def sanitize_filename(name: str) -> str:
+    if not name:
+        return "file.mp4"
+    name = os.path.basename(name)
+    cleaned = re.sub(r'[\\/*?:"<>|\x00-\x1f\x7f]', "_", str(name))
+    cleaned = cleaned.strip(". ")
+    return cleaned or "file.mp4"
+
+def clean_temp_files(*files):
+    for f in files:
+        if isinstance(f, (list, tuple, set)):
+            for sub_f in f:
+                clean_temp_files(sub_f)
+            continue
+        if f and isinstance(f, (str, bytes, os.PathLike)):
+            try:
+                if os.path.exists(f):
+                    if os.path.isdir(f):
+                        shutil.rmtree(f, ignore_errors=True)
+                    else:
+                        os.remove(f)
+            except Exception:
+                pass
+
+
+# ==================== 5. PYROGRAM PROGRESS (DYNAMIC MULTI-WORKER THROTTLING) ====================
+
+_PROGRESS_THROTTLE: Dict[Tuple[int, int, str], float] = {}
+_PROGRESS_STEP: Dict[Tuple[int, int, str], int] = {}
+
+async def progress_for_pyrogram(
+    current: int,
+    total: int,
+    ud_type: str,
+    message: Any,
+    start_time: Any = None
+):
+    if message is None:
+        return
+    chat_id, msg_id = _extract_msg_identity(message)
+    if rate_limit_manager.is_in_cooldown(chat_id):
+        return
+
+    now_ts = get_current_timestamp()
+    start_ts = now_ts
+    if start_time is not None:
+        if callable(start_time):
+            try:
+                val = start_time()
+                if isinstance(val, (int, float)):
+                    start_ts = float(val)
+            except Exception:
+                pass
+        elif isinstance(start_time, (int, float)):
+            start_ts = float(start_time)
+
+    msg_key = (chat_id, msg_id, str(ud_type))
+    percentage = (current * 100.0 / total) if total > 0 else 0.0
+    active_jobs = max(1, task_manager.active_count)
+    step_granularity = 5 if active_jobs <= 2 else min(20, 5 * active_jobs)
+    pct_step = min(100, max(0, int(percentage // step_granularity) * step_granularity))
+    is_done = total > 0 and current >= total
+    last_edit = _PROGRESS_THROTTLE.get(msg_key, 0.0)
+    last_step = _PROGRESS_STEP.get(msg_key, -step_granularity)
+
+    min_time_gap = max(
+        float(getattr(Config, "PROGRESS_EDIT_MIN_INTERVAL_SEC", 3.5)),
+        min(18.0, 2.2 * active_jobs),
+    )
+
+    if not is_done:
+        step_ready = pct_step >= last_step + step_granularity and (now_ts - last_edit) >= min_time_gap
+        time_ready = (now_ts - last_edit) >= (min_time_gap * 1.8)
+        if not (step_ready or time_ready):
+            return
+    else:
+        pct_step = 100
+        percentage = 100.0
+
+    _PROGRESS_THROTTLE[msg_key] = now_ts
+    _PROGRESS_STEP[msg_key] = pct_step
+    if is_done:
+        _PROGRESS_THROTTLE.pop(msg_key, None)
+        _PROGRESS_STEP.pop(msg_key, None)
+
+    diff = max(0.001, now_ts - start_ts)
+    speed = (current / diff) if diff > 0 else 0
+    time_to_completion = round((total - current) / speed) * 1000 if (speed > 0 and not is_done) else 0
+
+    filled_blocks = min(10, max(0, math.floor(percentage / 10)))
+    progress = "[{0}{1}] `{2}%`\n".format(
+        "".join(["▰" for _ in range(filled_blocks)]),
+        "".join(["▱" for _ in range(10 - filled_blocks)]),
+        round(percentage, 1)
+    )
+
+    tmp = (
+        f"⚡ **{to_smallcaps(ud_type)}**...\n\n"
+        f"{progress}"
+        f"🚀 **{to_smallcaps('speed')}** : `{humanbytes(speed)}/s`\n"
+        f"📦 **{to_smallcaps('done')}** : `{humanbytes(current)} / {humanbytes(total)}`\n"
+        f"⏳ **{to_smallcaps('eta')}** : `{time_formatter(milliseconds=time_to_completion)}`"
+        f"{format_watermark()}"
+    )
+    try:
+        await safe_edit_text(message, tmp)
+    except Exception:
+        pass
+
+
+# ==================== 6. PERSISTENT FAULT-TOLERANT TASK MANAGER ====================
+
+class MediaTask:
+    def __init__(
+        self,
+        task_id: str,
+        user_id: int,
+        task_type: str,
+        work_dir: str,
+        asyncio_task: Optional[asyncio.Task] = None,
+        process: Optional[asyncio.subprocess.Process] = None,
+        stage: str = "initialized",
+        status: str = "running",
+        params: Optional[Dict[str, Any]] = None,
+    ):
+        self.task_id = task_id
+        self.user_id = user_id
+        self.task_type = task_type
+        self.work_dir = work_dir
+        self.asyncio_task = asyncio_task
+        self.process = process
+        self.stage = stage
+        self.status = status
+        self.params = dict(params or {})
+        self.created_at = time.time()
+        self.updated_at = time.time()
+        self.is_cancelled = False
+
+
+class TaskManager:
+    """
+    Fault-tolerant, unlimited-concurrency TaskManager with persistent recovery telemetry.
+    Tracks all active media jobs (`compress`, `rename`, `file_pro`, `stream`), subprocesses,
+    recovery metrics, and execution reports.
+    """
+    def __init__(self):
+        self._tasks: Dict[str, MediaTask] = {}
+        self._lock = asyncio.Lock()
+        self._recovery_metrics: Dict[str, Any] = {
+            "total_detected": 0,
+            "completed_tasks": 0,
+            "recovered_tasks": 0,
+            "failed_tasks": 0,
+            "skipped_tasks": 0,
+            "total_retries": 0,
+            "in_progress_tasks": 0,
+            "remaining_errors": [],
+            "last_recovery_run_ts": 0.0,
+            "status": "ready",
+        }
+
+    @property
+    def active_count(self) -> int:
+        return sum(1 for t in self._tasks.values() if not t.is_cancelled and t.status in ("queued", "running", "retrying"))
+
+    def generate_task_id(self, user_id: int, prefix: str = "task") -> str:
+        return f"{prefix}_{user_id}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+
+    def create_workspace(self, user_id: int, task_id: str) -> str:
+        work_dir = os.path.abspath(os.path.join(Config.DOWNLOAD_DIR, str(user_id), task_id))
+        os.makedirs(work_dir, exist_ok=True)
+        return work_dir
+
+    async def register_task(
+        self,
+        task_id: str,
+        user_id: int,
+        task_type: str,
+        work_dir: str,
+        asyncio_task: Optional[asyncio.Task] = None,
+        stage: str = "initialized",
+        params: Optional[Dict[str, Any]] = None,
+    ) -> MediaTask:
+        async with self._lock:
+            media_task = MediaTask(
+                task_id=task_id,
+                user_id=user_id,
+                task_type=task_type,
+                work_dir=work_dir,
+                asyncio_task=asyncio_task,
+                stage=stage,
+                status="running",
+                params=params,
+            )
+            self._tasks[task_id] = media_task
+            self._recovery_metrics["in_progress_tasks"] = self.active_count
+            return media_task
+
+    def set_subprocess(self, task_id: str, process: asyncio.subprocess.Process) -> None:
+        if task_id and task_id in self._tasks:
+            self._tasks[task_id].process = process
+            self._tasks[task_id].updated_at = time.time()
+
+    def update_stage(self, task_id: str, stage: str, status: str = "running") -> None:
+        if task_id and task_id in self._tasks:
+            self._tasks[task_id].stage = stage
+            self._tasks[task_id].status = status
+            self._tasks[task_id].updated_at = time.time()
+
+    def get_task(self, task_id: str) -> Optional[MediaTask]:
+        return self._tasks.get(task_id)
+
+    def get_user_tasks(self, user_id: int) -> list:
+        return [task for task in self._tasks.values() if task.user_id == user_id]
+
+    def is_user_busy(self, user_id: int) -> bool:
+        return any(not task.is_cancelled for task in self._tasks.values() if task.user_id == user_id)
+
+    async def cancel_user_tasks(self, user_id: int) -> int:
+        user_tasks = self.get_user_tasks(user_id)
+        count = 0
+        for t in user_tasks:
+            if await self.cancel_task(t.task_id):
+                count += 1
+        return count
+
+    async def cancel_task(self, task_id: str) -> bool:
+        async with self._lock:
+            task = self._tasks.get(task_id)
+            if not task:
+                return False
+            task.is_cancelled = True
+            task.status = "cancelled"
+            if task.process and task.process.returncode is None:
+                try:
+                    task.process.kill()
+                except Exception:
+                    pass
+            if task.asyncio_task and not task.asyncio_task.done():
+                task.asyncio_task.cancel()
+            self._recovery_metrics["in_progress_tasks"] = self.active_count
+        try:
+            from plugins.core_db import task_repo
+            await task_repo.update_task(task_id, {"status": "cancelled", "stage": "cancelled"})
+        except Exception:
+            pass
+        return True
+
+    async def cleanup_task(self, task_id: str, preserve_workspace: bool = False) -> None:
+        async with self._lock:
+            task = self._tasks.pop(task_id, None)
+            self._recovery_metrics["in_progress_tasks"] = self.active_count
+        if not preserve_workspace and task and task.work_dir and os.path.exists(task.work_dir):
+            try:
+                shutil.rmtree(task.work_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+    def record_metric(
+        self,
+        detected: int = 0,
+        completed: int = 0,
+        recovered: int = 0,
+        failed: int = 0,
+        skipped: int = 0,
+        retries: int = 0,
+        error: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> None:
+        self._recovery_metrics["total_detected"] += int(detected)
+        self._recovery_metrics["completed_tasks"] += int(completed)
+        self._recovery_metrics["recovered_tasks"] += int(recovered)
+        self._recovery_metrics["failed_tasks"] += int(failed)
+        self._recovery_metrics["skipped_tasks"] += int(skipped)
+        self._recovery_metrics["total_retries"] += int(retries)
+        self._recovery_metrics["in_progress_tasks"] = self.active_count
+        if error:
+            errs = self._recovery_metrics["remaining_errors"]
+            errs.append(str(error)[:300])
+            if len(errs) > 25:
+                del errs[:-25]
+        if status:
+            self._recovery_metrics["status"] = status
+
+    def get_recovery_report(self) -> Dict[str, Any]:
+        self._recovery_metrics["in_progress_tasks"] = self.active_count
+        return dict(self._recovery_metrics)
+
+
+task_manager = TaskManager()
+
+# Unlimited concurrent task admission + high-throughput parallel FFmpeg worker pool
+_max_cfg = int(getattr(Config, "MAX_CONCURRENT_TASKS", 0) or 0)
+_ffmpeg_pool = int(getattr(Config, "FFMPEG_PARALLEL_JOBS", 32) or 32)
+MEDIA_JOB_SEMAPHORE = asyncio.Semaphore(_max_cfg if _max_cfg > 0 else max(64, _ffmpeg_pool))
+
+
+def bounded_media_job(func):
+    """
+    Supports unlimited concurrent queued/active tasks with automatic task registration,
+    while pacing heavy local FFmpeg/disk operations and preserving async cancellation.
+    """
+    @functools.wraps(func)
+    async def wrapped(*args, **kwargs):
+        user_id = kwargs.get("user_id")
+        if user_id is None:
+            try:
+                user_id = inspect.signature(func).bind_partial(*args, **kwargs).arguments.get("user_id")
+            except (TypeError, ValueError):
+                user_id = None
+        task_id = kwargs.get("task_id")
+        registered_local = False
+        if user_id is not None and not task_id:
+            task_id = task_manager.generate_task_id(int(user_id), prefix=func.__name__[:8])
+            await task_manager.register_task(
+                task_id, int(user_id), func.__name__, "", asyncio.current_task()
+            )
+            registered_local = True
+        try:
+            async with MEDIA_JOB_SEMAPHORE:
+                return await func(*args, **kwargs)
+        finally:
+            if registered_local and task_id:
+                await task_manager.cleanup_task(task_id, preserve_workspace=True)
+    return wrapped
