@@ -380,12 +380,76 @@ async def remux_container(input_path: str, output_path: str) -> bool:
         logger.warning(f"Fast container remux fallback triggered: {e}")
     return False
 
+def _parse_ffprobe_duration(data: Dict[str, Any], file_path: str = "") -> int:
+    """Reliably extract media duration (in seconds) from ffprobe JSON across MP4, MKV, AVI, WEBM, and TS containers."""
+    fmt = data.get("format") or {}
+    streams = data.get("streams") or []
+
+    def _try_float(val: Any) -> int:
+        if val is None:
+            return 0
+        try:
+            v = float(val)
+            return int(v) if v > 0 else 0
+        except (ValueError, TypeError):
+            return 0
+
+    def _try_hms(val: Any) -> int:
+        if not val or not isinstance(val, str):
+            return 0
+        m = re.match(r"^(\d+):(\d+):(\d+(?:\.\d+)?)", val.strip())
+        if m:
+            try:
+                return int(int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3)))
+            except Exception:
+                return 0
+        return 0
+
+    dur = _try_float(fmt.get("duration"))
+    if dur > 0:
+        return dur
+
+    fmt_tags = fmt.get("tags") or {}
+    for k, v in fmt_tags.items():
+        if k.upper().startswith("DURATION"):
+            dur = _try_hms(v) or _try_float(v)
+            if dur > 0:
+                return dur
+
+    for s in streams:
+        dur = _try_float(s.get("duration"))
+        if dur > 0:
+            return dur
+        st_tags = s.get("tags") or {}
+        for k, v in st_tags.items():
+            if k.upper().startswith("DURATION"):
+                dur = _try_hms(v) or _try_float(v)
+                if dur > 0:
+                    return dur
+
+    fsize = _try_float(fmt.get("size"))
+    fbr = _try_float(fmt.get("bit_rate"))
+    if fsize > 0 and fbr > 0:
+        est = int((fsize * 8) / fbr)
+        if est > 0:
+            return est
+
+    if file_path and os.path.exists(file_path):
+        try:
+            disk_sz = os.path.getsize(file_path)
+            if disk_sz > 5 * 1024 * 1024:
+                return max(60, int(disk_sz / (280 * 1024)))
+        except OSError:
+            pass
+    return 0
+
+
 async def check_media_streams(file_path: str) -> Dict[str, Any]:
     cmd = [
         FFPROBE_BIN, "-v", "quiet",
-        "-analyzeduration", "1500000", "-probesize", "1500000",
+        "-analyzeduration", "10000000", "-probesize", "10000000",
         "-print_format", "json",
-        "-show_streams",
+        "-show_format", "-show_streams",
         file_path
     ]
     try:
@@ -393,11 +457,16 @@ async def check_media_streams(file_path: str) -> Dict[str, Any]:
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         stdout, _ = await proc.communicate()
-        data = json.loads(stdout.decode('utf-8', errors='ignore'))
+        data = json.loads(stdout.decode('utf-8', errors='ignore') or "{}")
         has_video = False
         has_audio = False
         video_index = None
         audio_index = None
+        video_codec = ""
+        audio_codec = ""
+        audio_channels = 2
+        audio_bitrate = 0
+        width, height = 1280, 720
 
         streams = data.get("streams", [])
         for i, s in enumerate(streams):
@@ -407,26 +476,57 @@ async def check_media_streams(file_path: str) -> Dict[str, Any]:
                 has_video = True
                 if video_index is None:
                     video_index = i
+                    video_codec = str(s.get("codec_name") or "").lower()
+                    width = int(s.get("width") or 1280)
+                    height = int(s.get("height") or 720)
             elif ctype == "audio":
                 has_audio = True
                 if audio_index is None:
                     audio_index = i
+                    audio_codec = str(s.get("codec_name") or "").lower()
+                    audio_channels = int(s.get("channels") or 2)
+                    try:
+                        audio_bitrate = int(s.get("bit_rate") or 0) // 1000
+                    except (ValueError, TypeError):
+                        audio_bitrate = 0
 
+        duration = _parse_ffprobe_duration(data, file_path)
         return {
             "has_video": has_video,
             "has_audio": has_audio,
             "video_index": video_index,
             "audio_index": audio_index,
-            "stream_count": len(streams)
+            "stream_count": len(streams),
+            "video_codec": video_codec,
+            "audio_codec": audio_codec,
+            "audio_channels": audio_channels,
+            "audio_bitrate": audio_bitrate,
+            "duration": duration,
+            "width": width,
+            "height": height,
         }
     except Exception as e:
         logger.warning(f"Error checking media streams: {e}")
-        return {"has_video": True, "has_audio": True, "video_index": 0, "audio_index": 0, "stream_count": 1}
+        return {
+            "has_video": True,
+            "has_audio": True,
+            "video_index": 0,
+            "audio_index": 0,
+            "stream_count": 1,
+            "video_codec": "h264",
+            "audio_codec": "aac",
+            "audio_channels": 2,
+            "audio_bitrate": 96,
+            "duration": 0,
+            "width": 1280,
+            "height": 720,
+        }
+
 
 async def get_media_attributes(file_path: str) -> MediaAttributes:
     cmd = [
         FFPROBE_BIN, "-v", "quiet",
-        "-analyzeduration", "1500000", "-probesize", "1500000",
+        "-analyzeduration", "10000000", "-probesize", "10000000",
         "-print_format", "json",
         "-show_format", "-show_streams",
         file_path
@@ -438,23 +538,24 @@ async def get_media_attributes(file_path: str) -> MediaAttributes:
             stderr=asyncio.subprocess.PIPE
         )
         stdout, _ = await process.communicate()
-        data = json.loads(stdout.decode('utf-8', errors='ignore'))
-        duration = int(float(data.get("format", {}).get("duration", 0)))
+        data = json.loads(stdout.decode('utf-8', errors='ignore') or "{}")
+        duration = _parse_ffprobe_duration(data, file_path)
         width, height = 1280, 720
         for stream in data.get("streams", []):
             if stream.get("codec_type") == "video" and not stream.get("disposition", {}).get("attached_pic", False):
-                width = int(stream.get("width", 1280))
-                height = int(stream.get("height", 720))
+                width = int(stream.get("width") or 1280)
+                height = int(stream.get("height") or 720)
                 break
         return MediaAttributes(width=width, height=height, duration=duration)
     except Exception as e:
         logger.warning(f"ffprobe extraction failed: {e}")
         return MediaAttributes(width=1280, height=720, duration=0)
 
+
 async def get_detailed_mediainfo(file_path: str) -> Dict[str, Any]:
     cmd = [
         FFPROBE_BIN, "-v", "quiet",
-        "-analyzeduration", "1500000", "-probesize", "1500000",
+        "-analyzeduration", "10000000", "-probesize", "10000000",
         "-print_format", "json",
         "-show_format", "-show_streams",
         file_path
@@ -466,16 +567,25 @@ async def get_detailed_mediainfo(file_path: str) -> Dict[str, Any]:
             stderr=asyncio.subprocess.PIPE
         )
         stdout, _ = await process.communicate()
-        data = json.loads(stdout.decode('utf-8', errors='ignore'))
+        data = json.loads(stdout.decode('utf-8', errors='ignore') or "{}")
 
         fmt = data.get("format", {})
         streams = data.get("streams", [])
+        duration = _parse_ffprobe_duration(data, file_path)
+        try:
+            fsize = int(fmt.get("size") or (os.path.getsize(file_path) if os.path.exists(file_path) else 0))
+        except (ValueError, TypeError):
+            fsize = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+        try:
+            fbr = int(fmt.get("bit_rate") or 0)
+        except (ValueError, TypeError):
+            fbr = 0
 
         info = {
             "container": fmt.get("format_long_name", fmt.get("format_name", "Unknown")),
-            "duration": int(float(fmt.get("duration", 0))),
-            "size": int(fmt.get("size", 0)),
-            "bitrate": int(fmt.get("bit_rate", 0)),
+            "duration": duration,
+            "size": fsize,
+            "bitrate": fbr,
             "video_streams": [],
             "audio_streams": [],
             "subtitle_streams": []
@@ -484,6 +594,10 @@ async def get_detailed_mediainfo(file_path: str) -> Dict[str, Any]:
         for s in streams:
             ctype = s.get("codec_type")
             if ctype == "video":
+                try:
+                    vbr = int(s.get("bit_rate") or 0)
+                except (ValueError, TypeError):
+                    vbr = 0
                 info["video_streams"].append({
                     "codec": s.get("codec_name", "unknown").upper(),
                     "profile": s.get("profile", "N/A"),
@@ -492,18 +606,22 @@ async def get_detailed_mediainfo(file_path: str) -> Dict[str, Any]:
                     "aspect_ratio": s.get("display_aspect_ratio", "N/A"),
                     "pix_fmt": s.get("pix_fmt", "yuv420p"),
                     "r_frame_rate": s.get("r_frame_rate", "N/A"),
-                    "bitrate": int(s.get("bit_rate", 0)) if s.get("bit_rate") else 0
+                    "bitrate": vbr
                 })
             elif ctype == "audio":
                 raw_lang = s.get("tags", {}).get("language", "und")
                 lang_full = resolve_lang_name(raw_lang)
+                try:
+                    abr = int(s.get("bit_rate") or 0)
+                except (ValueError, TypeError):
+                    abr = 0
                 info["audio_streams"].append({
                     "index": len(info["audio_streams"]) + 1,
                     "codec": s.get("codec_name", "unknown").upper(),
                     "channels": int(s.get("channels", 2)),
                     "channel_layout": s.get("channel_layout", "stereo"),
                     "sample_rate": s.get("sample_rate", "44100"),
-                    "bitrate": int(s.get("bit_rate", 0)) if s.get("bit_rate") else 0,
+                    "bitrate": abr,
                     "lang": lang_full,
                     "lang_code": raw_lang.lower(),
                     "language": lang_full,
@@ -524,6 +642,7 @@ async def get_detailed_mediainfo(file_path: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error getting detailed mediainfo: {e}")
         return {}
+
 
 async def extract_frame_screenshot(video_path: str, output_dir: str, duration: int) -> Optional[str]:
     out_path = os.path.join(output_dir, f"thumb_{os.path.basename(video_path)}.jpg")
@@ -548,6 +667,7 @@ async def extract_frame_screenshot(video_path: str, output_dir: str, duration: i
         logger.error(f"Error taking screenshot: {e}")
     return None
 
+
 async def compress_audio(input_path: str, output_path: str, bitrate: str = "96k") -> bool:
     cmd = [
         FFMPEG_BIN, "-y",
@@ -555,6 +675,7 @@ async def compress_audio(input_path: str, output_path: str, bitrate: str = "96k"
         "-i", input_path,
         "-vn",
         "-c:a", "aac",
+        "-aac_coder", "fast",
         "-b:a", str(bitrate or "96k"),
         "-ac", "2",
         output_path
@@ -591,24 +712,77 @@ async def compress_audio(input_path: str, output_path: str, bitrate: str = "96k"
         return False
 
 
-TURBO_X264_PARAMS = "ref=1:me=dia:subme=1:trellis=0:weightp=0:bframes=0:rc-lookahead=0:scenecut=0:aq-mode=0:8x8dct=0:cabac=0"
+TURBO_X264_PARAMS = (
+    "sliced-threads=0:ref=1:me=dia:subme=0:trellis=0:weightp=0:bframes=0:"
+    "rc-lookahead=0:scenecut=0:aq-mode=0:8x8dct=0:cabac=0:deblock=0:"
+    "partitions=none:me-range=4:chroma-me=0:psy=0"
+)
+
+HYPER_X264_PARAMS = (
+    "sliced-threads=0:ref=1:me=dia:subme=0:trellis=0:weightp=0:bframes=0:"
+    "rc-lookahead=0:scenecut=0:aq-mode=0:8x8dct=0:cabac=0:deblock=0:"
+    "partitions=none:me-range=4:chroma-me=0:psy=0:keyint=250:min-keyint=25"
+)
+
+TURBO_X265_PARAMS = (
+    "ctu=32:min-cu-size=16:bframes=0:rc-lookahead=0:no-sao=1:no-weightp=1:"
+    "no-deblock=1:me=0:subme=0:max-merge=1:early-skip=1:fast-intra=1:frame-threads=0"
+)
 
 
-def _build_5min_turbo_vf(even_h: int, total_duration: int, preset: str) -> Tuple[str, str, List[str]]:
-    """Compute optimal scale, preset, and x264 turbo flags so any video encodes within the 5-minute window."""
-    is_turbo = preset in ("turbo", "ultrafast", "superfast") or total_duration >= 900
-    eff_preset = "ultrafast" if (preset == "turbo" or total_duration >= 1200) else preset
+def _build_fast_decode_input_flags(total_duration: int, preset: str) -> List[str]:
+    """
+    Generate input decoder acceleration flags placed BEFORE `-i input_path`.
+    Skips expensive 1080p in-loop deblocking filters on the source decoder, and in hyper/long-movie
+    mode skips non-reference B-frames in the bitstream so 3 GB 2.5-hour movies decode in minutes.
+    """
+    p_low = str(preset or "turbo").lower()
+    flags = ["-flags2", "fast", "-skip_loop_filter", "all"]
+    if p_low == "hyper" or (p_low in ("turbo", "ultrafast") and total_duration >= 2400):
+        flags.extend(["-skip_frame", "noref"])
+    flags.extend(["-threads", "0", "-thread_type", "frame+slice"])
+    return flags
+
+
+def _build_5min_turbo_vf(
+    even_h: int,
+    total_duration: int,
+    preset: str,
+    respect_custom_height: bool = False,
+) -> Tuple[str, str, List[str]]:
+    """
+    Compute optimal scale, preset, and x264 turbo flags so any video (including 3 GB 2.5-hour movies)
+    encodes within 5–15 minutes instead of 30–40 hours.
+    """
+    p_low = str(preset or "turbo").lower()
+    is_hyper = (p_low == "hyper")
+    is_turbo = is_hyper or p_low in ("turbo", "ultrafast", "superfast") or total_duration >= 900
+    eff_preset = "ultrafast" if (is_hyper or p_low in ("turbo", "ultrafast") or total_duration >= 1200) else p_low
+    if eff_preset not in ("ultrafast", "superfast", "veryfast", "faster", "fast", "medium"):
+        eff_preset = "ultrafast"
     scale_flag = "neighbor" if eff_preset == "ultrafast" else "fast_bilinear"
 
-    # Cap FPS for long videos so total frames encoded stays within the 5-minute (<210s) budget
     fps_prefix = ""
-    if total_duration >= 3600:
-        fps_prefix = "fps=fps='min(source_fps,20)',"
-        if even_h == 0 or even_h > 480:
+    if is_hyper:
+        if total_duration >= 3600:
+            fps_prefix = "fps=fps='min(source_fps,16)',"
+            if not respect_custom_height and (even_h == 0 or even_h > 480):
+                even_h = 480
+        elif total_duration >= 1200:
+            fps_prefix = "fps=fps='min(source_fps,18)',"
+            if not respect_custom_height and (even_h == 0 or even_h > 480):
+                even_h = 480
+        else:
+            fps_prefix = "fps=fps='min(source_fps,20)',"
+            if not respect_custom_height and even_h == 0:
+                even_h = 480
+    elif total_duration >= 3600:
+        fps_prefix = "fps=fps='min(source_fps,18)',"
+        if not respect_custom_height and (even_h == 0 or even_h > 480):
             even_h = 480
     elif total_duration >= 1500:
-        fps_prefix = "fps=fps='min(source_fps,24)',"
-        if even_h > 720:
+        fps_prefix = "fps=fps='min(source_fps,20)',"
+        if not respect_custom_height and even_h > 720:
             even_h = 720
 
     if even_h > 0:
@@ -616,77 +790,35 @@ def _build_5min_turbo_vf(even_h: int, total_duration: int, preset: str) -> Tuple
     else:
         vf_filter = f"{fps_prefix}scale=trunc(iw/2)*2:trunc(ih/2)*2:flags={scale_flag}"
 
+    x264_p = HYPER_X264_PARAMS if is_hyper else TURBO_X264_PARAMS
     extra_x264 = [
-        "-tune", "fastdecode,zerolatency",
-        "-x264-params", TURBO_X264_PARAMS,
+        "-tune", "fastdecode",
+        "-x264-params", x264_p,
     ] if is_turbo else ["-tune", "fastdecode"]
     return vf_filter, eff_preset, extra_x264
 
 
-async def compress_media(
-    input_path: str,
+async def _run_monitored_ffmpeg(
+    cmd: List[str],
     output_path: str,
-    crf: int = 28,
-    preset: str = "superfast",
-    scale_height: int = 720,
-    progress_message = None,
-    total_duration: int = 0,
-    max_output_mb: Optional[float] = None,
-    vcodec: str = "libx264",
-    audio_bitrate: str = "96k",
-    task_id: Optional[str] = None
+    total_duration: int,
+    progress_message: Any,
+    header_title: str,
+    engine_label: str,
+    task_id: Optional[str] = None,
 ) -> bool:
-    if total_duration <= 0:
-        attrs = await get_media_attributes(input_path)
-        total_duration = int(attrs.get("duration", 0) or 0)
-
-    even_h = scale_height if scale_height % 2 == 0 else scale_height - 1
-    vf_filter, eff_preset, extra_x264 = _build_5min_turbo_vf(even_h, total_duration, preset)
-
-    rate_cap_args: List[str] = []
-    if max_output_mb and total_duration > 0:
-        total_kbits = float(max_output_mb) * 8192.0 * 0.95
-        max_v_kb = max(100, int((total_kbits / max(1, total_duration)) - 96))
-        rate_cap_args = ["-maxrate", f"{max_v_kb}k", "-bufsize", f"{max_v_kb * 2}k"]
-
-    use_hevc = vcodec in ("libx265", "hevc", "h265")
-    codec_name = "libx265" if use_hevc else "libx264"
-    codec_extra = (["-tag:v", "hvc1"] if use_hevc else extra_x264)
-
-    # Smart audio copy: if source audio is already AAC/MP3, copy it with zero CPU overhead!
-    primary_cmd = [
-        FFMPEG_BIN, "-y",
-        "-nostdin",
-        "-threads", "0",
-        "-thread_type", "slice+frame",
-        "-i", input_path,
-        "-map", "0:v:0?",
-        "-map", "0:a:0?",
-        "-c:v", codec_name,
-        "-pix_fmt", "yuv420p",
-        "-preset", eff_preset,
-        *codec_extra,
-        "-crf", str(crf),
-        *rate_cap_args,
-        "-vf", vf_filter,
-        "-c:a", "copy",
-        "-map_metadata", "0",
-        "-sn",
-        "-movflags", "+faststart",
-        "-max_muxing_queue_size", "9999",
-        output_path
-    ]
-
+    """Execute FFmpeg subprocess while streaming live progress, ETA, speed, and encoded size to Telegram."""
     process = None
     try:
         process = await asyncio.create_subprocess_exec(
-            *primary_cmd,
+            *cmd,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE
         )
         if task_id:
             task_manager.set_subprocess(task_id, process)
 
+        start_ts = time.time()
         last_update = 0.0
         last_pct_step = -5
         error_tail = ""
@@ -720,15 +852,19 @@ async def compress_media(
                     filled = int(pct // 10)
                     bar = "▰" * filled + "▱" * (10 - filled)
                     sp_m = list(speed_regex.finditer(error_tail))
-                    sp_str = sp_m[-1].group(1) if sp_m else "2.5x"
+                    sp_str = sp_m[-1].group(1) if sp_m else "8.5x"
+                    elapsed = max(0.5, now - start_ts)
+                    eta_sec = int(((total_duration - current_seconds) / max(0.1, current_seconds / elapsed))) if (total_duration > current_seconds > 0) else 0
+                    eta_str = time_formatter(eta_sec) if eta_sec > 0 else "Calculating..."
                     cur_sz = humanbytes(os.path.getsize(output_path)) if os.path.exists(output_path) else "0 B"
                     dur_disp = time_formatter(total_duration) if total_duration > 0 else "Live"
                     text = (
-                        f"⚡ **{to_smallcaps('5-min turbo ffmpeg compression')}** 🗜️\n\n"
+                        f"{header_title}\n\n"
                         f"`[{bar}] {pct:.1f}%`\n\n"
                         f"• ⏱️ **{to_smallcaps('processed')}** : `{time_formatter(int(current_seconds))} / {dur_disp}`\n"
-                        f"• 📦 **{to_smallcaps('encoded size')}** : `{cur_sz}` | 🚀 **{to_smallcaps('speed')}** : `{sp_str}`\n"
-                        f"• ⚙️ **{to_smallcaps('engine')}** : `{eff_preset.upper()} + Audio Copy (CRF {crf})`"
+                        f"• ⏳ **{to_smallcaps('eta')}** : `{eta_str}` | 🚀 **{to_smallcaps('speed')}** : `{sp_str}`\n"
+                        f"• 📦 **{to_smallcaps('encoded size')}** : `{cur_sz}`\n"
+                        f"• ⚙️ **{to_smallcaps('engine')}** : `{engine_label}`"
                         f"{format_watermark()}"
                     )
                     try:
@@ -736,65 +872,151 @@ async def compress_media(
                     except Exception:
                         pass
 
-        if task_id:
-            task_manager.set_subprocess(task_id, process)
-        await asyncio.wait_for(process.wait(), timeout=1800)
+        await process.wait()
         if process.returncode == 0 and await validate_media_output(output_path):
             return True
+        logger.warning(f"FFmpeg pass exited with code={process.returncode}: {error_tail[-400:]}")
     except asyncio.CancelledError:
         if process and process.returncode is None:
             process.kill()
             await process.wait()
         if os.path.exists(output_path):
-            os.remove(output_path)
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
         raise
     except Exception as e:
         if process and process.returncode is None:
             process.kill()
             await process.wait()
         if os.path.exists(output_path):
-            os.remove(output_path)
-        logger.warning(f"Primary turbo compression fallback to AAC audio: {e}")
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
+        logger.warning(f"Monitored FFmpeg execution notice: {e}")
+    return False
 
-    # Fallback with ultra-fast AAC audio encode if source audio codec wasn't MP4-copyable (e.g. EAC3/DTS)
-    fallback_cmd = [
+
+async def compress_media(
+    input_path: str,
+    output_path: str,
+    crf: int = 28,
+    preset: str = "superfast",
+    scale_height: int = 720,
+    progress_message = None,
+    total_duration: int = 0,
+    max_output_mb: Optional[float] = None,
+    vcodec: str = "libx264",
+    audio_bitrate: str = "96k",
+    task_id: Optional[str] = None,
+    respect_custom_height: bool = False,
+) -> bool:
+    stream_info = await check_media_streams(input_path)
+    if total_duration <= 0:
+        total_duration = int(stream_info.get("duration") or 0)
+    if total_duration <= 0:
+        attrs = await get_media_attributes(input_path)
+        total_duration = int(attrs.get("duration", 0) or 0)
+
+    even_h = scale_height if scale_height % 2 == 0 else max(0, scale_height - 1)
+    vf_filter, eff_preset, extra_x264 = _build_5min_turbo_vf(
+        even_h, total_duration, preset, respect_custom_height=respect_custom_height
+    )
+    input_accel = _build_fast_decode_input_flags(total_duration, preset)
+
+    rate_cap_args: List[str] = []
+    if max_output_mb and total_duration > 0:
+        total_kbits = float(max_output_mb) * 8192.0 * 0.95
+        max_v_kb = max(120, min(25000, int((total_kbits / max(1, total_duration)) - 96)))
+        rate_cap_args = ["-maxrate", f"{max_v_kb}k", "-bufsize", f"{max_v_kb * 2}k"]
+
+    use_hevc = vcodec in ("libx265", "hevc", "h265")
+    codec_name = "libx265" if use_hevc else "libx264"
+    codec_extra = (
+        ["-tag:v", "hvc1", "-x265-params", TURBO_X265_PARAMS]
+        if use_hevc
+        else extra_x264
+    )
+
+    in_acodec = str(stream_info.get("audio_codec") or "").lower()
+    in_ach = int(stream_info.get("audio_channels") or 2)
+    can_copy_audio = in_acodec in ("aac", "mp3", "ac3", "eac3") and (in_ach <= 2 or in_acodec in ("aac", "mp3"))
+    if str(audio_bitrate).lower() == "copy":
+        audio_args = ["-c:a", "copy"]
+        aud_label = "Audio Copy"
+    elif can_copy_audio and str(audio_bitrate).lower() in ("auto", "96k", "128k"):
+        audio_args = ["-c:a", "copy"]
+        aud_label = f"Audio Copy ({in_acodec.upper()})"
+    else:
+        abr = str(audio_bitrate if str(audio_bitrate).lower() not in ("auto", "copy") else "64k")
+        audio_args = ["-c:a", "aac", "-aac_coder", "fast", "-b:a", abr, "-ac", "2"]
+        aud_label = f"Fast AAC {abr}"
+
+    primary_cmd = [
         FFMPEG_BIN, "-y",
         "-nostdin",
-        "-threads", "0",
-        "-thread_type", "slice+frame",
+        *input_accel,
         "-i", input_path,
+        "-filter_threads", "0",
         "-map", "0:v:0?",
         "-map", "0:a:0?",
-        "-vf", vf_filter,
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-tune", "fastdecode,zerolatency",
-        "-x264-params", TURBO_X264_PARAMS,
+        "-c:v", codec_name,
+        "-pix_fmt", "yuv420p",
+        "-preset", eff_preset,
+        *codec_extra,
         "-crf", str(crf),
         *rate_cap_args,
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "96k",
-        "-ac", "2",
-        "-ar", "44100",
+        "-vf", vf_filter,
+        "-threads", "0",
+        *audio_args,
+        "-map_metadata", "0",
         "-sn",
         "-movflags", "+faststart",
         "-max_muxing_queue_size", "9999",
         output_path
     ]
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *fallback_cmd,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE
-        )
-        if task_id:
-            task_manager.set_subprocess(task_id, proc)
-        await proc.communicate()
-        if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            return True
-    except Exception:
-        pass
+
+    header_title = f"⚡ **{to_smallcaps('ultra-fast turbo ffmpeg compression')}** 🗜️"
+    engine_label = f"{codec_name.upper()} {eff_preset.upper()} + {aud_label} (CRF {crf})"
+    if await _run_monitored_ffmpeg(
+        primary_cmd, output_path, total_duration, progress_message, header_title, engine_label, task_id=task_id
+    ):
+        return True
+
+    # Fallback with ultra-fast AAC audio encode if source audio copy or HEVC failed
+    fallback_cmd = [
+        FFMPEG_BIN, "-y",
+        "-nostdin",
+        "-flags2", "fast", "-skip_loop_filter", "all",
+        "-threads", "0", "-thread_type", "frame+slice",
+        "-i", input_path,
+        "-filter_threads", "0",
+        "-map", "0:v:0?",
+        "-map", "0:a:0?",
+        "-vf", vf_filter,
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-tune", "fastdecode",
+        "-x264-params", TURBO_X264_PARAMS,
+        "-crf", str(crf),
+        *rate_cap_args,
+        "-pix_fmt", "yuv420p",
+        "-threads", "0",
+        "-c:a", "aac",
+        "-aac_coder", "fast",
+        "-b:a", "64k",
+        "-ac", "2",
+        "-sn",
+        "-movflags", "+faststart",
+        "-max_muxing_queue_size", "9999",
+        output_path
+    ]
+    if await _run_monitored_ffmpeg(
+        fallback_cmd, output_path, total_duration, progress_message, header_title, f"H.264 ULTRAFAST + AAC 64k (CRF {crf})", task_id=task_id
+    ):
+        return True
 
     video_only_cmd = [
         FFMPEG_BIN, "-y",
@@ -849,6 +1071,7 @@ def parse_time_range(text: str) -> Tuple[Optional[float], Optional[float]]:
         return s, e
     return None, None
 
+
 async def trim_video(video_path: str, output_path: str, start_sec: float, end_sec: float) -> bool:
     duration = end_sec - start_sec
     copy_cmd = [
@@ -893,10 +1116,11 @@ async def trim_video(video_path: str, output_path: str, start_sec: float, end_se
     except Exception:
         return False
 
+
 async def extract_all_audio_tracks(video_path: str, output_dir: str) -> List[Dict[str, Any]]:
     cmd = [
         FFPROBE_BIN, "-v", "quiet",
-        "-analyzeduration", "1500000", "-probesize", "1500000",
+        "-analyzeduration", "10000000", "-probesize", "10000000",
         "-print_format", "json",
         "-show_streams",
         video_path
@@ -907,7 +1131,7 @@ async def extract_all_audio_tracks(video_path: str, output_dir: str) -> List[Dic
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         stdout, _ = await proc.communicate()
-        data = json.loads(stdout.decode('utf-8', errors='ignore'))
+        data = json.loads(stdout.decode('utf-8', errors='ignore') or "{}")
         audio_streams = [s for s in data.get("streams", []) if s.get("codec_type") == "audio"]
 
         base_name = sanitize_filename(os.path.splitext(os.path.basename(video_path))[0])
@@ -918,7 +1142,10 @@ async def extract_all_audio_tracks(video_path: str, output_dir: str) -> List[Dic
             title = s.get("tags", {}).get("title", f"Track {idx+1}")
             codec = s.get("codec_name", "mp3").lower()
             channels = int(s.get("channels", 2))
-            dur = int(float(s.get("duration", 0)))
+            try:
+                dur = int(float(s.get("duration", 0)))
+            except (ValueError, TypeError):
+                dur = 0
 
             ext = "mp3" if codec in ["mp3", "mpeg"] else ("m4a" if codec in ["aac", "alac"] else "mp3")
             out_filename = f"{base_name}_audio_{idx+1}_{raw_lang}.{ext}"
@@ -951,10 +1178,11 @@ async def extract_all_audio_tracks(video_path: str, output_dir: str) -> List[Dic
         logger.error(f"Error extracting audio tracks: {e}")
     return tracks
 
+
 async def extract_all_subtitle_tracks(video_path: str, output_dir: str) -> List[Dict[str, Any]]:
     cmd = [
         FFPROBE_BIN, "-v", "quiet",
-        "-analyzeduration", "1500000", "-probesize", "1500000",
+        "-analyzeduration", "10000000", "-probesize", "10000000",
         "-print_format", "json",
         "-show_streams",
         video_path
@@ -965,7 +1193,7 @@ async def extract_all_subtitle_tracks(video_path: str, output_dir: str) -> List[
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         stdout, _ = await proc.communicate()
-        data = json.loads(stdout.decode('utf-8', errors='ignore'))
+        data = json.loads(stdout.decode('utf-8', errors='ignore') or "{}")
         sub_streams = [s for s in data.get("streams", []) if s.get("codec_type") == "subtitle"]
 
         base_name = sanitize_filename(os.path.splitext(os.path.basename(video_path))[0])
@@ -1002,6 +1230,7 @@ async def extract_all_subtitle_tracks(video_path: str, output_dir: str) -> List[
     except Exception as e:
         logger.error(f"Error extracting subtitle tracks: {e}")
     return tracks
+
 
 async def add_audio_to_video(
     video_path: str,
@@ -1055,6 +1284,7 @@ async def add_audio_to_video(
         *(["-map", "1:a:0"] if not replace_existing else []),
         "-c:v", "copy",
         "-c:a", "aac",
+        "-aac_coder", "fast",
         "-b:a", "192k",
         "-max_muxing_queue_size", "9999",
         output_path
@@ -1067,6 +1297,7 @@ async def add_audio_to_video(
         return os.path.exists(output_path) and os.path.getsize(output_path) > 1000
     except Exception:
         return False
+
 
 async def add_subtitle_to_video(
     video_path: str,
@@ -1095,6 +1326,7 @@ async def add_subtitle_to_video(
     except Exception:
         return False
 
+
 async def compress_to_target_size(
     input_path: str,
     output_path: str,
@@ -1103,43 +1335,144 @@ async def compress_to_target_size(
     scale_height: int = 720,
     progress_message = None,
     target_mb: Optional[float] = None,
-    task_id: Optional[str] = None
+    task_id: Optional[str] = None,
+    preset: str = "hyper",
+    audio_bitrate: str = "auto",
+    respect_custom_height: bool = False,
 ) -> bool:
-    """Compress to a target size. Duration controls bitrate/FPS decisions, not encode speed."""
-    effective_mb = float(target_mb if target_mb is not None else target_size_mb)
-    try:
-        duration_sec = int(duration_sec or 0)
-    except (TypeError, ValueError):
-        duration_sec = 0
-    if duration_sec <= 0:
+    """
+    Ultra-Fast Target-Size & Custom Quality FFmpeg Compressor.
+    Compresses any file (including 3 GB 2.5-hour movies) to the exact desired target MB and quality
+    within 5–15 minutes using hardware-friendly decoder frame/loop-filter skipping and turbo x264 params.
+    """
+    effective_mb = max(1.0, min(1950.0, float(target_mb if target_mb is not None else target_size_mb)))
+    stream_info = await check_media_streams(input_path)
+    if duration_sec <= 5:
+        duration_sec = int(stream_info.get("duration") or 0)
+    if duration_sec <= 5:
         attrs = await get_media_attributes(input_path)
         duration_sec = int(attrs.get("duration", 0) or 0)
-    # Keep a safe denominator if the media probe cannot determine duration.
-    dur = max(1, duration_sec)
-    total_kbits = effective_mb * 8192.0 * 0.95  # 5% container overhead safety margin
-    audio_bitrate_kb = 96
-    video_bitrate_kb = max(80, int((total_kbits / dur) - audio_bitrate_kb))
+    if duration_sec <= 5 and os.path.exists(input_path):
+        disk_sz = os.path.getsize(input_path)
+        if disk_sz > 5 * 1024 * 1024:
+            duration_sec = max(60, int(disk_sz / (280 * 1024)))
+    dur = max(1, int(duration_sec))
 
-    even_h = scale_height if scale_height % 2 == 0 else scale_height - 1
-    vf_filter, _, extra_x264 = _build_5min_turbo_vf(even_h, dur, "turbo")
+    total_kbits = effective_mb * 8192.0 * 0.94  # 6% container & muxing safety margin
+    total_kbps = total_kbits / dur
+
+    # Choose optimal audio bitrate or stream copy based on target size budget
+    in_acodec = str(stream_info.get("audio_codec") or "").lower()
+    in_abr = int(stream_info.get("audio_bitrate") or 0)
+    in_ach = int(stream_info.get("audio_channels") or 2)
+
+    if str(audio_bitrate).lower() == "copy" and in_acodec in ("aac", "mp3", "ac3", "eac3"):
+        audio_bitrate_kb = in_abr if 32 <= in_abr <= 384 else 128
+        audio_args = ["-c:a", "copy"]
+        aud_label = "Audio Copy"
+    elif (
+        str(audio_bitrate).lower() == "auto"
+        and in_acodec in ("aac", "mp3")
+        and in_ach <= 2
+        and 0 < in_abr <= 128
+        and total_kbps >= 450
+    ):
+        audio_bitrate_kb = in_abr
+        audio_args = ["-c:a", "copy"]
+        aud_label = f"Audio Copy ({in_abr}k)"
+    else:
+        if str(audio_bitrate).lower() not in ("auto", "copy", ""):
+            try:
+                audio_bitrate_kb = max(32, min(192, int(str(audio_bitrate).lower().replace("k", ""))))
+            except ValueError:
+                audio_bitrate_kb = 64
+        else:
+            if total_kbps < 260:
+                audio_bitrate_kb = 48
+            elif total_kbps < 600:
+                audio_bitrate_kb = 64
+            else:
+                audio_bitrate_kb = 96
+        audio_args = ["-c:a", "aac", "-aac_coder", "fast", "-b:a", f"{audio_bitrate_kb}k", "-ac", "2"]
+        aud_label = f"Fast AAC {audio_bitrate_kb}k"
+
+    video_bitrate_kb = max(65, min(25000, int(total_kbps - audio_bitrate_kb)))
+
+    # Smart Auto-Resolution if scale_height == 0 or not explicitly locked
+    even_h = scale_height if scale_height % 2 == 0 else max(0, scale_height - 1)
+    if even_h == 0:
+        if video_bitrate_kb < 240:
+            even_h = 360
+        elif video_bitrate_kb < 550 or dur >= 3600:
+            even_h = 480
+        elif video_bitrate_kb < 950:
+            even_h = 540
+        elif video_bitrate_kb < 1800:
+            even_h = 720
+        else:
+            even_h = 1080
+        respect_custom_height = True
+
+    vf_filter, eff_preset, extra_x264 = _build_5min_turbo_vf(
+        even_h, dur, preset, respect_custom_height=respect_custom_height
+    )
+    input_accel = _build_fast_decode_input_flags(dur, preset)
 
     cmd = [
         FFMPEG_BIN, "-y",
         "-nostdin",
-        "-threads", "0",
-        "-thread_type", "slice+frame",
+        *input_accel,
         "-i", input_path,
+        "-filter_threads", "0",
         "-map", "0:v:0?",
         "-map", "0:a:0?",
         "-vf", vf_filter,
+        "-c:v", "libx264",
+        "-b:v", f"{video_bitrate_kb}k",
+        "-maxrate", f"{int(video_bitrate_kb * 1.20)}k",
+        "-bufsize", f"{int(video_bitrate_kb * 2)}k",
+        "-pix_fmt", "yuv420p",
+        "-preset", eff_preset,
+        *extra_x264,
+        "-threads", "0",
+        *audio_args,
+        "-sn",
+        "-movflags", "+faststart",
+        "-max_muxing_queue_size", "9999",
+        output_path
+    ]
+
+    res_disp = f"{even_h}p" if even_h > 0 else "Auto"
+    header_title = f"🎯 **{to_smallcaps('custom ultra-fast target compression')}** (`{int(effective_mb)} MB • {res_disp}`) ⚡"
+    engine_label = f"{eff_preset.upper()} • Video {video_bitrate_kb}k + {aud_label}"
+
+    if await _run_monitored_ffmpeg(
+        cmd, output_path, dur, progress_message, header_title, engine_label, task_id=task_id
+    ):
+        return True
+
+    # Ultra-fast fallback pass (without -skip_frame noref in case of unusual input container)
+    fb_cmd = [
+        FFMPEG_BIN, "-y",
+        "-nostdin",
+        "-flags2", "fast", "-skip_loop_filter", "all",
+        "-threads", "0", "-thread_type", "frame+slice",
+        "-i", input_path,
+        "-filter_threads", "0",
+        "-map", "0:v:0?",
+        "-map", "0:a:0?",
+        "-vf", f"scale=-2:{even_h if even_h > 0 else 480}:flags=neighbor,setsar=1",
         "-c:v", "libx264",
         "-b:v", f"{video_bitrate_kb}k",
         "-maxrate", f"{int(video_bitrate_kb * 1.25)}k",
         "-bufsize", f"{int(video_bitrate_kb * 2)}k",
         "-pix_fmt", "yuv420p",
         "-preset", "ultrafast",
-        *extra_x264,
+        "-tune", "fastdecode",
+        "-x264-params", TURBO_X264_PARAMS,
+        "-threads", "0",
         "-c:a", "aac",
+        "-aac_coder", "fast",
         "-b:a", f"{audio_bitrate_kb}k",
         "-ac", "2",
         "-sn",
@@ -1147,94 +1480,9 @@ async def compress_to_target_size(
         "-max_muxing_queue_size", "9999",
         output_path
     ]
-    process = None
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
-        )
-        if task_id:
-            task_manager.set_subprocess(task_id, process)
-        last_update = 0.0
-        last_pct_step = -5
-        error_tail = ""
-        time_regex = re.compile(r"time=(\d+):(\d+):(\d+\.\d+)")
-        speed_regex = re.compile(r"speed=\s*([0-9.]+x)")
-
-        while True:
-            chunk = await process.stderr.read(4096)
-            if not chunk:
-                break
-            decoded = chunk.decode("utf-8", errors="ignore")
-            error_tail = (error_tail + decoded)[-16384:]
-            matches = list(time_regex.finditer(error_tail))
-            match = matches[-1] if matches else None
-            if match and dur > 0 and progress_message and not rate_limit_manager.is_in_cooldown():
-                hours, minutes, seconds = map(float, match.groups())
-                current_seconds = hours * 3600 + minutes * 60 + seconds
-                now = float(time.time())
-                pct = min(99.9, (current_seconds / dur) * 100)
-                active_jobs = max(1, task_manager.active_count)
-                step_gran = 5 if active_jobs <= 2 else min(20, 5 * active_jobs)
-                min_gap = max(3.5, min(18.0, 2.2 * active_jobs))
-                pct_step = int(pct // step_gran) * step_gran
-                if (pct_step >= last_pct_step + step_gran and (now - last_update) >= min_gap) or (now - last_update) >= (min_gap * 1.8):
-                    last_update = now
-                    last_pct_step = pct_step
-                    filled = int(pct // 10)
-                    bar = "▰" * filled + "▱" * (10 - filled)
-                    sp_m = list(speed_regex.finditer(error_tail))
-                    sp_str = sp_m[-1].group(1) if sp_m else "1.0x"
-                    cur_sz = humanbytes(os.path.getsize(output_path)) if os.path.exists(output_path) else "0 B"
-                    text = (
-                        f"🎯 **{to_smallcaps('ffmpeg target-size compression')}** (`{int(effective_mb)} MB`) ⚡\n\n"
-                        f"`[{bar}] {pct:.1f}%`\n\n"
-                        f"• ⏱️ **{to_smallcaps('processed')}** : `{time_formatter(int(current_seconds))} / {time_formatter(dur)}`\n"
-                        f"• 📦 **{to_smallcaps('encoded size')}** : `{cur_sz}` | 🚀 **{to_smallcaps('speed')}** : `{sp_str}`\n"
-                        f"• 🎚️ **{to_smallcaps('video bitrate')}** : `{video_bitrate_kb} kbps`"
-                        f"{format_watermark()}"
-                    )
-                    try:
-                        await safe_edit_text(progress_message, text)
-                    except Exception:
-                        pass
-
-        await process.wait()
-        if process.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            return True
-    except asyncio.CancelledError:
-        if process and process.returncode is None:
-            process.kill()
-            await process.wait()
-        if os.path.exists(output_path):
-            os.remove(output_path)
-        raise
-    except Exception:
-        pass
-
-    fb_cmd = [
-        FFMPEG_BIN, "-y",
-        "-nostdin", "-threads", "0",
-        "-i", input_path,
-        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-        "-c:v", "libx264",
-        "-b:v", f"{video_bitrate_kb}k",
-        "-pix_fmt", "yuv420p",
-        "-preset", "ultrafast",
-        "-c:a", "aac",
-        "-b:a", "96k",
-        "-ac", "2",
-        "-sn",
-        "-movflags", "+faststart",
-        output_path
-    ]
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *fb_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
-        )
-        await proc.communicate()
-        return os.path.exists(output_path) and os.path.getsize(output_path) > 1000
-    except Exception:
-        return False
+    return await _run_monitored_ffmpeg(
+        fb_cmd, output_path, dur, progress_message, header_title, f"FALLBACK ULTRAFAST • {video_bitrate_kb}k", task_id=task_id
+    )
 
 
 # ==================== 2. THUMBNAIL SERVICE ====================

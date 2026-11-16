@@ -314,7 +314,7 @@ async def help_subpages(client: Client, query: CallbackQuery):
         text = (
             f"✦ <b>{to_smallcaps('fault-tolerant compressor & recovery — guide')}</b> ✦\n\n"
             f"• 🗜️ <b>{to_smallcaps('manual & auto compression')}</b> :\n"
-            f"  • {to_smallcaps('send a video or reply with')} <code>/compress</code> {to_smallcaps('or')} <code>/compress 500MB</code>.\n"
+            f"  • {to_smallcaps('send a video or reply with')} <code>/compress</code>, <code>/customcompress</code>, {to_smallcaps('or')} <code>/compress 450MB 480p</code>.\n"
             f"  • {to_smallcaps('choose 5-min turbo, 720p, 480p, 360p, 1080p, h.265 hevc, remux, or target size.')}\n"
             f"  • <code>/autocompress</code> : {to_smallcaps('toggle automatic compression.')}\n\n"
             f"• ♻️ <b>{to_smallcaps('automatic task recovery')}</b> :\n"

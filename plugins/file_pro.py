@@ -836,6 +836,8 @@ async def file_pro_force_reply_media_listener(client: Client, message: Message):
             )
         return await execute_add_subtitle(client, message, sub_video_id, message)
 
+    message.continue_propagation()
+
 
 # ==================== 6. SCREENSHOTS, SAMPLE CLIP, MUTE AUDIO & REMUX ====================
 

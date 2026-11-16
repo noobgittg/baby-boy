@@ -12,6 +12,7 @@ async def cancel_command_handler(client: Client, message: Message):
     await cache.delete(f"waiting_addaudio_{user_id}")
     await cache.delete(f"waiting_addsub_{user_id}")
     await cache.delete(f"waiting_trim_{user_id}")
+    await cache.delete(f"waiting_custom_comp_{user_id}")
     await cleanup_sess_client(user_id)
     cancelled_tasks = await task_manager.cancel_user_tasks(user_id)
 
@@ -35,6 +36,7 @@ async def cancel_callback_handler(client: Client, query: CallbackQuery):
     await cache.delete(f"waiting_addaudio_{user_id}")
     await cache.delete(f"waiting_addsub_{user_id}")
     await cache.delete(f"waiting_trim_{user_id}")
+    await cache.delete(f"waiting_custom_comp_{user_id}")
     await cleanup_sess_client(user_id)
     await task_manager.cancel_user_tasks(user_id)
     await query.answer(to_smallcaps("cancelled!"), show_alert=False)

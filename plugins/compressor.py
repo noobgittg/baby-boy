@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import secrets
 import asyncio
@@ -9,7 +10,8 @@ from pyrogram.types import (
     Message,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    CallbackQuery
+    CallbackQuery,
+    ForceReply
 )
 from config import Config
 from info import COMMAND_PREFIXES, LOG_CHANNEL
@@ -161,7 +163,7 @@ async def run_auto_compress_workflow(client: Client, media_msg: Message, user_id
     res_raw = str((u.get("resolution") if u else "720p") or "720p").lower().replace("p", "").strip()
     scale_h = int(res_raw) if res_raw.isdigit() else 720
     preset_raw = str((u.get("compression_preset") if u else "turbo") or "turbo").lower()
-    if preset_raw not in ("turbo", "ultrafast", "superfast", "veryfast", "fast", "hevc"):
+    if preset_raw not in ("hyper", "turbo", "ultrafast", "superfast", "veryfast", "fast", "hevc"):
         preset_raw = "turbo"
     status = await safe_reply_text(
         media_msg,
@@ -181,28 +183,164 @@ async def run_auto_compress_workflow(client: Client, media_msg: Message, user_id
     )
 
 
-@Client.on_message(filters.private & filters.command(["compress", "comp"], prefixes=COMMAND_PREFIXES))
+def parse_custom_compress_input(text: str, orig_size_bytes: int = 0) -> Dict[str, Any]:
+    """
+    Parse flexible custom compression input such as:
+      - '450MB', '450', '1.2GB', '50%'
+      - '500MB 480p', '700MB 720p hyper', '300MB 360p', '1.5GB 1080p fast'
+      - '480p crf26', '360p'
+    Returns dict with keys: target_mb, scale_h, speed, audio_br, crf, has_custom_res.
+    """
+    raw = (text or "").strip().lower()
+    result: Dict[str, Any] = {
+        "target_mb": None,
+        "scale_h": None,
+        "speed": None,
+        "audio_br": None,
+        "crf": None,
+        "has_custom_res": False,
+    }
+    if not raw:
+        return result
+
+    # 1. Extract resolution token (e.g., 360p, 480p, 540p, 720p, 1080p)
+    res_match = re.search(r"\b(240|360|480|540|720|1080)p\b", raw)
+    if res_match:
+        result["scale_h"] = int(res_match.group(1))
+        result["has_custom_res"] = True
+        raw = raw[:res_match.start()] + " " + raw[res_match.end():]
+    elif re.search(r"\bauto\b", raw):
+        result["scale_h"] = 0
+        result["has_custom_res"] = False
+
+    # 2. Extract CRF token if provided (e.g., crf26, crf 28)
+    crf_match = re.search(r"\bcrf\s*(\d{2})\b", raw)
+    if crf_match:
+        result["crf"] = max(16, min(40, int(crf_match.group(1))))
+        raw = raw[:crf_match.start()] + " " + raw[crf_match.end():]
+
+    # 3. Extract Audio bitrate token if provided (e.g., 64k, 96k, 128k, copy)
+    aud_match = re.search(r"\b(48k|64k|96k|128k|160k|192k|copy)\b", raw)
+    if aud_match:
+        result["audio_br"] = aud_match.group(1)
+        raw = raw[:aud_match.start()] + " " + raw[aud_match.end():]
+
+    # 4. Extract Speed mode token (hyper, turbo, fast, superfast, quality)
+    spd_match = re.search(r"\b(hyper|turbo|ultrafast|superfast|veryfast|fast|quality|hevc)\b", raw)
+    if spd_match:
+        s_tok = spd_match.group(1)
+        result["speed"] = "superfast" if s_tok == "quality" else ("hyper" if s_tok == "ultrafast" else s_tok)
+        raw = raw[:spd_match.start()] + " " + raw[spd_match.end():]
+
+    # 5. Extract percentage target size (e.g., 40%, 50%)
+    pct_match = re.search(r"\b(\d{1,2}(?:\.\d+)?)\s*%", raw)
+    if pct_match and orig_size_bytes > 0:
+        pct_val = max(5.0, min(95.0, float(pct_match.group(1))))
+        orig_mb = orig_size_bytes / (1024 * 1024)
+        result["target_mb"] = round(max(1.0, min(1900.0, orig_mb * (pct_val / 100.0))), 1)
+        raw = raw[:pct_match.start()] + " " + raw[pct_match.end():]
+
+    # 6. Extract explicit GB / MB / numeric target size
+    if result["target_mb"] is None:
+        gb_match = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:gb|g)\b", raw)
+        mb_match = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:mb|m)?\b", raw)
+        if gb_match:
+            val_mb = float(gb_match.group(1)) * 1024.0
+            result["target_mb"] = round(max(1.0, min(1900.0, val_mb)), 1)
+        elif mb_match:
+            val = float(mb_match.group(1))
+            # If user typed a small decimal like 1.5 without unit, treat <= 4.0 as GB
+            if val <= 4.0 and "." in mb_match.group(1):
+                val = val * 1024.0
+            if val >= 1.0:
+                result["target_mb"] = round(max(1.0, min(1900.0, val)), 1)
+
+    return result
+
+
+async def _get_or_init_custom_comp_cfg(
+    user_id: int,
+    msg_id: int,
+    orig_size_bytes: int,
+    duration_sec: int = 0,
+) -> Dict[str, Any]:
+    """Retrieve or initialize the user's Custom Ultra-Fast Compressor configuration for a media message."""
+    key = f"custcomp_cfg_{user_id}_{msg_id}"
+    cfg = await cache.get(key)
+    if isinstance(cfg, dict) and cfg.get("target_mb"):
+        return cfg
+
+    orig_mb = orig_size_bytes / (1024 * 1024) if orig_size_bytes > 0 else 1000.0
+    if orig_mb > 2000:
+        default_mb = 700
+    elif orig_mb > 1000:
+        default_mb = 450
+    elif orig_mb > 400:
+        default_mb = 250
+    else:
+        default_mb = max(25, int(orig_mb * 0.45))
+
+    cfg = {
+        "target_mb": float(default_mb),
+        "scale_h": 480 if (duration_sec >= 2400 or orig_mb >= 1200) else 0,
+        "speed": "hyper",
+        "audio_br": "auto",
+        "crf": 28,
+        "has_custom_res": bool(duration_sec >= 2400 or orig_mb >= 1200),
+    }
+    await cache.set(key, cfg, ttl=1800)
+    return cfg
+
+
+@Client.on_message(filters.private & filters.command(["compress", "comp", "customcompress", "ccomp", "fastcompress"], prefixes=COMMAND_PREFIXES))
 async def compress_command_handler(client: Client, message: Message):
     target = message.reply_to_message
     if not target or not (target.video or target.document or target.audio):
         return await safe_reply_text(message, 
             f"⚠️ **{to_smallcaps('please reply to a video or audio file to compress with ffmpeg.')}**\n\n"
-            f"• **{to_smallcaps('usage')}** : {to_smallcaps('reply to any media with')} `/compress` {to_smallcaps('or')} `/compress 500MB`"
+            f"• **{to_smallcaps('usage 1')}** : {to_smallcaps('reply with')} `/compress` {to_smallcaps('or')} `/customcompress`\n"
+            f"• **{to_smallcaps('usage 2')}** : {to_smallcaps('reply with')} `/compress 450MB 480p` {to_smallcaps('or')} `/compress 700MB`"
             f"{format_watermark()}"
         )
 
-    target_mb = None
-    if len(message.command) > 1:
-        arg = message.command[1].upper().replace("GB", "000").replace("MB", "").replace("M", "").strip()
-        try:
-            target_mb = float(arg)
-            if target_mb <= 0:
-                target_mb = None
-        except ValueError:
-            target_mb = None
+    cmd_name = (message.command[0] if message.command else "compress").lower()
+    raw_args = message.text.split(None, 1)[1].strip() if (message.text and len(message.text.split(None, 1)) > 1) else ""
+    media = target.video or target.document or target.audio
+    orig_size_bytes = int(getattr(media, "file_size", 0) or 0)
+    dur_val = int(getattr(media, "duration", 0) or 0)
+    user_id = message.from_user.id if message.from_user else message.chat.id
 
-    if target_mb:
-        await cache.set(f"comp_target_{message.from_user.id}_{target.id}", target_mb, ttl=600)
+    if cmd_name in ("customcompress", "ccomp", "fastcompress") or raw_args.lower() == "custom":
+        if raw_args and raw_args.lower() != "custom":
+            parsed = parse_custom_compress_input(raw_args, orig_size_bytes)
+            cfg = await _get_or_init_custom_comp_cfg(user_id, target.id, orig_size_bytes, dur_val)
+            if parsed.get("target_mb"):
+                cfg["target_mb"] = parsed["target_mb"]
+            if parsed.get("scale_h") is not None:
+                cfg["scale_h"] = parsed["scale_h"]
+                cfg["has_custom_res"] = bool(parsed["scale_h"] > 0)
+            if parsed.get("speed"):
+                cfg["speed"] = parsed["speed"]
+            if parsed.get("audio_br"):
+                cfg["audio_br"] = parsed["audio_br"]
+            await cache.set(f"custcomp_cfg_{user_id}_{target.id}", cfg, ttl=1800)
+        return await show_custom_compress_menu(target, message, user_id=user_id, is_callback=False)
+
+    target_mb = None
+    if raw_args:
+        parsed = parse_custom_compress_input(raw_args, orig_size_bytes)
+        target_mb = parsed.get("target_mb")
+        if target_mb or parsed.get("scale_h") is not None:
+            cfg = await _get_or_init_custom_comp_cfg(user_id, target.id, orig_size_bytes, dur_val)
+            if target_mb:
+                cfg["target_mb"] = target_mb
+                await cache.set(f"comp_target_{user_id}_{target.id}", target_mb, ttl=600)
+            if parsed.get("scale_h") is not None:
+                cfg["scale_h"] = parsed["scale_h"]
+                cfg["has_custom_res"] = bool(parsed["scale_h"] > 0)
+            if parsed.get("speed"):
+                cfg["speed"] = parsed["speed"]
+            await cache.set(f"custcomp_cfg_{user_id}_{target.id}", cfg, ttl=1800)
 
     await show_compression_menu(target, message, custom_target_mb=target_mb)
 
@@ -225,10 +363,14 @@ async def show_compression_menu(media_msg: Message, target_msg: Message, is_call
     file_size_bytes = getattr(media, "file_size", 0)
     file_size = humanbytes(file_size_bytes)
     dur_val = int(getattr(media, "duration", 0) or 0)
-    dur_str = time_formatter(seconds=dur_val) if dur_val > 0 else "N/A"
+    dur_str = time_formatter(seconds=dur_val) if dur_val > 0 else "Auto-Detect"
     is_oversized = file_size_bytes > MAX_BOT_FILE_SIZE
 
-    btn = []
+    btn = [
+        [
+            InlineKeyboardButton("🎛️ ᴄᴜsᴛᴏᴍ ᴄᴏᴍᴘʀᴇss (sɪᴢᴇ & ǫᴜᴀʟɪᴛʏ ⚡ 5-10ᴍ)", callback_data=f"custcomp_open_{msg_id}"),
+        ],
+    ]
     if is_oversized:
         btn.append([
             InlineKeyboardButton("🎯 ᴀᴜᴛᴏ-ғɪᴛ < 2ɢʙ (1.85 ɢʙ ғғᴍᴘᴇɢ)", callback_data=f"do_comptarget_{msg_id}_1850"),
@@ -236,14 +378,14 @@ async def show_compression_menu(media_msg: Message, target_msg: Message, is_call
 
     btn.extend([
         [
-            InlineKeyboardButton("⚡ 5-ᴍɪɴ ᴛᴜʀʙᴏ ᴄᴏᴍᴘʀᴇss (ғᴀsᴛᴇsᴛ)", callback_data=f"do_comp_{msg_id}_480_30_turbo"),
+            InlineKeyboardButton("⚡ 5-ᴍɪɴ ᴛᴜʀʙᴏ ᴄᴏᴍᴘʀᴇss (ғᴀsᴛᴇsᴛ)", callback_data=f"do_comp_{msg_id}_480_30_hyper"),
         ],
         [
             InlineKeyboardButton("⚡ ғᴀsᴛ (720ᴘ ʜᴅ)", callback_data=f"do_comp_{msg_id}_720_28_superfast"),
             InlineKeyboardButton("🚀 480ᴘ sᴅ (ᴜʟᴛʀᴀ ғᴀsᴛ)", callback_data=f"do_comp_{msg_id}_480_30_ultrafast")
         ],
         [
-            InlineKeyboardButton("📦 sᴍᴀʟʟ sɪᴢᴇ (360ᴘ)", callback_data=f"do_comp_{msg_id}_360_32_ultrafast"),
+            InlineKeyboardButton("📦 sᴍᴀʟʟ sɪᴢᴇ (360ᴘ)", callback_data=f"do_comp_{msg_id}_360_32_hyper"),
             InlineKeyboardButton("🎚️ 1080ᴘ (ғᴜʟʟ ʜᴅ)", callback_data=f"do_comp_{msg_id}_1080_24_veryfast")
         ],
         [
@@ -277,7 +419,7 @@ async def show_compression_menu(media_msg: Message, target_msg: Message, is_call
 
     oversize_note = (
         f"\n⚠️ **{to_smallcaps('oversized file (> 2gb) detected')}** : "
-        f"{to_smallcaps('ffmpeg will automatically cap output below 1.9 gb so the bot can upload & stream it!')}\n"
+        f"{to_smallcaps('use custom compress or auto-fit below to compress any 3gb+ movie in 5–10 mins!')}\n"
         if is_oversized else ""
     )
 
@@ -287,13 +429,333 @@ async def show_compression_menu(media_msg: Message, target_msg: Message, is_call
         f"• 📦 **{to_smallcaps('current size')}** : `{file_size}`\n"
         f"• ⏱️ **{to_smallcaps('duration')}** : `{dur_str}`\n"
         f"{oversize_note}\n"
-        f"💡 **{to_smallcaps('select your desired ffmpeg compression preset:')}**"
+        f"💡 **{to_smallcaps('tap custom compress (5-10m) to choose your exact size & quality, or pick a preset:')}**"
         f"{format_watermark()}"
     )
     if is_callback:
         await safe_edit_text(target_msg, text, reply_markup=InlineKeyboardMarkup(btn))
     else:
         await safe_reply_text(target_msg, text, reply_markup=InlineKeyboardMarkup(btn))
+
+
+async def show_custom_compress_menu(
+    media_msg: Message,
+    target_msg: Message,
+    user_id: int,
+    is_callback: bool = True,
+):
+    """
+    Render the interactive Custom Ultra-Fast Compression Studio where users can select
+    or type their exact desired Target Size (MB/GB/%), Quality/Resolution (Auto/360p/480p/540p/720p/1080p),
+    Speed Engine (5-10m Hyper Turbo / 10-15m Fast / 15-20m HD), and Audio Bitrate.
+    """
+    msg_id = media_msg.id
+    media = media_msg.video or media_msg.document or media_msg.audio
+    raw_file_name = getattr(media, "file_name", None) or "video.mp4"
+    file_name = raw_file_name.replace("`", "'")
+    orig_size_bytes = int(getattr(media, "file_size", 0) or 0)
+    file_size_str = humanbytes(orig_size_bytes)
+    dur_val = int(getattr(media, "duration", 0) or 0)
+    if dur_val <= 0 and orig_size_bytes > 5 * 1024 * 1024:
+        est_dur = max(60, int(orig_size_bytes / (280 * 1024)))
+        dur_str = f"~{time_formatter(seconds=est_dur)} (Auto)"
+    else:
+        est_dur = max(60, dur_val) if dur_val > 0 else 1800
+        dur_str = time_formatter(seconds=dur_val) if dur_val > 0 else "Auto-Detect"
+
+    cfg = await _get_or_init_custom_comp_cfg(user_id, msg_id, orig_size_bytes, dur_val)
+    target_mb = float(cfg.get("target_mb") or 500.0)
+    scale_h = int(cfg.get("scale_h") or 0)
+    speed = str(cfg.get("speed") or "hyper")
+    audio_br = str(cfg.get("audio_br") or "auto")
+
+    orig_mb = orig_size_bytes / (1024 * 1024) if orig_size_bytes > 0 else 1000.0
+    saved_pct = round(max(0.0, (1.0 - (target_mb / max(1.0, orig_mb))) * 100.0), 1) if orig_mb > target_mb else 0.0
+    total_kbps = int((target_mb * 8192.0 * 0.94) / max(1, est_dur))
+    est_v_kbps = max(65, total_kbps - 64)
+
+    res_label = f"{scale_h}p" if scale_h > 0 else "Auto Smart"
+    speed_labels = {
+        "hyper": "⚡ 5–10 Min Hyper Turbo (15x–25x)",
+        "turbo": "🚀 10–15 Min Fast Turbo (10x–15x)",
+        "superfast": "💎 15–20 Min HD Quality (8x–12x)",
+    }
+    speed_short = {
+        "hyper": "⚡ 5-10m",
+        "turbo": "🚀 10-15m",
+        "superfast": "💎 15-20m",
+    }.get(speed, "⚡ 5-10m")
+
+    def _chk(cond: bool) -> str:
+        return "✅ " if cond else ""
+
+    btn = [
+        [
+            InlineKeyboardButton(
+                f"🚀 sᴛᴀʀᴛ ᴄᴜsᴛᴏᴍ ᴄᴏᴍᴘʀᴇss ({int(target_mb)}ᴍʙ • {res_label} • {speed_short})",
+                callback_data=f"custcomp_run_{msg_id}",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "✏️ ᴛʏᴘᴇ ᴄᴜsᴛᴏᴍ sɪᴢᴇ / ǫᴜᴀʟɪᴛʏ (ᴇ.ɢ. 450MB 480p)",
+                callback_data=f"custcomp_ask_{msg_id}",
+            )
+        ],
+        [
+            InlineKeyboardButton(f"{_chk(int(target_mb)==150)}150ᴍʙ", callback_data=f"custcomp_sz_{msg_id}_150"),
+            InlineKeyboardButton(f"{_chk(int(target_mb)==250)}250ᴍʙ", callback_data=f"custcomp_sz_{msg_id}_250"),
+            InlineKeyboardButton(f"{_chk(int(target_mb)==400)}400ᴍʙ", callback_data=f"custcomp_sz_{msg_id}_400"),
+            InlineKeyboardButton(f"{_chk(int(target_mb)==500)}500ᴍʙ", callback_data=f"custcomp_sz_{msg_id}_500"),
+        ],
+        [
+            InlineKeyboardButton(f"{_chk(int(target_mb)==700)}700ᴍʙ", callback_data=f"custcomp_sz_{msg_id}_700"),
+            InlineKeyboardButton(f"{_chk(int(target_mb)==1000)}1.0ɢʙ", callback_data=f"custcomp_sz_{msg_id}_1000"),
+            InlineKeyboardButton(f"{_chk(int(target_mb)==1400)}1.4ɢʙ", callback_data=f"custcomp_sz_{msg_id}_1400"),
+            InlineKeyboardButton(f"{_chk(int(target_mb)==1850)}1.85ɢʙ", callback_data=f"custcomp_sz_{msg_id}_1850"),
+        ],
+        [
+            InlineKeyboardButton("📉 25% sɪᴢᴇ", callback_data=f"custcomp_pct_{msg_id}_25"),
+            InlineKeyboardButton("📉 40% sɪᴢᴇ", callback_data=f"custcomp_pct_{msg_id}_40"),
+            InlineKeyboardButton("📉 50% sɪᴢᴇ", callback_data=f"custcomp_pct_{msg_id}_50"),
+            InlineKeyboardButton("📉 70% sɪᴢᴇ", callback_data=f"custcomp_pct_{msg_id}_70"),
+        ],
+        [
+            InlineKeyboardButton(f"{_chk(scale_h==0)}ᴀᴜᴛᴏ", callback_data=f"custcomp_res_{msg_id}_0"),
+            InlineKeyboardButton(f"{_chk(scale_h==360)}360ᴘ", callback_data=f"custcomp_res_{msg_id}_360"),
+            InlineKeyboardButton(f"{_chk(scale_h==480)}480ᴘ", callback_data=f"custcomp_res_{msg_id}_480"),
+            InlineKeyboardButton(f"{_chk(scale_h==540)}540ᴘ", callback_data=f"custcomp_res_{msg_id}_540"),
+            InlineKeyboardButton(f"{_chk(scale_h==720)}720ᴘ", callback_data=f"custcomp_res_{msg_id}_720"),
+            InlineKeyboardButton(f"{_chk(scale_h==1080)}1080ᴘ", callback_data=f"custcomp_res_{msg_id}_1080"),
+        ],
+        [
+            InlineKeyboardButton(f"{_chk(speed=='hyper')}⚡ 5-10ᴍ ʜʏᴘᴇʀ", callback_data=f"custcomp_spd_{msg_id}_hyper"),
+            InlineKeyboardButton(f"{_chk(speed=='turbo')}🚀 10-15ᴍ ғᴀsᴛ", callback_data=f"custcomp_spd_{msg_id}_turbo"),
+            InlineKeyboardButton(f"{_chk(speed=='superfast')}💎 15-20ᴍ ʜᴅ", callback_data=f"custcomp_spd_{msg_id}_superfast"),
+        ],
+        [
+            InlineKeyboardButton(f"{_chk(audio_br=='auto')}🎵 ᴀᴜᴛᴏ", callback_data=f"custcomp_aud_{msg_id}_auto"),
+            InlineKeyboardButton(f"{_chk(audio_br=='64k')}64ᴋ", callback_data=f"custcomp_aud_{msg_id}_64k"),
+            InlineKeyboardButton(f"{_chk(audio_br=='96k')}96ᴋ", callback_data=f"custcomp_aud_{msg_id}_96k"),
+            InlineKeyboardButton(f"{_chk(audio_br=='128k')}128ᴋ", callback_data=f"custcomp_aud_{msg_id}_128k"),
+            InlineKeyboardButton(f"{_chk(audio_br=='copy')}ᴄᴏᴘʏ", callback_data=f"custcomp_aud_{msg_id}_copy"),
+        ],
+        [
+            InlineKeyboardButton("⚡ 1-ᴛᴀᴘ: 350ᴍʙ • 360ᴘ (5ᴍ)", callback_data=f"custcomp_quick_{msg_id}_350_360_hyper"),
+            InlineKeyboardButton("⚡ 1-ᴛᴀᴘ: 500ᴍʙ • 480ᴘ (7ᴍ)", callback_data=f"custcomp_quick_{msg_id}_500_480_hyper"),
+        ],
+        [
+            InlineKeyboardButton(f"🔙 {to_smallcaps('back to presets')}", callback_data=f"compress_menu_{msg_id}"),
+            InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home"),
+            InlineKeyboardButton(f"❌ {to_smallcaps('close')}", callback_data="close_data"),
+        ],
+    ]
+
+    text = (
+        f"✦ **{to_smallcaps('custom ultra-fast compressor studio (5–10 min)')}** ✦ 🎛️⚡\n\n"
+        f"• 📁 **{to_smallcaps('file name')}** : `{file_name}`\n"
+        f"• 📦 **{to_smallcaps('original size')}** : `{file_size_str}` | ⏱️ **{to_smallcaps('duration')}** : `{dur_str}`\n"
+        f"• 🎯 **{to_smallcaps('target size')}** : `{int(target_mb)} MB` (`-{saved_pct}%` {to_smallcaps('reduction')})\n"
+        f"• 🎚️ **{to_smallcaps('quality / res')}** : `{res_label}` (`~{est_v_kbps} kbps` video)\n"
+        f"• 🎵 **{to_smallcaps('audio mode')}** : `{audio_br.upper()}`\n"
+        f"• 🚀 **{to_smallcaps('speed engine')}** : `{speed_labels.get(speed, speed_labels['hyper'])}`\n\n"
+        f"💡 **{to_smallcaps('select size, resolution & speed below, then tap start — or tap type custom size/quality:')}**"
+        f"{format_watermark()}"
+    )
+
+    if is_callback:
+        await safe_edit_text(target_msg, text, reply_markup=InlineKeyboardMarkup(btn))
+    else:
+        await safe_reply_text(target_msg, text, reply_markup=InlineKeyboardMarkup(btn))
+
+
+@Client.on_callback_query(
+    filters.regex(r"^custcomp_(open|sz|pct|res|spd|aud|ask|run|quick)_(\d+)(?:_([a-zA-Z0-9.]+))?(?:_(\d+)_([a-z]+))?$")
+)
+async def custom_compress_callback_handler(client: Client, query: CallbackQuery):
+    action = query.matches[0].group(1)
+    msg_id = int(query.matches[0].group(2))
+    arg1 = query.matches[0].group(3)
+    arg2 = query.matches[0].group(4)
+    arg3 = query.matches[0].group(5)
+    user_id = query.from_user.id if query.from_user else query.message.chat.id
+
+    original_msg = await client.get_messages(query.message.chat.id, msg_id)
+    if not original_msg or not original_msg.media:
+        return await query.answer(to_smallcaps("original media not found!"), show_alert=True)
+
+    media = original_msg.video or original_msg.document or original_msg.audio
+    orig_size_bytes = int(getattr(media, "file_size", 0) or 0)
+    dur_val = int(getattr(media, "duration", 0) or 0)
+    cfg = await _get_or_init_custom_comp_cfg(user_id, msg_id, orig_size_bytes, dur_val)
+
+    if action == "open":
+        await query.answer("🎛️ ᴄᴜsᴛᴏᴍ ᴜʟᴛʀᴀ-ғᴀsᴛ ᴄᴏᴍᴘʀᴇssᴏʀ")
+        return await show_custom_compress_menu(original_msg, query.message, user_id, is_callback=True)
+
+    if action == "sz" and arg1:
+        cfg["target_mb"] = max(1.0, min(1900.0, float(arg1)))
+        await cache.set(f"custcomp_cfg_{user_id}_{msg_id}", cfg, ttl=1800)
+        await query.answer(f"🎯 ᴛᴀʀɢᴇᴛ sɪᴢᴇ: {int(cfg['target_mb'])} ᴍʙ")
+        return await show_custom_compress_menu(original_msg, query.message, user_id, is_callback=True)
+
+    if action == "pct" and arg1:
+        pct = max(10.0, min(90.0, float(arg1)))
+        orig_mb = (orig_size_bytes / (1024 * 1024)) if orig_size_bytes > 0 else 1000.0
+        cfg["target_mb"] = round(max(1.0, min(1900.0, orig_mb * (pct / 100.0))), 1)
+        await cache.set(f"custcomp_cfg_{user_id}_{msg_id}", cfg, ttl=1800)
+        await query.answer(f"📉 {int(pct)}% sɪᴢᴇ ➔ {int(cfg['target_mb'])} ᴍʙ")
+        return await show_custom_compress_menu(original_msg, query.message, user_id, is_callback=True)
+
+    if action == "res" and arg1 is not None:
+        res_v = int(arg1)
+        cfg["scale_h"] = res_v
+        cfg["has_custom_res"] = bool(res_v > 0)
+        await cache.set(f"custcomp_cfg_{user_id}_{msg_id}", cfg, ttl=1800)
+        await query.answer(f"🎚️ ǫᴜᴀʟɪᴛʏ: {res_v}p" if res_v > 0 else "🎚️ ǫᴜᴀʟɪᴛʏ: ᴀᴜᴛᴏ sᴍᴀʀᴛ")
+        return await show_custom_compress_menu(original_msg, query.message, user_id, is_callback=True)
+
+    if action == "spd" and arg1:
+        cfg["speed"] = str(arg1).lower()
+        await cache.set(f"custcomp_cfg_{user_id}_{msg_id}", cfg, ttl=1800)
+        await query.answer(f"🚀 sᴘᴇᴇᴅ ᴍᴏᴅᴇ: {arg1.upper()}")
+        return await show_custom_compress_menu(original_msg, query.message, user_id, is_callback=True)
+
+    if action == "aud" and arg1:
+        cfg["audio_br"] = str(arg1).lower()
+        await cache.set(f"custcomp_cfg_{user_id}_{msg_id}", cfg, ttl=1800)
+        await query.answer(f"🎵 ᴀᴜᴅɪᴏ: {arg1.upper()}")
+        return await show_custom_compress_menu(original_msg, query.message, user_id, is_callback=True)
+
+    if action == "ask":
+        await query.answer("✏️ ᴛʏᴘᴇ ᴄᴜsᴛᴏᴍ sɪᴢᴇ & ǫᴜᴀʟɪᴛʏ")
+        raw_file_name = getattr(media, "file_name", None) or "video.mp4"
+        await cache.set(
+            f"waiting_custom_comp_{user_id}",
+            {"msg_id": msg_id, "orig_size": orig_size_bytes, "menu_msg_id": query.message.id},
+            ttl=600,
+        )
+        await safe_send_message(
+            client,
+            chat_id=query.message.chat.id,
+            text=(
+                f"🎛️ **{to_smallcaps('enter custom size & quality')}** ✦ ⚡\n\n"
+                f"• 📁 **{to_smallcaps('file')}** : `{raw_file_name}` (`{humanbytes(orig_size_bytes)}`)\n\n"
+                f"💬 **{to_smallcaps('send your desired target size and quality/resolution:')}**\n"
+                f"• `{to_smallcaps('examples')}` :\n"
+                f"  • `450MB 480p` _(450 MB at 480p in 5–10 mins)_\n"
+                f"  • `700MB 720p` _(700 MB at 720p HD)_\n"
+                f"  • `300MB 360p` _(300 MB ultra-small fast)_\n"
+                f"  • `1.2GB` {to_smallcaps('or')} `500MB` {to_smallcaps('or')} `40%`\n\n"
+                f"💡 {to_smallcaps('send')} `/cancel` {to_smallcaps('to abort.')}"
+                f"{format_watermark()}"
+            ),
+            reply_markup=ForceReply(placeholder="e.g. 450MB 480p or 700MB 720p"),
+        )
+        return
+
+    if action == "quick" and arg1 and arg2 and arg3:
+        target_mb = max(1.0, min(1900.0, float(arg1)))
+        scale_h = int(arg2)
+        speed = str(arg3).lower()
+        audio_br = str(cfg.get("audio_br") or "auto")
+        respect_res = bool(scale_h > 0)
+    else:
+        # action == "run"
+        target_mb = max(1.0, min(1900.0, float(cfg.get("target_mb") or 500.0)))
+        scale_h = int(cfg.get("scale_h") or 0)
+        speed = str(cfg.get("speed") or "hyper")
+        audio_br = str(cfg.get("audio_br") or "auto")
+        respect_res = bool(cfg.get("has_custom_res") and scale_h > 0)
+
+    await query.answer(f"🚀 sᴛᴀʀᴛɪɴɢ {int(target_mb)}ᴍʙ ᴜʟᴛʀᴀ-ғᴀsᴛ ᴄᴏᴍᴘʀᴇssɪᴏɴ...")
+    cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"❌ {to_smallcaps('cancel compression')}", callback_data="cancel_op")]])
+    status = await safe_edit_text(
+        query.message,
+        f"⚡ **{to_smallcaps('initializing custom ultra-fast ffmpeg engine...')}**\n\n"
+        f"• 🎯 **{to_smallcaps('target size')}** : `{int(target_mb)} MB`\n"
+        f"• 🎚️ **{to_smallcaps('quality / res')}** : `{f'{scale_h}p' if scale_h > 0 else 'Auto Smart'}`\n"
+        f"• 🚀 **{to_smallcaps('speed mode')}** : `{speed.upper()}`",
+        reply_markup=cancel_kb,
+    )
+    await perform_compression_job(
+        client=client,
+        original_msg=original_msg,
+        status=status,
+        user_id=user_id,
+        scale_h=scale_h,
+        crf=int(cfg.get("crf") or 28),
+        preset=speed,
+        is_target_mode=True,
+        target_mb=target_mb,
+        audio_bitrate=audio_br,
+        respect_custom_height=respect_res,
+    )
+
+
+async def handle_custom_compress_text_input(client: Client, message: Message, wait_data: Any):
+    """Handle user text reply for Custom Compress Size & Quality and start ultra-fast compression."""
+    user_id = message.from_user.id if message.from_user else message.chat.id
+    msg_id = int(wait_data.get("msg_id", 0)) if isinstance(wait_data, dict) else int(wait_data or 0)
+    orig_size_bytes = int(wait_data.get("orig_size", 0)) if isinstance(wait_data, dict) else 0
+
+    original_msg = await client.get_messages(message.chat.id, msg_id)
+    if not original_msg or not original_msg.media:
+        return await safe_reply_text(message, f"❌ **{to_smallcaps('original media message no longer exists!')}**")
+
+    media = original_msg.video or original_msg.document or original_msg.audio
+    if orig_size_bytes <= 0:
+        orig_size_bytes = int(getattr(media, "file_size", 0) or 0)
+    dur_val = int(getattr(media, "duration", 0) or 0)
+
+    cfg = await _get_or_init_custom_comp_cfg(user_id, msg_id, orig_size_bytes, dur_val)
+    parsed = parse_custom_compress_input(message.text or "", orig_size_bytes)
+
+    if parsed.get("target_mb") is not None:
+        cfg["target_mb"] = parsed["target_mb"]
+    if parsed.get("scale_h") is not None:
+        cfg["scale_h"] = parsed["scale_h"]
+        cfg["has_custom_res"] = bool(parsed["scale_h"] > 0)
+    if parsed.get("speed"):
+        cfg["speed"] = parsed["speed"]
+    if parsed.get("audio_br"):
+        cfg["audio_br"] = parsed["audio_br"]
+    if parsed.get("crf"):
+        cfg["crf"] = parsed["crf"]
+
+    await cache.set(f"custcomp_cfg_{user_id}_{msg_id}", cfg, ttl=1800)
+
+    target_mb = max(1.0, min(1900.0, float(cfg.get("target_mb") or 500.0)))
+    scale_h = int(cfg.get("scale_h") or 0)
+    speed = str(cfg.get("speed") or "hyper")
+    audio_br = str(cfg.get("audio_br") or "auto")
+    respect_res = bool(cfg.get("has_custom_res") and scale_h > 0)
+    is_target_mode = True
+    if parsed.get("target_mb") is None and parsed.get("crf") is not None:
+        is_target_mode = False
+
+    cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton(f"❌ {to_smallcaps('cancel compression')}", callback_data="cancel_op")]])
+    status = await safe_reply_text(
+        message,
+        f"⚡ **{to_smallcaps('starting custom ultra-fast compression...')}**\n\n"
+        f"• 🎯 **{to_smallcaps('target size')}** : `{int(target_mb)} MB`\n"
+        f"• 🎚️ **{to_smallcaps('quality / res')}** : `{f'{scale_h}p' if scale_h > 0 else 'Auto Smart'}`\n"
+        f"• 🚀 **{to_smallcaps('speed engine')}** : `{speed.upper()}`",
+        reply_markup=cancel_kb,
+    )
+    return await perform_compression_job(
+        client=client,
+        original_msg=original_msg,
+        status=status,
+        user_id=user_id,
+        scale_h=scale_h,
+        crf=int(cfg.get("crf") or 28),
+        preset=speed,
+        is_target_mode=is_target_mode,
+        target_mb=target_mb if is_target_mode else None,
+        audio_bitrate=audio_br,
+        respect_custom_height=respect_res,
+    )
 
 
 @Client.on_callback_query(filters.regex(r"^do_comp(target)?_(\d+)_(\d+)(?:_(\d+)_([a-z]+))?"))
@@ -304,9 +766,9 @@ async def execute_compression(client: Client, query: CallbackQuery):
 
     if is_target_mode:
         target_mb = min(1900.0, float(query.matches[0].group(3)))
-        scale_h = 720
+        scale_h = 0
         crf = 28
-        preset = "veryfast"
+        preset = "hyper"
     else:
         scale_h = int(query.matches[0].group(3))
         crf = int(query.matches[0].group(4))
@@ -329,7 +791,8 @@ async def execute_compression(client: Client, query: CallbackQuery):
         crf=crf,
         preset=preset,
         is_target_mode=is_target_mode,
-        target_mb=target_mb
+        target_mb=target_mb,
+        respect_custom_height=bool(scale_h > 0),
     )
 
 
@@ -346,6 +809,8 @@ async def perform_compression_job(
     target_mb: Optional[float] = None,
     task_id: Optional[str] = None,
     is_recovery: bool = False,
+    audio_bitrate: str = "auto",
+    respect_custom_height: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """
     Fault-tolerant, stage-resumable FFmpeg compression job.
@@ -421,15 +886,15 @@ async def perform_compression_job(
     is_hevc = (preset == "hevc")
     eff_preset = "ultrafast" if is_hevc else preset
     vcodec = "libx265" if is_hevc else "libx264"
-    res_tag = f"{scale_h}p_" if scale_h > 0 else "CRF_"
+    res_tag = f"{scale_h}p_" if scale_h > 0 else ""
     codec_tag = "HEVC_" if is_hevc else ""
     if is_target_mode and target_mb:
         safe_target_mb = min(1900.0, float(target_mb))
-        default_out_name = sanitize_filename(f"compressed_{int(safe_target_mb)}MB_{base_n}.mp4")
+        default_out_name = sanitize_filename(f"compressed_{int(safe_target_mb)}MB_{res_tag}{base_n}.mp4")
     elif preset == "remux":
         default_out_name = sanitize_filename(f"remuxed_{base_n}.mp4")
     else:
-        default_out_name = sanitize_filename(f"compressed_{codec_tag}{res_tag}{base_n}.mp4")
+        default_out_name = sanitize_filename(f"compressed_{codec_tag}{res_tag or 'CRF_'}{base_n}.mp4")
 
     output_path = (
         existing_task_doc.get("output_path")
@@ -446,6 +911,8 @@ async def perform_compression_job(
         "preset": preset,
         "is_target_mode": is_target_mode,
         "target_mb": target_mb,
+        "audio_bitrate": audio_bitrate,
+        "respect_custom_height": respect_custom_height,
         "clean_name": clean_name,
         "expected_input_size": expected_input_size,
     }
@@ -580,7 +1047,7 @@ async def perform_compression_job(
             streams = await check_media_streams(output_path)
             in_attrs = await get_media_attributes(output_path)
 
-        tg_dur = int(in_attrs.get("duration") or getattr(media, "duration", 0) or 0)
+        tg_dur = int(streams.get("duration") or in_attrs.get("duration") or getattr(media, "duration", 0) or 0)
         is_audio_only = (not streams["has_video"]) and streams["has_audio"]
 
         if is_audio_only and not already_encoded:
@@ -602,14 +1069,16 @@ async def perform_compression_job(
                         clean_temp_files(output_path)
 
                     if is_audio_only:
-                        await safe_edit_text(status, f"🎵 **{to_smallcaps('compressing audio stream with ffmpeg (aac 96k)...')}**")
-                        encode_success = await compress_audio(input_path, output_path, bitrate="96k")
+                        abr_val = str(audio_bitrate if audio_bitrate not in ("auto", "copy") else "96k")
+                        await safe_edit_text(status, f"🎵 **{to_smallcaps(f'compressing audio stream with ffmpeg (aac {abr_val})...')}**")
+                        encode_success = await compress_audio(input_path, output_path, bitrate=abr_val)
                     elif is_target_mode and target_mb:
                         safe_target_mb = min(1900.0, float(target_mb))
+                        res_disp = f"{scale_h}p" if scale_h > 0 else "Auto Smart"
                         await safe_edit_text(
                             status,
-                            f"🎯 **{to_smallcaps('encoding video to target size')}** (`{int(safe_target_mb)} MB`)...\n\n"
-                            f"• ⚡ **{to_smallcaps('engine')}** : `FFmpeg H.264 Bitrate Target`"
+                            f"🎯 **{to_smallcaps('encoding video to target size')}** (`{int(safe_target_mb)} MB • {res_disp}`)...\n\n"
+                            f"• ⚡ **{to_smallcaps('engine')}** : `FFmpeg Ultra-Fast ({eff_preset.upper()})`"
                         )
                         encode_success = await compress_to_target_size(
                             input_path=input_path,
@@ -619,17 +1088,19 @@ async def perform_compression_job(
                             scale_height=scale_h,
                             progress_message=status,
                             task_id=task_id,
+                            preset=eff_preset if enc_attempt == 0 else "hyper",
+                            audio_bitrate=audio_bitrate,
+                            respect_custom_height=respect_custom_height,
                         )
                     elif preset == "remux" and enc_attempt == 0:
                         await safe_edit_text(status, f"🔄 **{to_smallcaps('fast remuxing container to mp4 (stream copy)...')}**")
                         encode_success = await remux_container(input_path, output_path)
                         if not encode_success:
-                            # If stream-copy remux fails due to incompatible codec, automatically fallback to fast transcode!
                             encode_success = await compress_media(
                                 input_path=input_path,
                                 output_path=output_path,
                                 crf=26,
-                                preset="ultrafast",
+                                preset="hyper",
                                 scale_height=scale_h,
                                 progress_message=status,
                                 total_duration=tg_dur,
@@ -637,13 +1108,12 @@ async def perform_compression_job(
                             )
                     else:
                         max_out_mb = 1880.0 if orig_size > MAX_BOT_FILE_SIZE else None
-                        # On retry attempts, fall back from HEVC/custom to ultra-reliable H.264 ultrafast
                         attempt_vcodec = vcodec if enc_attempt == 0 else "libx264"
-                        attempt_preset = eff_preset if enc_attempt == 0 else "ultrafast"
+                        attempt_preset = eff_preset if enc_attempt == 0 else "hyper"
                         await safe_edit_text(
                             status,
                             f"🗜️ **{to_smallcaps('encoding video with ffmpeg')} ({'H.265/HEVC' if attempt_vcodec == 'libx265' else 'H.264'})...**\n\n"
-                            f"• 🎚️ **{to_smallcaps('resolution')}** : `{scale_h if scale_h > 0 else 'Original'}p`\n"
+                            f"• 🎚️ **{to_smallcaps('resolution')}** : `{scale_h if scale_h > 0 else 'Auto/Original'}p`\n"
                             f"• ⚙️ **{to_smallcaps('preset')}** : `{attempt_preset}` (CRF `{crf}`)\n"
                             f"• 📦 **{to_smallcaps('original size')}** : `{humanbytes(orig_size)}`\n\n"
                             f"⏳ _{to_smallcaps('live ffmpeg progress will update automatically...')}_"
@@ -658,7 +1128,9 @@ async def perform_compression_job(
                             total_duration=tg_dur,
                             max_output_mb=max_out_mb,
                             vcodec=attempt_vcodec,
+                            audio_bitrate=audio_bitrate,
                             task_id=task_id,
+                            respect_custom_height=respect_custom_height,
                         )
 
                     if encode_success and await validate_media_output(output_path):
@@ -712,9 +1184,10 @@ async def perform_compression_job(
                     output_path=refit_path,
                     target_size_mb=1850.0,
                     duration_sec=tg_dur,
-                    scale_height=min(scale_h if scale_h > 0 else 720, 720),
+                    scale_height=min(scale_h if scale_h > 0 else 480, 720),
                     progress_message=status,
                     task_id=task_id,
+                    preset="hyper",
                 )
                 if fit_ok and os.path.exists(refit_path):
                     os.replace(refit_path, output_path)
@@ -1081,6 +1554,8 @@ async def _recover_single_task(bot: Any, task_doc: Dict[str, Any]) -> str:
             target_mb=params.get("target_mb"),
             task_id=task_id,
             is_recovery=True,
+            audio_bitrate=str(params.get("audio_bitrate", "auto")),
+            respect_custom_height=bool(params.get("respect_custom_height", False)),
         )
 
     final_doc = res_doc or await task_repo.get_task(task_id) or {}

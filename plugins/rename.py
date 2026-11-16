@@ -119,8 +119,11 @@ async def render_media_studio_card(
         )
         buttons = [
             [
+                InlineKeyboardButton(f"🎛️ {to_smallcaps('custom compress (5-10m)')}", callback_data=f"custcomp_open_{media_msg.id}"),
+            ],
+            [
                 InlineKeyboardButton(f"🗜️ {to_smallcaps('compress < 2gb (ffmpeg)')}", callback_data=f"do_comptarget_{media_msg.id}_1850"),
-                InlineKeyboardButton(f"🎛️ {to_smallcaps('ffmpeg presets')}", callback_data=f"compress_menu_{media_msg.id}")
+                InlineKeyboardButton(f"🎚️ {to_smallcaps('ffmpeg presets')}", callback_data=f"compress_menu_{media_msg.id}")
             ],
             [
                 InlineKeyboardButton(f"⚡ {to_smallcaps('file stream card')}", callback_data=f"stream_{media_msg.id}"),
@@ -457,6 +460,12 @@ async def rename_callback_ask(client: Client, query: CallbackQuery):
 @Client.on_message(filters.private & filters.text & ~filters.regex(r"^[/!.]"), group=2)
 async def reply_force_rename_collector(client: Client, message: Message):
     user_id = message.from_user.id
+
+    if await cache.get(f"waiting_custom_comp_{user_id}"):
+        from plugins.compressor import handle_custom_compress_text_input
+        wait_data = await cache.get(f"waiting_custom_comp_{user_id}")
+        await cache.delete(f"waiting_custom_comp_{user_id}")
+        return await handle_custom_compress_text_input(client, message, wait_data)
 
     if await cache.get(f"waiting_trim_{user_id}"):
         from plugins.file_pro import execute_trim_video

@@ -444,9 +444,9 @@ async def render_user_dashboard_view(target_msg: Message, user_id: int, first_na
 
     buttons = [
         [
-            InlineKeyboardButton(f"{'🟢 ' if preset == 'turbo' else ''}⚡ ᴛᴜʀʙᴏ", callback_data="pvt_preset#turbo"),
-            InlineKeyboardButton(f"{'🟢 ' if preset == 'superfast' else ''}🚀 sᴜᴘᴇʀғᴀsᴛ", callback_data="pvt_preset#superfast"),
-            InlineKeyboardButton(f"{'🟢 ' if preset == 'veryfast' else ''}⚖️ ᴠᴇʀʏғᴀsᴛ", callback_data="pvt_preset#veryfast"),
+            InlineKeyboardButton(f"{'🟢 ' if preset == 'hyper' else ''}⚡ ʜʏᴘᴇʀ", callback_data="pvt_preset#hyper"),
+            InlineKeyboardButton(f"{'🟢 ' if preset == 'turbo' else ''}🚀 ᴛᴜʀʙᴏ", callback_data="pvt_preset#turbo"),
+            InlineKeyboardButton(f"{'🟢 ' if preset == 'superfast' else ''}💨 sᴜᴘᴇʀғᴀsᴛ", callback_data="pvt_preset#superfast"),
             InlineKeyboardButton(f"{'🟢 ' if preset == 'hevc' else ''}🧬 ʜ.265", callback_data="pvt_preset#hevc"),
         ],
         [
@@ -479,7 +479,7 @@ async def user_dashboard_cmd_handler(client: Client, message: Message):
     cmd = message.command[0].lower()
     if cmd in ("preset", "setpreset") and len(message.command) > 1:
         arg = message.command[1].strip().lower()
-        if arg in ("turbo", "ultrafast", "superfast", "veryfast", "fast", "hevc"):
+        if arg in ("hyper", "turbo", "ultrafast", "superfast", "veryfast", "fast", "hevc"):
             await user_repo.update_user(uid, {"compression_preset": arg})
         elif arg in ("360p", "480p", "720p", "1080p"):
             await user_repo.update_user(uid, {"resolution": arg})
