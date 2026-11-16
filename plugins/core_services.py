@@ -1105,11 +1105,17 @@ async def compress_to_target_size(
     target_mb: Optional[float] = None,
     task_id: Optional[str] = None
 ) -> bool:
+    """Compress to a target size. Duration controls bitrate/FPS decisions, not encode speed."""
     effective_mb = float(target_mb if target_mb is not None else target_size_mb)
+    try:
+        duration_sec = int(duration_sec or 0)
+    except (TypeError, ValueError):
+        duration_sec = 0
     if duration_sec <= 0:
         attrs = await get_media_attributes(input_path)
-        duration_sec = int(attrs.get("duration", 0) or 1)
-    dur = max(1, int(duration_sec))
+        duration_sec = int(attrs.get("duration", 0) or 0)
+    # Keep a safe denominator if the media probe cannot determine duration.
+    dur = max(1, duration_sec)
     total_kbits = effective_mb * 8192.0 * 0.95  # 5% container overhead safety margin
     audio_bitrate_kb = 96
     video_bitrate_kb = max(80, int((total_kbits / dur) - audio_bitrate_kb))
