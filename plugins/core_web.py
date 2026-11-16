@@ -593,7 +593,7 @@ async def api_status(request: Request):
     return {
         "status": "operational",
         "service": "MMW All-In-One Pro Engine",
-        "version": "7.0.0-pro-turbo",
+        "version": "8.0.0-ultra-max",
         "stream_speed": "turbo HTTP 206 byte-range streaming",
         "external_players": ["PLAYit", "MX Player", "VLC", "S Player"],
         "uptime_seconds": uptime_sec,
@@ -704,6 +704,8 @@ async def api_tasks_report():
     """Return persistent task recovery and completion execution report."""
     from plugins.compressor import generate_task_execution_report
     return await generate_task_execution_report()
+
+
 
 
 @api_router.get("/ratelimit")

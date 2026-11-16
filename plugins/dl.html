@@ -4,31 +4,30 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
-    <title>Download {{ file_name }} — adaptive range stream</title>
+    <title>Download {{ file_name }} — MMW Ultra Max Stream</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="dns-prefetch" href="//fonts.googleapis.com">
-    <link rel="dns-prefetch" href="//fonts.gstatic.com">
-    <link rel="preload" as="style" fetchpriority="high" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'"><noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
+    <link rel="preload" as="style" fetchpriority="high" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
     <style>
         .smallcap-ui { font-variant: small-caps; letter-spacing: 0.015em; }
         .smallcap-ui code, .smallcap-ui input, .smallcap-ui button { font-variant: normal; }
         :root {
-            --bg: #070a12;
-            --card-bg: rgba(15, 23, 42, 0.85);
-            --card-border: rgba(56, 189, 248, 0.2);
+            --bg: #040711;
+            --card-bg: rgba(11, 18, 36, 0.86);
+            --card-border: rgba(56, 189, 248, 0.24);
             --accent: #38bdf8;
-            --accent-glow: rgba(56, 189, 248, 0.35);
-            --accent-gradient: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+            --accent-glow: rgba(56, 189, 248, 0.38);
+            --accent-gradient: linear-gradient(135deg, #38bdf8 0%, #818cf8 55%, #c084fc 100%);
             --text-main: #f8fafc;
             --text-muted: #94a3b8;
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
         body {
             background-color: var(--bg);
-            background-image: 
-                radial-gradient(at 15% 15%, rgba(56, 189, 248, 0.15) 0px, transparent 50%),
-                radial-gradient(at 85% 85%, rgba(129, 140, 248, 0.15) 0px, transparent 50%);
+            background-image:
+                radial-gradient(at 15% 15%, rgba(56, 189, 248, 0.16) 0px, transparent 50%),
+                radial-gradient(at 85% 85%, rgba(168, 85, 247, 0.15) 0px, transparent 50%);
             color: var(--text-main);
             min-height: 100vh;
             display: flex;
@@ -38,37 +37,51 @@
         }
         .card {
             background: var(--card-bg);
-            backdrop-filter: blur(20px);
+            backdrop-filter: blur(22px);
+            -webkit-backdrop-filter: blur(22px);
             border: 1px solid var(--card-border);
             border-radius: 28px;
-            padding: 40px 32px;
-            max-width: 600px;
+            padding: 38px 30px;
+            max-width: 620px;
             width: 100%;
             text-align: center;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+            box-shadow: 0 28px 55px -12px rgba(0, 0, 0, 0.78);
         }
-        .icon { font-size: 3.4rem; margin-bottom: 14px; display: inline-block; }
-        h1 { font-size: 1.35rem; font-weight: 700; margin-bottom: 18px; word-break: break-all; line-height: 1.4; }
+        .badge-top {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 16px;
+            border-radius: 999px;
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            font-size: 0.78rem;
+            font-weight: 800;
+            margin-bottom: 14px;
+        }
+        .icon { font-size: 3.2rem; margin-bottom: 10px; display: inline-block; }
+        h1 { font-size: 1.35rem; font-weight: 800; margin-bottom: 18px; word-break: break-all; line-height: 1.4; }
         .file-meta-box {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 18px;
             padding: 16px 20px;
-            margin-bottom: 22px;
+            margin-bottom: 20px;
             display: flex;
             flex-direction: column;
             gap: 10px;
             text-align: left;
             font-size: 0.92rem;
         }
-        .meta-row { display: flex; justify-content: space-between; align-items: center; }
-        .meta-row .label { color: var(--text-muted); font-weight: 500; }
-        .meta-row .val { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--accent); }
+        .meta-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+        .meta-row .label { color: var(--text-muted); font-weight: 600; }
+        .meta-row .val { font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--accent); }
         .players-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 10px;
-            margin-bottom: 18px;
+            margin-bottom: 16px;
         }
         .btn {
             display: flex;
@@ -78,7 +91,7 @@
             width: 100%;
             padding: 14px;
             border-radius: 14px;
-            font-weight: 700;
+            font-weight: 800;
             font-size: 0.9rem;
             text-decoration: none;
             transition: all 0.2s ease;
@@ -87,35 +100,58 @@
         }
         .btn-primary {
             background: var(--accent-gradient);
-            color: #070a12;
+            color: #040711;
             box-shadow: 0 10px 25px -5px var(--accent-glow);
-            margin-bottom: 12px;
+            margin-bottom: 10px;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 14px 30px -5px var(--accent-glow);
         }
         .btn-secondary {
-            background: rgba(255, 255, 255, 0.04);
+            background: rgba(255, 255, 255, 0.045);
             color: var(--text-main);
             border: 1px solid var(--card-border);
         }
         .btn-secondary:hover {
-            background: rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.09);
             border-color: var(--accent);
             transform: translateY(-2px);
         }
         .section-label {
-            font-size: 0.8rem;
+            font-size: 0.78rem;
             text-transform: uppercase;
             letter-spacing: 0.8px;
             color: var(--text-muted);
-            margin-bottom: 10px;
-            font-weight: 700;
+            margin: 14px 0 10px;
+            font-weight: 800;
         }
         .footer { font-size: 0.85rem; color: var(--text-muted); margin-top: 16px; }
-        .footer a { color: var(--accent); text-decoration: none; font-weight: 600; }
+        .footer a { color: var(--accent); text-decoration: none; font-weight: 700; }
+        #toast {
+            visibility: hidden;
+            min-width: 240px;
+            background: rgba(16, 185, 129, 0.95);
+            color: #fff;
+            text-align: center;
+            border-radius: 12px;
+            padding: 12px 18px;
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-weight: 700;
+            font-size: 0.9rem;
+            opacity: 0;
+            transition: 0.25s;
+        }
+        #toast.show { visibility: visible; opacity: 1; }
     </style>
 </head>
 <body class="smallcap-ui">
     <div class="card">
-        <div class="icon">📦</div>
+        <div class="badge-top">⚡ MMW ULTRA MAX HTTP 206 RANGE DELIVERY</div>
+        <div><span class="icon">📦</span></div>
         <h1>{{ file_name }}</h1>
 
         <div class="file-meta-box">
@@ -129,7 +165,7 @@
             </div>
             <div class="meta-row">
                 <span class="label">⚡ sᴛʀᴇᴀᴍ sᴘᴇᴇᴅ:</span>
-                <span class="val">HTTP 206 byte-range delivery</span>
+                <span class="val">HTTP 206 Multi-Connection Range</span>
             </div>
             <div class="meta-row">
                 <span class="label">🌐 ʟᴀɴɢᴜᴀɢᴇ:</span>
@@ -141,7 +177,7 @@
             </div>
         </div>
 
-        <div class="players-grid" style="margin-bottom: 18px;">
+        <div class="players-grid">
             {% if metadata.caption %}<a href="{{ watch_url }}#captionPanel" class="btn btn-secondary">📝 sᴇᴇ ᴄᴀᴘᴛɪᴏɴ</a>{% endif %}
             {% if metadata.audio_track != 'Default Audio' or metadata.audio_tracks %}<a href="{{ watch_url }}#audioPanel" class="btn btn-secondary">🎧 sᴇᴇ ᴀᴜᴅɪᴏ</a>{% endif %}
             {% if metadata.language != 'Undetermined' or metadata.audio_tracks or metadata.subtitle_tracks %}<a href="{{ watch_url }}#languagePanel" class="btn btn-secondary">🌐 sᴇᴇ ʟᴀɴɢᴜᴀɢᴇ</a>{% endif %}
@@ -150,6 +186,10 @@
         <a href="{{ download_url }}" class="btn btn-primary" download="{{ file_name }}">
             ⚡ ɪɴsᴛᴀɴᴛ ᴅɪʀᴇᴄᴛ ʙʏᴛᴇ-ʀᴀɴɢᴇ ᴅᴏᴡɴʟᴏᴀᴅ
         </a>
+
+        <button type="button" class="btn btn-secondary" style="margin-bottom: 10px;" onclick="copyDirectUrl('{{ download_url }}')">
+            📋 ᴄᴏᴘʏ ᴅɪʀᴇᴄᴛ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋ
+        </button>
 
         <div class="section-label">📱 ᴘʟᴀʏ ɪɴ 4 ᴇxᴛᴇʀɴᴀʟ ᴘʟᴀʏᴇʀs ᴏɴʟʏ</div>
         <div class="players-grid">
@@ -164,11 +204,30 @@
         </a>
 
         <div class="footer">
-            ⚡ ᴘᴏᴡᴇʀᴇᴅ ʙʏ <a href="{{ watermark_url }}" target="_blank" rel="noopener">{{ watermark }}</a>
+            ⚡ ᴘᴏᴡᴇʀᴇᴅ ʙʏ <a href="{{ watermark_url }}" target="_blank" rel="noopener">{{ watermark }}</a> • <a href="/">🏠 ᴅᴀsʜʙᴏᴀʀᴅ</a>
         </div>
     </div>
 
+    <div id="toast">Direct Download Link Copied!</div>
+
     <script>
+        function copyDirectUrl(url) {
+            const fullUrl = new URL(url, window.location.origin).href;
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(fullUrl);
+            } else {
+                const ta = document.createElement('textarea');
+                ta.value = fullUrl;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                ta.remove();
+            }
+            const t = document.getElementById('toast');
+            t.className = 'show';
+            setTimeout(() => { t.className = ''; }, 2500);
+        }
+
         const PLAYER_LINKS = {
             playit: {
                 intent: "{{ player_links.playit_intent if player_links else '' }}",
@@ -208,5 +267,4 @@
         }
     </script>
 </body>
-
 </html>

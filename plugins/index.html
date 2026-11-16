@@ -4,51 +4,53 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
-    <title>⚡ MMW All-In-One Pro Engine — {{ watermark }}</title>
+    <title>⚡ MMW Ultra Max v8.0 — {{ watermark }}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="dns-prefetch" href="//fonts.googleapis.com">
-    <link rel="dns-prefetch" href="//fonts.gstatic.com">
-    <link rel="preload" as="style" fetchpriority="high" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'"><noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap"></noscript>
+    <link rel="preload" as="style" fetchpriority="high" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap"></noscript>
     <style>
         .smallcap-ui { font-variant: small-caps; letter-spacing: 0.015em; }
         .smallcap-ui code, .smallcap-ui input, .smallcap-ui button { font-variant: normal; }
         :root {
-            --bg: #070a12;
-            --card-bg: rgba(15, 23, 42, 0.75);
-            --card-border: rgba(56, 189, 248, 0.2);
+            --bg: #040711;
+            --card-bg: rgba(11, 18, 36, 0.82);
+            --card-border: rgba(56, 189, 248, 0.24);
             --accent: #38bdf8;
-            --accent-glow: rgba(56, 189, 248, 0.35);
-            --accent-gradient: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+            --accent-2: #a855f7;
+            --accent-3: #10b981;
+            --accent-glow: rgba(56, 189, 248, 0.38);
+            --accent-gradient: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
             --text-main: #f8fafc;
             --text-muted: #94a3b8;
-            --badge-bg: rgba(56, 189, 248, 0.12);
+            --badge-bg: rgba(56, 189, 248, 0.14);
             --success: #10b981;
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif; }
         body {
             background-color: var(--bg);
-            background-image: 
-                radial-gradient(at 10% 15%, rgba(56, 189, 248, 0.15) 0px, transparent 50%),
-                radial-gradient(at 90% 85%, rgba(129, 140, 248, 0.15) 0px, transparent 50%);
+            background-image:
+                radial-gradient(at 8% 12%, rgba(56, 189, 248, 0.18) 0px, transparent 48%),
+                radial-gradient(at 92% 18%, rgba(168, 85, 247, 0.16) 0px, transparent 48%),
+                radial-gradient(at 50% 90%, rgba(16, 185, 129, 0.12) 0px, transparent 50%);
             color: var(--text-main);
             min-height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 32px 16px;
+            padding: 28px 16px;
         }
         .container {
-            max-width: 920px;
+            max-width: 1020px;
             width: 100%;
             background: var(--card-bg);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
             border: 1px solid var(--card-border);
             border-radius: 28px;
-            padding: 44px 32px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+            padding: 40px 32px;
+            box-shadow: 0 28px 60px -12px rgba(0, 0, 0, 0.8), 0 0 40px rgba(56, 189, 248, 0.08);
             text-align: center;
         }
         .header-badge {
@@ -57,13 +59,13 @@
             gap: 10px;
             background: var(--badge-bg);
             color: var(--accent);
-            border: 1px solid rgba(56, 189, 248, 0.3);
+            border: 1px solid rgba(56, 189, 248, 0.35);
             padding: 8px 20px;
             border-radius: 9999px;
-            font-size: 0.85rem;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            margin-bottom: 24px;
+            font-size: 0.82rem;
+            font-weight: 800;
+            letter-spacing: 0.6px;
+            margin-bottom: 20px;
         }
         .pulse-dot {
             width: 9px;
@@ -75,72 +77,71 @@
         }
         @keyframes pulse {
             0% { transform: scale(0.95); opacity: 0.8; }
-            50% { transform: scale(1.25); opacity: 1; }
+            50% { transform: scale(1.3); opacity: 1; }
             100% { transform: scale(0.95); opacity: 0.8; }
         }
         h1 {
-            font-size: 2.8rem;
+            font-size: 2.85rem;
             font-weight: 800;
-            line-height: 1.2;
-            margin-bottom: 14px;
+            line-height: 1.18;
+            margin-bottom: 12px;
             background: var(--accent-gradient);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
         p.subtitle {
             color: var(--text-muted);
-            font-size: 1.05rem;
+            font-size: 1.02rem;
             line-height: 1.6;
-            margin-bottom: 32px;
-            max-width: 660px;
+            margin-bottom: 28px;
+            max-width: 740px;
             margin-left: auto;
             margin-right: auto;
         }
-        /* Metrics Grid */
         .metrics-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            gap: 16px;
-            margin-bottom: 32px;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 14px;
+            margin-bottom: 28px;
         }
         .metric-card {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid var(--card-border);
             border-radius: 18px;
-            padding: 20px 16px;
+            padding: 18px 14px;
             display: flex;
             flex-direction: column;
             gap: 6px;
-            transition: transform 0.2s, border-color 0.2s;
+            transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
         }
         .metric-card:hover {
-            transform: translateY(-2px);
+            transform: translateY(-3px);
             border-color: var(--accent);
+            box-shadow: 0 10px 24px -8px var(--accent-glow);
         }
         .metric-value {
-            font-size: 1.7rem;
+            font-size: 1.65rem;
             font-weight: 800;
             font-family: 'JetBrains Mono', monospace;
             color: var(--accent);
         }
         .metric-label {
-            font-size: 0.82rem;
+            font-size: 0.78rem;
             color: var(--text-muted);
-            font-weight: 600;
+            font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        /* Search & Lookup Card */
         .lookup-box {
-            background: rgba(255, 255, 255, 0.02);
+            background: rgba(255, 255, 255, 0.025);
             border: 1px solid var(--card-border);
             border-radius: 20px;
-            padding: 24px;
-            margin-bottom: 32px;
+            padding: 22px;
+            margin-bottom: 28px;
             text-align: left;
         }
         .lookup-title {
-            font-size: 1.1rem;
+            font-size: 1.05rem;
             font-weight: 700;
             margin-bottom: 12px;
             color: var(--text-main);
@@ -157,8 +158,8 @@
         .lookup-input {
             flex: 1;
             min-width: 240px;
-            background: rgba(0, 0, 0, 0.4);
-            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(0, 0, 0, 0.45);
+            border: 1px solid rgba(255, 255, 255, 0.14);
             border-radius: 14px;
             padding: 14px 18px;
             color: #fff;
@@ -171,8 +172,8 @@
         }
         .lookup-btn {
             background: var(--accent-gradient);
-            color: #070a12;
-            font-weight: 700;
+            color: #040711;
+            font-weight: 800;
             border: none;
             border-radius: 14px;
             padding: 14px 22px;
@@ -183,7 +184,7 @@
             background: rgba(255, 255, 255, 0.06);
             color: var(--text-main);
             border: 1px solid var(--card-border);
-            font-weight: 600;
+            font-weight: 700;
             border-radius: 14px;
             padding: 14px 18px;
             cursor: pointer;
@@ -201,10 +202,10 @@
             margin-top: 16px;
             padding: 16px 20px;
             border-radius: 16px;
-            background: rgba(0, 0, 0, 0.35);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.09);
             display: none;
-            font-size: 0.95rem;
+            font-size: 0.94rem;
         }
         .result-item {
             padding: 12px 0;
@@ -218,50 +219,47 @@
         .result-item:last-child {
             border-bottom: none;
         }
-        /* Features */
         .features-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
             gap: 12px;
-            margin-bottom: 32px;
+            margin-bottom: 28px;
             text-align: left;
         }
         .feature-box {
-            background: rgba(255, 255, 255, 0.02);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            padding: 14px 18px;
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            padding: 14px 16px;
             border-radius: 14px;
             display: flex;
             align-items: center;
             gap: 10px;
-            font-weight: 600;
-            font-size: 0.92rem;
+            font-weight: 700;
+            font-size: 0.9rem;
             transition: 0.2s;
         }
         .feature-box:hover {
-            background: rgba(255, 255, 255, 0.05);
-            border-color: rgba(56, 189, 248, 0.3);
+            background: rgba(56, 189, 248, 0.08);
+            border-color: rgba(56, 189, 248, 0.35);
+            transform: translateY(-2px);
         }
-        .feature-icon {
-            font-size: 1.3rem;
-        }
-        /* Buttons */
+        .feature-icon { font-size: 1.3rem; }
         .action-row {
             display: flex;
             flex-wrap: wrap;
-            gap: 12px;
+            gap: 10px;
             justify-content: center;
-            margin-bottom: 24px;
+            margin-bottom: 22px;
         }
         .btn {
             display: inline-flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
-            padding: 14px 24px;
+            padding: 13px 20px;
             border-radius: 14px;
             font-weight: 700;
-            font-size: 0.92rem;
+            font-size: 0.9rem;
             text-decoration: none;
             cursor: pointer;
             transition: all 0.2s ease;
@@ -269,7 +267,7 @@
         }
         .btn-primary {
             background: var(--accent-gradient);
-            color: #070a12;
+            color: #040711;
             box-shadow: 0 10px 25px -5px var(--accent-glow);
         }
         .btn-primary:hover {
@@ -282,28 +280,25 @@
             border: 1px solid var(--card-border);
         }
         .btn-outline:hover {
-            background: rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.09);
             border-color: var(--accent);
             transform: translateY(-2px);
         }
         footer {
-            font-size: 0.88rem;
+            font-size: 0.86rem;
             color: var(--text-muted);
-            margin-top: 10px;
+            margin-top: 8px;
         }
         footer a {
             color: var(--accent);
             text-decoration: none;
-            font-weight: 600;
+            font-weight: 700;
         }
-        footer a:hover {
-            text-decoration: underline;
-        }
-        /* Toast Alert */
+        footer a:hover { text-decoration: underline; }
         #toast {
             visibility: hidden;
             min-width: 260px;
-            background: rgba(16, 185, 129, 0.95);
+            background: rgba(16, 185, 129, 0.96);
             color: #fff;
             text-align: center;
             border-radius: 14px;
@@ -314,18 +309,18 @@
             left: 50%;
             transform: translateX(-50%);
             font-weight: 700;
-            font-size: 0.95rem;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            font-size: 0.94rem;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
             opacity: 0;
-            transition: opacity 0.3s, visibility 0.3s;
+            transition: opacity 0.25s, visibility 0.25s;
         }
         #toast.show {
             visibility: visible;
             opacity: 1;
         }
         @media (max-width: 640px) {
-            h1 { font-size: 2.1rem; }
-            .container { padding: 28px 18px; }
+            h1 { font-size: 2.05rem; }
+            .container { padding: 26px 16px; }
             .btn { width: 100%; }
         }
     </style>
@@ -334,15 +329,15 @@
     <div class="container">
         <div class="header-badge">
             <span class="pulse-dot"></span>
-            <span>PRO ENGINE ONLINE & OPERATIONAL</span>
+            <span>MMW ULTRA MAX v8.0 • PERSISTENT TASK RECOVERY & STREAM ENGINE</span>
         </div>
 
-        <h1>MMW All-In-One Pro</h1>
+        <h1>MMW Ultra Max Pro</h1>
         <p class="subtitle">
-            Enterprise high-performance Telegram Bot & Web Platform powered by Python 3.10, Pyrofork, MongoDB Motor, and HTTP 206 Fast Streaming Engine.
+            Ultra-Fast Asynchronous Telegram Media, Fault-Tolerant FFmpeg Compressor, Persistent Task Recovery, Auto-Renamer & HTTP 206 4-Player Stream Engine.
         </p>
 
-        <!-- Live Metrics Section -->
+        <!-- Live Telemetry Grid -->
         <div class="metrics-grid">
             <div class="metric-card">
                 <span class="metric-value" id="val-users">{{ users_count }}</span>
@@ -357,6 +352,14 @@
                 <span class="metric-label">Indexed Files</span>
             </div>
             <div class="metric-card">
+                <span class="metric-value" id="val-tasks">0</span>
+                <span class="metric-label">Completed Tasks</span>
+            </div>
+            <div class="metric-card">
+                <span class="metric-value" id="val-recovered">0</span>
+                <span class="metric-label">Recovered Tasks</span>
+            </div>
+            <div class="metric-card">
                 <span class="metric-value" id="val-ping">-- ms</span>
                 <span class="metric-label">Server Latency</span>
             </div>
@@ -365,27 +368,27 @@
         <!-- Interactive File / Stream Inspector & Search -->
         <div class="lookup-box">
             <div class="lookup-title">
-                <div><span>🔍</span> <span>Fast Stream & File Search Inspector</span></div>
+                <div><span>🔍</span> <span>Ultra Stream & File Search Inspector (Press / to focus)</span></div>
                 <button onclick="clearInspector()" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.85rem;">Clear ✕</button>
             </div>
             <div class="lookup-form">
-                <input type="text" id="lookup-input" class="lookup-input" placeholder="Enter File ID or Search Keyword (e.g. video.mp4)..." onkeydown="if(event.key==='Enter') smartInspect()" />
-                <button class="lookup-btn" onclick="smartInspect()">Inspect / Search</button>
-                <button class="lookup-btn-sec" onclick="searchFiles()">Search Files</button>
+                <input type="text" id="lookup-input" class="lookup-input" placeholder="Enter File ID or Search Keyword (e.g. movie.mp4)..." onkeydown="if(event.key==='Enter') smartInspect()" />
+                <button class="lookup-btn" onclick="smartInspect()">⚡ Inspect / Search</button>
+                <button class="lookup-btn-sec" onclick="searchFiles()">📂 Search Vault</button>
             </div>
             <div id="lookup-result"></div>
         </div>
 
         <!-- Features Showcase -->
         <div class="features-grid">
-            <div class="feature-box"><span class="feature-icon">✏️</span><span>Pro Renamer Engine</span></div>
-            <div class="feature-box"><span class="feature-icon">🛠️</span><span>File Pro Media Studio</span></div>
-            <div class="feature-box"><span class="feature-icon">🗜️</span><span>FFmpeg Video Compressor</span></div>
-            <div class="feature-box"><span class="feature-icon">⚡</span><span>HTTP 206 Fast Stream</span></div>
-            <div class="feature-box"><span class="feature-icon">🖼️</span><span>Smart Thumbnail Changer</span></div>
-            <div class="feature-box"><span class="feature-icon">⏱️</span><span>Auto-Delete Message Sweeper</span></div>
-            <div class="feature-box"><span class="feature-icon">🤝</span><span>Auto-Approve Joins</span></div>
-            <div class="feature-box"><span class="feature-icon">🔑</span><span>String Session Generator</span></div>
+            <div class="feature-box"><span class="feature-icon">✏️</span><span>Ultra Renamer & Templates</span></div>
+            <div class="feature-box"><span class="feature-icon">🗜️</span><span>5-Min Turbo FFmpeg H.264/HEVC</span></div>
+            <div class="feature-box"><span class="feature-icon">♻️</span><span>Persistent Task Recovery</span></div>
+            <div class="feature-box"><span class="feature-icon">⚡</span><span>HTTP 206 4-Player Stream</span></div>
+            <div class="feature-box"><span class="feature-icon">🎛️</span><span>File Pro Audio/Sub Muxer</span></div>
+            <div class="feature-box"><span class="feature-icon">🛡️</span><span>Zero-FloodWait Rate Manager</span></div>
+            <div class="feature-box"><span class="feature-icon">📢</span><span>Group & Channel Helpdesk</span></div>
+            <div class="feature-box"><span class="feature-icon">🌐</span><span>24/7 Uptime & KeepAlive</span></div>
         </div>
 
         <!-- Working Action Buttons -->
@@ -393,22 +396,22 @@
             <a href="{{ watermark_url }}" class="btn btn-primary" target="_blank" rel="noopener">
                 📢 Official Channel
             </a>
-            <button class="btn btn-outline" onclick="copyText('{{ watermark_url }}', 'Channel Link Copied to Clipboard!')">
+            <button class="btn btn-outline" onclick="copyText('{{ watermark_url }}', 'Channel Link Copied!')">
                 📋 Copy Channel Link
             </button>
             <button class="btn btn-outline" onclick="fetchLiveMetrics(true)">
-                🔄 Refresh Metrics
+                🔄 Refresh Telemetry
             </button>
-            <a href="/health" class="btn btn-outline" target="_blank" rel="noopener">
-                💓 Health API Check
+            <a href="/api/tasks/report" class="btn btn-outline" target="_blank" rel="noopener">
+                ♻️ Task Recovery JSON
             </a>
-            <a href="/api/status" class="btn btn-outline" target="_blank" rel="noopener">
-                📊 Live Status JSON
+            <a href="/health" class="btn btn-outline" target="_blank" rel="noopener">
+                💓 Health Check
             </a>
         </div>
 
         <footer>
-            ⚡ Powered by <a href="{{ watermark_url }}" target="_blank" rel="noopener">{{ watermark }}</a> • Python 3.10 + Pyrofork + FastAPI
+            ⚡ Powered by <a href="{{ watermark_url }}" target="_blank" rel="noopener">{{ watermark }}</a> • MMW Ultra Max v8.0 Engine
         </footer>
     </div>
 
@@ -419,7 +422,7 @@
             const toast = document.getElementById('toast');
             toast.textContent = msg || 'Copied to clipboard!';
             toast.className = 'show';
-            setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 3000);
+            setTimeout(() => { toast.className = toast.className.replace('show', ''); }, 2800);
         }
 
         function copyText(text, successMsg) {
@@ -443,6 +446,13 @@
             }
         }
 
+        document.addEventListener('keydown', (e) => {
+            if (e.key === '/' && document.activeElement !== document.getElementById('lookup-input')) {
+                e.preventDefault();
+                document.getElementById('lookup-input').focus();
+            }
+        });
+
         function clearInspector() {
             document.getElementById('lookup-input').value = '';
             const resBox = document.getElementById('lookup-result');
@@ -456,7 +466,6 @@
                 showToast('Please enter a File ID or search term');
                 return;
             }
-            // If input is a single token without spaces and looks like an ID, try info first
             if (!input.includes(' ') && input.length >= 8) {
                 const ok = await lookupFile(input);
                 if (!ok) {
@@ -529,7 +538,7 @@
                 const actions = document.createElement('div');
                 actions.style.cssText = 'display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;';
                 actions.append(
-                    makeResultLink('🎬 Watch Online', data.watch_url, 'btn btn-primary'),
+                    makeResultLink('🎬 Watch Online (4 Players)', data.watch_url, 'btn btn-primary'),
                     makeResultLink('⬇️ Direct Download', data.direct_download_url || data.download_url, 'btn btn-outline'),
                     makeCopyButton(data.stream_url)
                 );
@@ -595,7 +604,10 @@
         async function fetchLiveMetrics(manual = false) {
             const t0 = performance.now();
             try {
-                const res = await fetch('/api/status');
+                const [res, taskRes] = await Promise.all([
+                    fetch('/api/status'),
+                    fetch('/api/tasks/report')
+                ]);
                 const t1 = performance.now();
                 if (res.ok) {
                     const data = await res.json();
@@ -603,8 +615,19 @@
                     if (data.chats !== undefined) document.getElementById('val-chats').textContent = data.chats;
                     if (data.files !== undefined) document.getElementById('val-files').textContent = data.files;
                     document.getElementById('val-ping').textContent = Math.round(t1 - t0) + ' ms';
-                    if (manual) showToast('Metrics updated!');
                 }
+                if (taskRes && taskRes.ok) {
+                    const tr = await taskRes.json();
+                    const el = document.getElementById('val-tasks');
+                    if (el && tr.completed_tasks !== undefined) {
+                        el.textContent = tr.completed_tasks;
+                    }
+                    const recEl = document.getElementById('val-recovered');
+                    if (recEl && tr.recovered_tasks !== undefined) {
+                        recEl.textContent = tr.recovered_tasks;
+                    }
+                }
+                if (manual) showToast('⚡ Ultra Telemetry Refreshed!');
             } catch (e) {
                 console.debug('Polling error:', e);
             }

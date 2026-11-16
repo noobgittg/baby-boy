@@ -243,7 +243,6 @@ async def build_global_config_view() -> tuple[str, InlineKeyboardMarkup]:
         "⚙️ <b>ɢʟᴏʙᴀʟ ʙᴏᴛ ᴄᴏɴғɪɢᴜʀᴀᴛɪᴏɴ &amp; ʟɪᴠᴇ ғᴇᴀᴛᴜʀᴇ ᴛᴏɢɢʟᴇs</b> ⚡\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         f"• 🛠️ <b>ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ ᴍᴏᴅᴇ:</b> <code>{_b(cfg.get('maintenance_mode', False))}</code>\n"
-        f"• 🤖 <b>ᴀɪ ᴀssɪsᴛᴀɴᴛ (/ask):</b> <code>{_b(cfg.get('ai_enabled', True))}</code>\n"
         f"• 🎬 <b>ɢʟᴏʙᴀʟ ᴀᴜᴛᴏ-sᴛʀᴇᴀᴍ:</b> <code>{_b(cfg.get('auto_stream_global', True))}</code>\n"
         f"• 📝 <b>ɢʟᴏʙᴀʟ ᴀᴜᴛᴏ-ᴄᴀᴘᴛɪᴏɴ:</b> <code>{_b(cfg.get('auto_caption_global', True))}</code>\n"
         f"• 🔁 <b>ɢʟᴏʙᴀʟ ᴀᴜᴛᴏ-ғᴏʀᴡᴀʀᴅ:</b> <code>{_b(cfg.get('auto_forward_global', True))}</code>\n"
@@ -261,10 +260,6 @@ async def build_global_config_view() -> tuple[str, InlineKeyboardMarkup]:
             InlineKeyboardButton(
                 f"🛠️ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ: {_b(cfg.get('maintenance_mode', False))}",
                 callback_data="adm_panel#toggle_cfg#maintenance_mode",
-            ),
-            InlineKeyboardButton(
-                f"🤖 ᴀɪ ᴄʜᴀᴛ: {_b(cfg.get('ai_enabled', True))}",
-                callback_data="adm_panel#toggle_cfg#ai_enabled",
             ),
         ],
         [

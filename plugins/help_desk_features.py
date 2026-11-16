@@ -2238,16 +2238,11 @@ def build_helpdesk_menu_view(section: str, cfg: Optional[Dict[str, Any]] = None)
             "• <code>/zombies</code> — ғɪɴᴅ &amp; ᴄʟᴇᴀɴ ᴅᴇʟᴇᴛᴇᴅ ᴀᴄᴄᴏᴜɴᴛs\n"
             "• <code>/bots</code> — ʟɪsᴛ ʙᴏᴛs │ <code>/poll Q | Opt1 | Opt2</code>"
         )
-    elif section == "ai_help":
+    elif section == "web_help":
         text = (
-            "🤖 <b>ᴍᴜʟᴛɪ-ᴍᴏᴅᴇʟ ᴘʀᴏᴍᴘᴛ ᴍᴀsᴛᴇʀ ᴀɪ &amp; ᴡᴇʙ ᴛᴏᴏʟs</b> ⚡\n"
+            "🌐 <b>24/7 ᴜᴘᴛɪᴍᴇ ᴍᴏɴɪᴛᴏʀ &amp; ᴡᴇʙ ᴜᴛɪʟɪᴛɪᴇs</b> ⚡\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🧠 <b>ᴀɪ ᴀssɪsᴛᴀɴᴛ ᴄᴏᴍᴍᴀɴᴅs:</b>\n"
-            "• <code>/ask &lt;query&gt;</code> │ <code>/proai &lt;query&gt;</code> — ᴄʜᴀᴛ ᴡɪᴛʜ ᴀɪ\n"
-            "• <code>/models</code> — ᴄʜᴏᴏsᴇ ᴀɪ ᴍᴏᴅᴇʟ ᴠɪᴀ ɪɴʟɪɴᴇ ʙᴜᴛᴛᴏɴs\n"
-            "• <code>/selectedai</code> │ <code>/mymodel</code> │ <code>/modeldetail</code>\n"
-            "• <code>/resetmymodel</code> │ <code>/listmodels</code> │ <code>/modelhelp</code>\n\n"
-            "🌐 <b>24/7 ᴜᴘᴛɪᴍᴇ &amp; ᴡᴇʙ ᴜᴛɪʟɪᴛɪᴇs:</b>\n"
+            "🌐 <b>24/7 ᴜᴘᴛɪᴍᴇ &amp; ᴡᴇʙ ᴛᴏᴏʟs:</b>\n"
             "• <code>/uptime &lt;url&gt;</code> │ <code>/listup</code> │ <code>/revoke</code>\n"
             "• <code>/web &lt;url&gt;</code> │ <code>/webss &lt;url&gt;</code> │ <code>/fwebss &lt;url&gt;</code>\n"
             "• <code>/tr &lt;lang&gt;</code> │ <code>/paste</code> │ <code>/calc</code> │ <code>/qr</code> │ <code>/stickerid</code>"
@@ -2299,7 +2294,7 @@ def build_helpdesk_menu_view(section: str, cfg: Optional[Dict[str, Any]] = None)
         ],
         [
             InlineKeyboardButton("🎨 ᴘᴏsᴛ & ʙᴜᴛᴛᴏɴ sᴛᴜᴅɪᴏ", callback_data="postedit|home"),
-            InlineKeyboardButton("🤖 ᴀɪ & ᴜᴛɪʟɪᴛɪᴇs", callback_data=f"hdesk{HD_SEP}ai_help"),
+            InlineKeyboardButton("🌐 ᴜᴘᴛɪᴍᴇ & ᴡᴇʙ ᴛᴏᴏʟs", callback_data=f"hdesk{HD_SEP}web_help"),
         ],
         bottom_row,
     ])
@@ -2348,7 +2343,7 @@ async def hd_callback_router(client: Client, query: CallbackQuery):
             pass
         return
 
-    if action in ("home", "admin", "members", "moderation", "security", "settings", "notes_help", "ai_help"):
+    if action in ("home", "admin", "members", "moderation", "security", "settings", "notes_help", "web_help"):
         cfg = await db.get_helpdesk_config(chat_id) if chat_id < 0 else {}
         text, markup = build_helpdesk_menu_view(action, cfg)
         await query.answer()

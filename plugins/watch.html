@@ -4,15 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark light">
-    <title>{{ file_name | default("Watch Media") }} — adaptive range stream</title>
+    <title>{{ file_name | default("Watch Media") }} — MMW Ultra Max Stream</title>
     <link rel="preconnect" href="https://cdn.tailwindcss.com">
     <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-    <link rel="dns-prefetch" href="//cdn.tailwindcss.com">
-    <link rel="dns-prefetch" href="//cdnjs.cloudflare.com">
-    <link rel="preload" as="script" href="https://cdn.tailwindcss.com">
     <script defer src="https://cdn.tailwindcss.com"></script>
     <script>
+        window.tailwind = window.tailwind || {};
         tailwind.config = {
             darkMode: 'class',
             theme: {
@@ -22,7 +20,7 @@
                     }
                 }
             }
-        }
+        };
     </script>
     <link rel="preload" as="style" fetchpriority="high" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"></noscript>
@@ -31,6 +29,44 @@
     <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/plyr@3.7.8/dist/plyr.css"></noscript>
     <script defer src="https://cdn.jsdelivr.net/npm/plyr@3.7.8/dist/plyr.polyfilled.js"></script>
     {% endif %}
+    <style>
+        /* Self-contained Ultra Glassmorphism CSS fallback so UI stays crisp even before/without external CDN */
+        :root {
+            --ultra-bg: #040711;
+            --ultra-card: rgba(15, 23, 42, 0.85);
+            --ultra-border: rgba(56, 189, 248, 0.22);
+            --ultra-accent: #38bdf8;
+        }
+        .smallcap-ui { font-variant: small-caps; letter-spacing: 0.015em; font-family: system-ui, -apple-system, sans-serif; }
+        .smallcap-ui code, .smallcap-ui input, .smallcap-ui button, .smallcap-ui select { font-variant: normal; }
+        html.dark body {
+            background-color: var(--ultra-bg);
+            background-image:
+                radial-gradient(at 10% 10%, rgba(56, 189, 248, 0.14) 0px, transparent 50%),
+                radial-gradient(at 90% 85%, rgba(168, 85, 247, 0.12) 0px, transparent 50%);
+            color: #f8fafc;
+        }
+        .ultra-card {
+            background: var(--ultra-card);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--ultra-border);
+            border-radius: 20px;
+            box-shadow: 0 20px 45px -12px rgba(0, 0, 0, 0.7);
+        }
+        .ultra-pill-btn {
+            cursor: pointer;
+            transition: all 0.18s ease;
+            border: 1px solid rgba(56, 189, 248, 0.2);
+        }
+        .ultra-pill-btn:hover {
+            transform: translateY(-2px);
+            border-color: var(--ultra-accent);
+        }
+        .theatre-active {
+            max-width: 100% !important;
+        }
+    </style>
     <script>
         (function() {
             const savedTheme = localStorage.getItem('theme');
@@ -45,15 +81,15 @@
 <body class="smallcap-ui bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 min-h-screen flex flex-col transition-colors duration-200">
 
     <!-- Header / Navbar -->
-    <header class="w-full border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
+    <header class="w-full border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between bg-white/85 dark:bg-slate-900/85 backdrop-blur-md sticky top-0 z-50">
         <div class="flex items-center space-x-3 overflow-hidden">
-            <span class="bg-brand-500 text-white p-2 rounded-xl text-sm shadow-lg shadow-brand-500/30 flex items-center justify-center w-9 h-9">
+            <a href="/" class="bg-brand-500 text-white p-2 rounded-xl text-sm shadow-lg shadow-brand-500/30 flex items-center justify-center w-9 h-9" title="Back to Dashboard">
                 <i class="fa-solid fa-bolt"></i>
-            </span>
+            </a>
             <div>
                 <h1 class="font-bold text-sm sm:text-base truncate max-w-xs md:max-w-xl" title="{{ file_name }}">{{ file_name | default("Streaming Media") }}</h1>
-                <div class="flex items-center space-x-2 text-xs text-emerald-500 font-semibold">
-                    <span>⚡ ʟɪᴠᴇ ʜᴛᴛᴘ ʀᴀɴɢᴇ sᴛʀᴇᴀᴍ</span>
+                <div class="flex items-center space-x-2 text-xs text-emerald-400 font-semibold">
+                    <span>⚡ ᴍᴍᴡ ᴜʟᴛʀᴀ ʜᴛᴛᴘ 206 ʀᴀɴɢᴇ sᴛʀᴇᴀᴍ</span>
                     <span>•</span>
                     <span>{{ file_size | default("") }}</span>
                 </div>
@@ -72,7 +108,7 @@
     </header>
 
     <!-- Main Content -->
-    <main class="flex-1 flex flex-col items-center justify-start p-3 sm:p-6 max-w-5xl mx-auto w-full gap-6">
+    <main id="mainContainer" class="flex-1 flex flex-col items-center justify-start p-3 sm:p-6 max-w-5xl mx-auto w-full gap-6 transition-all duration-200">
         
         <!-- Video Player Box -->
         <div id="playerContainer" class="relative w-full {% if metadata.media_kind == 'audio' %}min-h-56{% else %}aspect-video{% endif %} bg-black rounded-2xl overflow-hidden shadow-2xl group border border-slate-200 dark:border-slate-800">
@@ -88,36 +124,38 @@
             {% else %}
             <div class="h-full min-h-56 flex flex-col items-center justify-center gap-3 p-8 text-center text-white">
                 <i class="fa-solid fa-file-circle-question text-4xl text-brand-400"></i>
-                <p class="font-semibold">ᴛʜɪs ғɪʟᴇ ɪs ɴᴏᴛ ᴘʟᴀʏᴀʙʟᴇ ɪɴ ᴛʜɪs ʙʀᴏᴡsᴇʀ</p>
-                <a href="{{ download_url }}" class="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-bold">⬇️ ᴅᴏᴡɴʟᴏᴀᴅ ғɪʟᴇ</a>
+                <p class="font-semibold">ᴛʜɪs ғɪʟᴇ ɪs ᴏᴘᴛɪᴍɪᴢᴇᴅ ғᴏʀ ᴇxᴛᴇʀɴᴀʟ ʜᴡ+ ᴘʟᴀʏᴇʀs (ᴍᴋᴠ / ʜᴇᴠᴄ / ᴅᴜᴀʟ ᴀᴜᴅɪᴏ)</p>
+                <a href="{{ download_url }}" class="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-bold">⬇️ ᴅᴏᴡɴʟᴏᴀᴅ ᴏʀ ᴏᴘᴇɴ ɪɴ ᴘʟᴀʏɪᴛ / ᴍx / ᴠʟᴄ / s ᴘʟᴀʏᴇʀ</a>
             </div>
             {% endif %}
-            <div id="playerStatus" class="absolute left-3 right-3 bottom-3 hidden rounded-xl bg-slate-950/80 px-3 py-2 text-xs text-white" role="status" aria-live="polite"></div>
+            <div id="playerStatus" class="absolute left-3 right-3 bottom-3 hidden rounded-xl bg-slate-950/85 px-3 py-2 text-xs text-white border border-sky-500/30" role="status" aria-live="polite"></div>
         </div>
 
-        <!-- Metadata controls: values come from stored media metadata, never filenames. -->
-        <section class="w-full bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xl">
+        <!-- Ultra Studio Controls & Metadata -->
+        <section class="ultra-card w-full bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xl">
             <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
-                <h2 class="text-base sm:text-lg font-bold">🧠 ᴍᴇᴅɪᴀ ᴍᴇᴛᴀᴅᴀᴛᴀ</h2>
+                <h2 class="text-base sm:text-lg font-bold">🎛️ ᴜʟᴛʀᴀ ᴘʟᴀʏʙᴀᴄᴋ & ᴍᴇᴅɪᴀ ᴍᴇᴛᴀᴅᴀᴛᴀ</h2>
                 <span class="text-xs text-slate-500 dark:text-slate-400">{{ metadata.media_kind | default('document') }} · {{ metadata.mime_type | default(mime_type) }}</span>
             </div>
             <div class="flex flex-wrap gap-2">
-                {% if metadata.caption %}<button type="button" class="px-3 py-2 rounded-xl bg-brand-500/15 text-brand-400 border border-brand-500/30 text-xs font-bold" onclick="toggleMetadata('captionPanel')">📝 ᴇɴᴀʙʟᴇ / sᴇᴇ ᴄᴀᴘᴛɪᴏɴ</button>{% endif %}
-                {% if metadata.audio_track != 'Default Audio' or metadata.audio_tracks %}<button type="button" class="px-3 py-2 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-bold" onclick="toggleMetadata('audioPanel')">🎧 ᴇɴᴀʙʟᴇ / sᴇᴇ ᴀᴜᴅɪᴏ</button>{% endif %}
-                {% if metadata.language != 'Undetermined' or metadata.audio_tracks or metadata.subtitle_tracks %}<button type="button" class="px-3 py-2 rounded-xl bg-violet-500/15 text-violet-400 border border-violet-500/30 text-xs font-bold" onclick="toggleMetadata('languagePanel')">🌐 ᴇɴᴀʙʟᴇ / sᴇᴇ ʟᴀɴɢᴜᴀɢᴇ</button>{% endif %}
+                {% if metadata.caption %}<button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-brand-500/15 text-brand-400 border border-brand-500/30 text-xs font-bold" onclick="toggleMetadata('captionPanel')">📝 ᴇɴᴀʙʟᴇ / sᴇᴇ ᴄᴀᴘᴛɪᴏɴ</button>{% endif %}
+                {% if metadata.audio_track != 'Default Audio' or metadata.audio_tracks %}<button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-bold" onclick="toggleMetadata('audioPanel')">🎧 ᴇɴᴀʙʟᴇ / sᴇᴇ ᴀᴜᴅɪᴏ</button>{% endif %}
+                {% if metadata.language != 'Undetermined' or metadata.audio_tracks or metadata.subtitle_tracks %}<button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-violet-500/15 text-violet-400 border border-violet-500/30 text-xs font-bold" onclick="toggleMetadata('languagePanel')">🌐 ᴇɴᴀʙʟᴇ / sᴇᴇ ʟᴀɴɢᴜᴀɢᴇ</button>{% endif %}
             </div>
             {% if metadata.media_kind in ['audio', 'video'] %}
-            <div class="mt-4 flex flex-wrap gap-2 text-xs">
-                <button type="button" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleLoop()">🔁 ʟᴏᴏᴘ</button>
-                <button type="button" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="captureFrame()">📸 ғʀᴀᴍᴇ</button>
-                <button type="button" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="togglePiP()">⛶ ᴘɪᴘ</button>
-                <button type="button" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleSleepTimer()">⏱️ sʟᴇᴇᴘ</button>
-                <button type="button" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="setABPoint()">⤴️ ᴀ–ʙ</button>
-                <button type="button" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="retryMedia()">↻ ʀᴇᴛʀʏ</button>
-                <button type="button" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleFit()">▣ ғɪᴛ</button>
-                <button type="button" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleMirror()">↔ ᴍɪʀʀᴏʀ</button>
-                <button type="button" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleWakeLock()">☀ ᴡᴀᴋᴇ</button>
-                <button type="button" class="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleScreenLock()">⌧ ʟᴏᴄᴋ</button>
+            <div class="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleLoop()">🔁 ʟᴏᴏᴘ</button>
+                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="cycleSpeed()" id="speedBtn">⏩ 1.0x</button>
+                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleTheatre()">🖥️ ᴛʜᴇᴀᴛʀᴇ</button>
+                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="captureFrame()">📸 ғʀᴀᴍᴇ</button>
+                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="togglePiP()">⛶ ᴘɪᴘ</button>
+                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleSleepTimer()">⏱️ sʟᴇᴇᴘ</button>
+                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="setABPoint()">⤴️ ᴀ–ʙ</button>
+                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="retryMedia()">↻ ʀᴇᴛʀʏ</button>
+                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleFit()">▣ ғɪᴛ</button>
+                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleMirror()">↔ ᴍɪʀʀᴏʀ</button>
+                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleWakeLock()">☀ ᴡᴀᴋᴇ</button>
+                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleScreenLock()">⌧ ʟᴏᴄᴋ</button>
                 <span id="networkState" class="px-3 py-2 text-slate-500 dark:text-slate-400">ᴄʜᴇᴄᴋɪɴɢ ɴᴇᴛᴡᴏʀᴋ…</span>
             </div>
             {% endif %}
@@ -127,7 +165,7 @@
         </section>
 
         <!-- 4 External Players ONLY Section (PLAYit, MX Player, VLC, S Player) -->
-        <section class="w-full bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xl">
+        <section class="ultra-card w-full bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xl">
             <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
                 <div>
                     <h2 class="text-base sm:text-lg font-bold flex items-center gap-2">
@@ -139,7 +177,7 @@
                     </p>
                 </div>
                 <span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                    🚀 ʀᴀɴɢᴇ sᴛʀᴇᴀᴍ ʀᴇᴀᴅʏ
+                    🚀 ᴜʟᴛʀᴀ ʀᴀɴɢᴇ ʀᴇᴀᴅʏ
                 </span>
             </div>
 
@@ -190,7 +228,7 @@
                     <i class="fa-solid fa-arrow-up-right-from-square text-xs text-orange-400 group-hover:translate-x-0.5 transition"></i>
                 </a>
 
-                <!-- 4. S Player (4th External Player) -->
+                <!-- 4. S Player -->
                 <a href="{{ player_links.splayer if player_links else '#' }}" onclick="return openExternalPlayer(event, 'splayer')"
                    class="flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-purple-500/15 to-pink-500/15 hover:from-purple-500/25 hover:to-pink-500/25 border border-purple-500/30 transition group">
                     <div class="flex items-center space-x-3">
@@ -217,6 +255,10 @@
                         <i class="fa-solid fa-copy"></i>
                         <span id="copyBtnText">📋 ᴄᴏᴘʏ sᴛʀᴇᴀᴍ ᴜʀʟ</span>
                     </button>
+                    <a href="{{ dl_page_url | default(download_url) }}" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold transition flex items-center gap-2">
+                        <i class="fa-solid fa-box-open"></i>
+                        <span>📦 ᴅᴏᴡɴʟᴏᴀᴅ ʜᴜʙ</span>
+                    </a>
                 </div>
                 <a href="{{ watermark_url | default('https://t.me/mallumovieworldmain2') }}" target="_blank" class="text-xs text-brand-400 hover:underline font-semibold">
                     📢 {{ watermark | default('t.me/mallumovieworldmain2') }}
@@ -232,6 +274,8 @@
             const status = document.getElementById('playerStatus');
             const network = document.getElementById('networkState');
             const storageKey = `mmw-playback:${location.pathname}`;
+            const speeds = [0.75, 1.0, 1.25, 1.5, 2.0];
+            let speedIdx = 1;
             let player = null;
             let sleepTimer = null;
             let statusTimer = null;
@@ -247,6 +291,24 @@
             window.toggleMetadata = (id) => {
                 const panel = document.getElementById(id);
                 if (panel) panel.classList.toggle('hidden');
+            };
+
+            window.cycleSpeed = () => {
+                if (!media) return;
+                speedIdx = (speedIdx + 1) % speeds.length;
+                const sp = speeds[speedIdx];
+                media.playbackRate = sp;
+                const btn = document.getElementById('speedBtn');
+                if (btn) btn.textContent = `⏩ ${sp}x`;
+                notify(`⚡ Playback Speed: ${sp}x`);
+            };
+
+            window.toggleTheatre = () => {
+                const mc = document.getElementById('mainContainer');
+                if (mc) {
+                    mc.classList.toggle('theatre-active');
+                    notify(mc.classList.contains('theatre-active') ? '🖥️ Theatre Mode ON' : '🖥️ Theatre Mode OFF');
+                }
             };
 
             const metadataHash = window.location.hash.replace('#', '');
@@ -308,7 +370,6 @@
                 return false;
             };
 
-
             function restoreState() {
                 if (!media) return;
                 try {
@@ -340,8 +401,8 @@
                 media.addEventListener('volumechange', saveState, { passive: true });
                 media.addEventListener('waiting', () => notify('⏳ ʙᴜғғᴇʀɪɴɢ…', true));
                 media.addEventListener('playing', () => { if (status) status.classList.add('hidden'); });
-                media.addEventListener('error', () => notify('⚠️ ᴛʜɪs ᴍᴇᴅɪᴀ ᴄᴏᴜʟᴅ ɴᴏᴛ ʙᴇ ᴘʟᴀʏᴇᴅ — ᴜsᴇ ᴅᴏᴡɴʟᴏᴀᴅ ᴏʀ ᴀɴ ᴇxᴛᴇʀɴᴀʟ ᴘʟᴀʏᴇʀ', true));
-                media.addEventListener('loadedmetadata', () => notify('✅ ᴍᴇᴛᴀᴅᴀᴛᴀ ʀᴇᴀᴅʏ'));
+                media.addEventListener('error', () => notify('⚠️ ᴛʜɪs ᴍᴇᴅɪᴀ ᴄᴏᴜʟᴅ ɴᴏᴛ ʙᴇ ᴘʟᴀʏᴇᴅ ɪɴ ʙʀᴏᴡsᴇʀ — ᴜsᴇ ᴘʟᴀʏɪᴛ / ᴍx / ᴠʟᴄ / s ᴘʟᴀʏᴇʀ ʙᴇʟᴏᴡ', true));
+                media.addEventListener('loadedmetadata', () => notify('✅ ᴜʟᴛʀᴀ ʀᴀɴɢᴇ sᴛʀᴇᴀᴍ ʀᴇᴀᴅʏ'));
             }
 
             window.toggleLoop = () => { if (!media) return; media.loop = !media.loop; notify(media.loop ? '🔁 ʟᴏᴏᴘ ᴇɴᴀʙʟᴇᴅ' : '⏹️ ʟᴏᴏᴘ ᴅɪsᴀʙʟᴇᴅ'); };
@@ -358,7 +419,7 @@
             window.toggleWakeLock = async () => { try { if (wakeLock) { await wakeLock.release(); wakeLock = null; return notify('☀ ᴡᴀᴋᴇ ʟᴏᴄᴋ ᴏғғ'); } if (!('wakeLock' in navigator)) return notify('ᴡᴀᴋᴇ ʟᴏᴄᴋ ɴᴏᴛ sᴜᴘᴘᴏʀᴛᴇᴅ'); wakeLock = await navigator.wakeLock.request('screen'); notify('☀ ᴡᴀᴋᴇ ʟᴏᴄᴋ ᴏɴ'); } catch (_) { notify('ᴡᴀᴋᴇ ʟᴏᴄᴋ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); } };
             window.toggleScreenLock = () => { document.body.classList.toggle('select-none'); notify(document.body.classList.contains('select-none') ? '⌧ ᴛᴏᴜᴄʜ sᴄʀᴇᴇɴ ʟᴏᴄᴋᴇᴅ' : '⌧ ᴛᴏᴜᴄʜ sᴄʀᴇᴇɴ ᴜɴʟᴏᴄᴋᴇᴅ'); };
             if (media) media.addEventListener('timeupdate', () => { if (abStart !== null && abEnd !== null && media.currentTime >= abEnd) media.currentTime = abStart; });
-            document.addEventListener('keydown', (event) => { if (!media || ['INPUT', 'TEXTAREA', 'BUTTON'].includes(document.activeElement?.tagName)) return; if (event.code === 'Space') { event.preventDefault(); media.paused ? media.play().catch(() => {}) : media.pause(); } else if (event.key === 'ArrowRight') media.currentTime += 10; else if (event.key === 'ArrowLeft') media.currentTime = Math.max(0, media.currentTime - 10); else if (event.key.toLowerCase() === 'm') media.muted = !media.muted; else if (event.key.toLowerCase() === 'l') window.toggleLoop(); });
+            document.addEventListener('keydown', (event) => { if (!media || ['INPUT', 'TEXTAREA', 'BUTTON'].includes(document.activeElement?.tagName)) return; if (event.code === 'Space') { event.preventDefault(); media.paused ? media.play().catch(() => {}) : media.pause(); } else if (event.key === 'ArrowRight') media.currentTime += 10; else if (event.key === 'ArrowLeft') media.currentTime = Math.max(0, media.currentTime - 10); else if (event.key.toLowerCase() === 'm') media.muted = !media.muted; else if (event.key.toLowerCase() === 'l') window.toggleLoop(); else if (event.key.toLowerCase() === 't') window.toggleTheatre(); });
 
             function updateNetwork() { if (network) network.textContent = navigator.onLine ? '🟢 ᴏɴʟɪɴᴇ' : '🔴 ᴏғғʟɪɴᴇ'; }
             window.addEventListener('online', updateNetwork); window.addEventListener('offline', updateNetwork); updateNetwork();

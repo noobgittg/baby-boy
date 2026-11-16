@@ -6,26 +6,23 @@ from database.users_chats_db import db
 from Script import script
 from utils import format_watermark_html, is_admin_sync, safe_edit_message
 from plugins.core_db import user_repo, chat_repo, file_repo
-from plugins.core_utils import to_smallcaps
+from plugins.core_utils import to_smallcaps, task_manager, safe_reply_text
 from plugins.start import build_home_buttons, build_home_text
 
 
 async def render_help_menu(target_msg: Message, user, is_admin: bool, is_edit: bool = True):
     mention = user.mention if user else "ғʀɪᴇɴᴅ"
     help_text = (
-        f"✦ <b>{to_smallcaps('all-in-one smart help center')}</b> ✦ ⚡\n\n"
-        f"👋 <b>{to_smallcaps('hello')} {mention}</b> !\n"
-        f"{to_smallcaps('explore our categorized guides below for all auto, media, group, channel, ai & uptime features:')}\n\n"
+        f"✦ <b>{to_smallcaps('mmw ultra max v8.0 — smart help center')}</b> ✦ ⚡\n\n"
+        f"<blockquote>👋 <b>{to_smallcaps('hello')} {mention}</b> !\n"
+        f"{to_smallcaps('explore all ultra media, recovery, stream, group & channel features below:')}</blockquote>\n\n"
+        f"• ♻️ <b>{to_smallcaps('persistent task recovery')}</b> : {to_smallcaps('auto-resumes interrupted tasks across restarts')} (<code>/taskreport</code>)\n"
         f"• ⚡ <b>{to_smallcaps('auto-set wizard')}</b> : {to_smallcaps('1-click setup for user, group & channel')} (<code>/autoset</code>)\n"
-        f"• 📝 <b>{to_smallcaps('auto captions')}</b> : {to_smallcaps('dynamic templates & cap[] queue manager')}\n"
-        f"• ✏️ <b>{to_smallcaps('auto & pro renamer')}</b> : {to_smallcaps('rename, auto-rename, prefix & suffix')}\n"
-        f"• 🔁 <b>{to_smallcaps('auto forward & batch')}</b> : {to_smallcaps('live channel/group cloner & batch copy')} (<code>/autoforward</code>)\n"
-        f"• 🎬 <b>{to_smallcaps('auto & file streamer')}</b> : {to_smallcaps('4 external players (playit, mx, vlc, s player)')}\n"
+        f"• 📝 <b>{to_smallcaps('auto captions & renamer')}</b> : {to_smallcaps('dynamic templates, prefix/suffix & custom thumb')}\n"
+        f"• 🎬 <b>{to_smallcaps('http 206 4-player stream')}</b> : <code>PLAYit • MX Player • VLC • S Player</code> (<code>/stream</code>)\n"
+        f"• 🗜️ <b>{to_smallcaps('compressor & file pro')}</b> : {to_smallcaps('5-min turbo h.264/hevc, trim, mux/extract audio & subs')}\n"
         f"• 🛡️ <b>{to_smallcaps('group helpdesk')}</b> : {to_smallcaps('70+ moderation, 16 locks, antiflood, notes & filters')}\n"
         f"• 📢 <b>{to_smallcaps('channel helper')}</b> : {to_smallcaps('35+ channel post, schedule, template & admin tools')}\n"
-        f"• 🗜️ <b>{to_smallcaps('compressor & file pro')}</b> : {to_smallcaps('h.264 presets, trim, extract/add audio & subs')}\n"
-        f"• 🤝 <b>{to_smallcaps('auto accept & thumb')}</b> : {to_smallcaps('auto-approve joins & custom thumbnail caching')}\n"
-        f"• 🌐 <b>{to_smallcaps('24/7 uptime & ai')}</b> : {to_smallcaps('website/bot monitor')} (<code>/uptime</code>) &amp; {to_smallcaps('multi-model ai')} (<code>/ask</code>)\n"
     )
     if is_admin:
         help_text += f"• 👑 <b>{to_smallcaps('master admin')}</b> : {to_smallcaps('live toggles, broadcast, user/chat manager & logs')}\n"
@@ -33,39 +30,42 @@ async def render_help_menu(target_msg: Message, user, is_admin: bool, is_edit: b
 
     buttons = [
         [
+            InlineKeyboardButton(f"♻️ {to_smallcaps('task recovery')}", callback_data="task_rec#report"),
+            InlineKeyboardButton(f"⚡ {to_smallcaps('auto-set wizard')}", callback_data="autoset|home"),
+        ],
+        [
             InlineKeyboardButton(f"🛡️ {to_smallcaps('group helpdesk')}", callback_data="hdesk|home"),
             InlineKeyboardButton(f"📢 {to_smallcaps('channel helper')}", callback_data="chdesk|home"),
         ],
         [
-            InlineKeyboardButton(f"⚡ {to_smallcaps('auto-set wizard')}", callback_data="autoset|home"),
             InlineKeyboardButton(f"🔁 {to_smallcaps('auto-forward')}", callback_data="autofwd|home"),
-        ],
-        [
             InlineKeyboardButton(f"🎨 {to_smallcaps('post & button studio')}", callback_data="postedit|home"),
+        ],
+        [
             InlineKeyboardButton(f"⚙️ {to_smallcaps('group/chnl editor')}", callback_data="gfeat|open"),
-        ],
-        [
             InlineKeyboardButton(f"✏️ {to_smallcaps('renamer')}", callback_data="help_renamer"),
+        ],
+        [
             InlineKeyboardButton(f"📝 {to_smallcaps('captions')}", callback_data="help_caption"),
-        ],
-        [
             InlineKeyboardButton(f"🎬 {to_smallcaps('file stream')}", callback_data="help_streamer"),
+        ],
+        [
             InlineKeyboardButton(f"🗜️ {to_smallcaps('compressor')}", callback_data="help_compressor"),
-        ],
-        [
             InlineKeyboardButton(f"🎛️ {to_smallcaps('file pro')}", callback_data="help_filepro"),
+        ],
+        [
             InlineKeyboardButton(f"🖼️ {to_smallcaps('thumbnail')}", callback_data="help_thumbnail"),
-        ],
-        [
             InlineKeyboardButton(f"🤝 {to_smallcaps('auto accept')}", callback_data="help_accept"),
+        ],
+        [
             InlineKeyboardButton(f"⏱️ {to_smallcaps('auto-delete')}", callback_data="help_autodelete"),
-        ],
-        [
             InlineKeyboardButton(f"📝 {to_smallcaps('notes & filters')}", callback_data="hdesk|notes_help"),
-            InlineKeyboardButton(f"🤖 {to_smallcaps('ai & uptime')}", callback_data="hdesk|ai_help"),
         ],
         [
+            InlineKeyboardButton(f"🌐 {to_smallcaps('uptime & web tools')}", callback_data="hdesk|web_help"),
             InlineKeyboardButton(f"🔑 {to_smallcaps('session')}", callback_data="help_session"),
+        ],
+        [
             InlineKeyboardButton(f"🛠️ {to_smallcaps('tools & cleaner')}", callback_data="help_tools"),
         ],
     ]
@@ -82,7 +82,8 @@ async def render_help_menu(target_msg: Message, user, is_admin: bool, is_edit: b
     if is_edit:
         await safe_edit_message(target_msg, help_text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=enums.ParseMode.HTML)
     else:
-        await target_msg.reply_text(
+        await safe_reply_text(
+            target_msg,
             help_text,
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode=enums.ParseMode.HTML,
@@ -110,10 +111,10 @@ async def render_settings_menu(target_msg: Message, user, is_edit: bool = True):
     up_mode = "🎬 ᴠɪᴅᴇᴏ" if u.get("upload_mode", "video") == "video" else "📁 ᴅᴏᴄ"
 
     settings_text = (
-        f"✦ <b>{to_smallcaps('smart settings & auto dashboard')}</b> ✦ ⚙️\n\n"
+        f"✦ <b>{to_smallcaps('ultra smart settings & auto dashboard')}</b> ✦ ⚙️\n\n"
         f"👤 <b>{to_smallcaps('user')}</b> : {mention} (<code>{uid}</code>)\n\n"
         f"• 📝 <b>{to_smallcaps('auto caption')}</b> : <code>{auto_cap}</code>\n"
-        f"• 🤖 <b>{to_smallcaps('auto rename')}</b> : <code>{auto_ren}</code>\n"
+        f"• ✏️ <b>{to_smallcaps('auto rename')}</b> : <code>{auto_ren}</code>\n"
         f"• ⚡ <b>{to_smallcaps('auto stream (4 players)')}</b> : <code>{auto_str}</code>\n"
         f"• 🗜️ <b>{to_smallcaps('auto compress')}</b> : <code>{auto_comp}</code>\n"
         f"• 📤 <b>{to_smallcaps('upload mode')}</b> : <code>{up_mode}</code>\n"
@@ -128,7 +129,7 @@ async def render_settings_menu(target_msg: Message, user, is_edit: bool = True):
     buttons = [
         [
             InlineKeyboardButton(f"📝 {to_smallcaps('auto caption')}: {auto_cap}", callback_data="settings_toggle_autocap"),
-            InlineKeyboardButton(f"🤖 {to_smallcaps('auto rename')}: {auto_ren}", callback_data="settings_toggle_autoren"),
+            InlineKeyboardButton(f"✏️ {to_smallcaps('auto rename')}: {auto_ren}", callback_data="settings_toggle_autoren"),
         ],
         [
             InlineKeyboardButton(f"⚡ {to_smallcaps('auto stream')}: {auto_str}", callback_data="settings_toggle_autostream"),
@@ -139,33 +140,35 @@ async def render_settings_menu(target_msg: Message, user, is_edit: bool = True):
             InlineKeyboardButton(f"⏱️ {to_smallcaps('timer settings')}", callback_data="open_timer_menu"),
         ],
         [
+            InlineKeyboardButton(f"♻️ {to_smallcaps('task recovery')}", callback_data="task_rec#report"),
             InlineKeyboardButton(f"🗂️ {to_smallcaps('my files vault')}", callback_data="pvt_vault#page_0"),
+        ],
+        [
             InlineKeyboardButton(f"🎛️ {to_smallcaps('presets & tasks')}", callback_data="pvt_dash#home"),
+            InlineKeyboardButton(f"⚡ {to_smallcaps('auto-set wizard')}", callback_data="autoset|home"),
         ],
         [
             InlineKeyboardButton(f"🖼️ {to_smallcaps('view thumb')}", callback_data="settings_view_thumb"),
             InlineKeyboardButton(f"📝 {to_smallcaps('view caption')}", callback_data="settings_view_caption"),
         ],
         [
-            InlineKeyboardButton(f"⚡ {to_smallcaps('auto-set wizard')}", callback_data="autoset|home"),
             InlineKeyboardButton(f"🔁 {to_smallcaps('auto-forward')}", callback_data="autofwd|home"),
-        ],
-        [
             InlineKeyboardButton(f"🎨 {to_smallcaps('post & button studio')}", callback_data="postedit|home"),
+        ],
+        [
             InlineKeyboardButton(f"⚙️ {to_smallcaps('group/chnl editor')}", callback_data="gfeat|open"),
-        ],
-        [
             InlineKeyboardButton(f"🔄 {to_smallcaps('reset all')}", callback_data="settings_reset_all"),
-            InlineKeyboardButton(f"🏠 {to_smallcaps('back to home')}", callback_data="nav_home"),
         ],
         [
+            InlineKeyboardButton(f"🏠 {to_smallcaps('back to home')}", callback_data="nav_home"),
             InlineKeyboardButton(f"❌ {to_smallcaps('close')}", callback_data="close_data"),
         ],
     ]
     if is_edit:
         await safe_edit_message(target_msg, settings_text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=enums.ParseMode.HTML)
     else:
-        await target_msg.reply_text(
+        await safe_reply_text(
+            target_msg,
             settings_text,
             reply_markup=InlineKeyboardMarkup(buttons),
             parse_mode=enums.ParseMode.HTML,
@@ -208,6 +211,10 @@ async def navigation_callbacks(client: Client, query: CallbackQuery):
         await query.answer("ℹ️ ᴀʙᴏᴜᴛ ʙᴏᴛ")
         buttons = [
             [
+                InlineKeyboardButton(f"♻️ {to_smallcaps('task recovery')}", callback_data="task_rec#report"),
+                InlineKeyboardButton(f"⚡ {to_smallcaps('auto-set wizard')}", callback_data="autoset|home"),
+            ],
+            [
                 InlineKeyboardButton(f"🛡️ {to_smallcaps('group helpdesk')}", callback_data="hdesk|home"),
                 InlineKeyboardButton(f"📢 {to_smallcaps('channel helper')}", callback_data="chdesk|home"),
             ],
@@ -234,20 +241,24 @@ async def navigation_callbacks(client: Client, query: CallbackQuery):
         chnl_count = await db.total_channels_count()
         files_count = await file_repo.get_total_files()
         fwd_rules = len(await db.get_all_autoforward_rules())
+        rep = task_manager.get_recovery_report()
         status_text = (
-            f"✦ <b>{to_smallcaps('system & bot live status')}</b> ✦ ⚡\n\n"
+            f"✦ <b>{to_smallcaps('mmw ultra max v8.0 — live status')}</b> ✦ ⚡\n\n"
             f"• 👥 <b>{to_smallcaps('registered users')}</b> : <code>{users_count}</code>\n"
             f"• 💬 <b>{to_smallcaps('active groups')}</b> : <code>{chats_count}</code>\n"
             f"• 📢 <b>{to_smallcaps('managed channels')}</b> : <code>{chnl_count}</code>\n"
             f"• 📁 <b>{to_smallcaps('indexed stream files')}</b> : <code>{files_count}</code>\n"
             f"• 🔁 <b>{to_smallcaps('auto-forward routes')}</b> : <code>{fwd_rules}</code>\n"
-            f"• ⚡ <b>{to_smallcaps('stream mode')}</b> : <code>turbo HTTP 206 byte-range</code>\n"
-            f"• 📱 <b>{to_smallcaps('4 external players')}</b> : <code>PLAYit • MX • VLC • S Player</code>\n"
-            f"• 🧠 <b>{to_smallcaps('caching')}</b> : <code>O(1) L1/L2 FastMemoryCache Active</code>\n"
-            f"• 🚀 <b>{to_smallcaps('server status')}</b> : <code>Online &amp; Fast</code>"
+            f"• ♻️ <b>{to_smallcaps('tasks completed / recovered')}</b> : <code>{rep['completed_tasks']} / {rep['recovered_tasks']}</code>\n"
+            f"• ⚡ <b>{to_smallcaps('stream mode')}</b> : <code>turbo HTTP 206 byte-range (4 Players)</code>\n"
+            f"• 🚀 <b>{to_smallcaps('server status')}</b> : <code>Online &amp; Ultra-Fast</code>"
             f"{format_watermark_html()}"
         )
         buttons = [
+            [
+                InlineKeyboardButton(f"♻️ {to_smallcaps('task recovery')}", callback_data="task_rec#report"),
+                InlineKeyboardButton(f"⚡ {to_smallcaps('auto-set wizard')}", callback_data="autoset|home"),
+            ],
             [
                 InlineKeyboardButton(f"🔄 {to_smallcaps('refresh')}", callback_data="nav_status"),
                 InlineKeyboardButton(f"🏠 {to_smallcaps('back to home')}", callback_data="nav_home"),
@@ -292,21 +303,22 @@ async def help_subpages(client: Client, query: CallbackQuery):
             f"• ✏️ <b>{to_smallcaps('manual rename')}</b> :\n"
             f"  1. {to_smallcaps('send any file or video and click')} <code>[✏️ {to_smallcaps('rename')}]</code>.\n"
             f"  2. {to_smallcaps('or reply to a file with')} <code>/rename new_name.mp4</code>.\n\n"
-            f"• 🤖 <b>{to_smallcaps('auto-rename mode')}</b> :\n"
+            f"• ⚡ <b>{to_smallcaps('auto-rename mode')}</b> :\n"
             f"  • <code>/autorename</code> : {to_smallcaps('toggle automatic renaming on/off.')}\n"
-            f"  • <code>/setprefix &lt;text&gt;</code> : {to_smallcaps('set prefix for all files.')}\n"
-            f"  • <code>/setsuffix &lt;text&gt;</code> : {to_smallcaps('set suffix before extension.')}\n"
-            f"  • <code>/delprefix</code> &amp; <code>/delsuffix</code> : {to_smallcaps('remove saved prefix/suffix.')}"
+            f"  • <code>/setformat &lt;tpl&gt;</code> : {to_smallcaps('set custom template ({filename}, {resolution}).')}\n"
+            f"  • <code>/setprefix &lt;text&gt;</code> &amp; <code>/setsuffix &lt;text&gt;</code>\n"
+            f"  • <code>/delprefix</code> &amp; <code>/delsuffix</code>"
             f"{format_watermark_html()}"
         )
     elif cat == "compressor":
         text = (
-            f"✦ <b>{to_smallcaps('auto & pro compressor — guide')}</b> ✦\n\n"
-            f"• 🗜️ <b>{to_smallcaps('manual compression')}</b> :\n"
-            f"  • {to_smallcaps('send a video or reply with')} <code>/compress</code> {to_smallcaps('or')} <code>/compress 100MB</code>.\n"
-            f"  • {to_smallcaps('choose 720p, 480p, 360p, 1080p, crf 24, crf 20, or target size.')}\n\n"
-            f"• 🤖 <b>{to_smallcaps('auto-compress mode')}</b> :\n"
-            f"  • <code>/autocompress</code> : {to_smallcaps('toggle automatic 720p hd superfast compression.')}"
+            f"✦ <b>{to_smallcaps('fault-tolerant compressor & recovery — guide')}</b> ✦\n\n"
+            f"• 🗜️ <b>{to_smallcaps('manual & auto compression')}</b> :\n"
+            f"  • {to_smallcaps('send a video or reply with')} <code>/compress</code> {to_smallcaps('or')} <code>/compress 500MB</code>.\n"
+            f"  • {to_smallcaps('choose 5-min turbo, 720p, 480p, 360p, 1080p, h.265 hevc, remux, or target size.')}\n"
+            f"  • <code>/autocompress</code> : {to_smallcaps('toggle automatic compression.')}\n\n"
+            f"• ♻️ <b>{to_smallcaps('automatic task recovery')}</b> :\n"
+            f"  • <code>/taskreport</code> &amp; <code>/recover</code> : {to_smallcaps('auto-resumes tasks across restarts & server rebuilds!')}"
             f"{format_watermark_html()}"
         )
     elif cat == "streamer":
@@ -318,88 +330,56 @@ async def help_subpages(client: Client, query: CallbackQuery):
             f"  • <code>/cautostream</code> : {to_smallcaps('auto-attach 4-player stream buttons in channels.')}\n\n"
             f"• 📱 <b>{to_smallcaps('4 external players supported')}</b> :\n"
             f"  <code>1.</code> ▶️ <b>PLAYit</b> │ <code>2.</code> 🎬 <b>MX Player</b> │ <code>3.</code> 🔊 <b>VLC</b> │ <code>4.</code> 🚀 <b>S Player</b>\n\n"
-            f"• 📥 <code>/getfile &lt;id&gt;</code> : {to_smallcaps('retrieve file in telegram.')}\n"
-            f"• 🗑️ <code>/revokestream &lt;id&gt;</code> : {to_smallcaps('disable stream link anytime.')}"
+            f"• 📥 <code>/getfile &lt;id&gt;</code> &amp; 🗑️ <code>/revokestream &lt;id&gt;</code>"
             f"{format_watermark_html()}"
         )
     elif cat == "accept":
         text = (
             f"✦ <b>{to_smallcaps('auto-accept join requests — guide')}</b> ✦\n\n"
-            f"• 🤝 <b>{to_smallcaps('automatic join approval')}</b> :\n"
-            f"  • {to_smallcaps('add the bot as admin to your channel or group with invite users permission.')}\n"
-            f"  • {to_smallcaps('the bot automatically accepts all incoming join requests and sends a stylish welcome message!')}\n\n"
-            f"• ⚙️ <b>{to_smallcaps('commands')}</b> :\n"
-            f"  • <code>/accept</code> {to_smallcaps('or')} <code>/autoapprove</code> : {to_smallcaps('toggle auto-accept on/off.')}"
+            f"• 🤝 <code>/accept</code> {to_smallcaps('or')} <code>/autoapprove</code> : {to_smallcaps('toggle automatic join request approval.')}"
             f"{format_watermark_html()}"
         )
     elif cat == "thumbnail":
         text = (
             f"✦ <b>{to_smallcaps('smart thumbnail — guide')}</b> ✦\n\n"
-            f"• 🖼️ <b>{to_smallcaps('commands')}</b> :\n"
-            f"  • {to_smallcaps('send any photo or reply to a photo with')} <code>/setthumb</code>.\n"
-            f"  • <code>/setthumb &lt;url&gt;</code> : {to_smallcaps('set direct image url fallback.')}\n"
-            f"  • <code>/thumb</code> : {to_smallcaps('view active thumbnail.')}\n"
-            f"  • <code>/delthumb</code> : {to_smallcaps('delete custom thumbnail.')}"
+            f"• 🖼️ <code>/setthumb</code>, <code>/setthumb &lt;url&gt;</code>, <code>/thumb</code>, <code>/delthumb</code>"
             f"{format_watermark_html()}"
         )
     elif cat == "caption":
         text = (
             f"✦ <b>{to_smallcaps('auto dynamic captions — guide')}</b> ✦\n\n"
-            f"• 📝 <b>{to_smallcaps('commands')}</b> :\n"
-            f"  • <code>/autocaption</code> : {to_smallcaps('toggle auto-caption on/off.')}\n"
-            f"  • <code>/setcaption &lt;template&gt;</code> : {to_smallcaps('set custom caption template.')}\n"
-            f"  • <code>/addcaption &lt;template&gt;</code> : {to_smallcaps('add to cap[] queue.')}\n"
-            f"  • <code>/caption</code> : {to_smallcaps('view active caption & queue.')}\n"
-            f"  • <code>/delcaption</code> : {to_smallcaps('reset to default.')}\n"
-            f"  • <code>/cautocaption &lt;template&gt;</code> : {to_smallcaps('set channel auto-caption.')}\n\n"
-            f"• 🏷️ <b>{to_smallcaps('variables')}</b> : <code>{{filename}}</code>, <code>{{filesize}}</code>, <code>{{duration}}</code>, <code>{{language}}</code>, <code>{{audio_track}}</code>, <code>{{ext}}</code>"
+            f"• 📝 <code>/autocaption</code>, <code>/setcaption</code>, <code>/addcaption</code>, <code>/caption</code>, <code>/delcaption</code>"
             f"{format_watermark_html()}"
         )
     elif cat == "autodelete":
         text = (
             f"✦ <b>{to_smallcaps('auto-delete timer — guide')}</b> ✦\n\n"
-            f"• ⏱️ <code>/autodelete</code> : {to_smallcaps('open interactive timer menu.')}\n"
-            f"• ⏱️ <code>/autodelete &lt;seconds&gt;</code> : {to_smallcaps('set custom auto-delete delay.')}\n"
-            f"• ⏱️ <code>/cautodel &lt;10m|off&gt;</code> : {to_smallcaps('set channel post auto-delete timer.')}"
+            f"• ⏱️ <code>/autodelete</code>, <code>/autodelete &lt;seconds&gt;</code>, <code>/cautodel &lt;10m|off&gt;</code>"
             f"{format_watermark_html()}"
         )
     elif cat == "session":
         text = (
             f"✦ <b>{to_smallcaps('string session generator — guide')}</b> ✦\n\n"
-            f"• 🔑 <code>/session</code> : {to_smallcaps('interactive step-by-step pyrogram & telethon string session generator in telegram.')}"
+            f"• 🔑 <code>/session</code> : {to_smallcaps('interactive pyrogram & telethon string session generator.')}"
             f"{format_watermark_html()}"
         )
     elif cat == "filepro":
         text = (
             f"✦ <b>{to_smallcaps('file pro studio — guide')}</b> ✦\n\n"
-            f"• 📊 <code>/mediainfo</code> : {to_smallcaps('inspect full container, video, audio & subtitle streams.')}\n"
-            f"• 🎵 <code>/extractaudio</code> : {to_smallcaps('extract all audio tracks separately.')}\n"
-            f"• 💬 <code>/extractsub</code> : {to_smallcaps('extract all subtitle tracks (.srt/.ass).')}\n"
-            f"• ➕🎵 <code>/addaudio</code> : {to_smallcaps('mux or replace audio track in video.')}\n"
-            f"• ➕💬 <code>/addsub</code> : {to_smallcaps('soft-mux subtitle file into video.')}\n"
-            f"• ✂️ <code>/trim</code> : {to_smallcaps('trim video segment by start & end time.')}"
+            f"• 📊 <code>/mediainfo</code> • 🎵 <code>/extractaudio</code> • 💬 <code>/extractsub</code> • ➕🎵 <code>/addaudio</code> • ➕💬 <code>/addsub</code> • ✂️ <code>/trim</code> • 🎞️ <code>/sample</code> • 🔇 <code>/mutevideo</code> • 🔄 <code>/remux</code>"
             f"{format_watermark_html()}"
         )
     elif cat in ("tools", "cleaner"):
         text = (
-            f"✦ <b>{to_smallcaps('tools & service cleaner — guide')}</b> ✦\n\n"
-            f"• 🆔 <code>/id</code> &amp; <code>/info</code> &amp; <code>/whois</code> : {to_smallcaps('user & chat id inspector.')}\n"
-            f"• ⚡ <code>/ping</code>, <code>/usage</code> &amp; <code>/speedtest</code> : {to_smallcaps('server latency, live cpu/ram & network check.')}\n"
-            f"• 🔎 <code>/search &lt;query&gt;</code> : {to_smallcaps('search indexed stream files.')}\n"
-            f"• 🌐 <code>/web</code>, <code>/webss</code>, <code>/paste</code>, <code>/tr</code>, <code>/calc</code>, <code>/qr</code> : {to_smallcaps('pro web & utility tools.')}\n"
-            f"• 🧹 <code>/clean &lt;count&gt;</code> &amp; <code>/purge</code> : {to_smallcaps('purge group messages & service notices.')}\n"
-            f"• ❌ <code>/cancel</code> : {to_smallcaps('cancel active tasks & prompts.')}"
+            f"✦ <b>{to_smallcaps('tools, web utilities & service cleaner — guide')}</b> ✦\n\n"
+            f"• 🌐 <code>/uptime</code>, <code>/listup</code>, <code>/revoke</code>, <code>/web</code>, <code>/webss</code>, <code>/fwebss</code>\n"
+            f"• 🆔 <code>/id</code>, <code>/info</code>, <code>/ping</code>, <code>/usage</code>, <code>/speedtest</code>, <code>/search</code>, <code>/clean</code>, <code>/cancel</code>"
             f"{format_watermark_html()}"
         )
     elif cat == "admin":
         text = (
             f"✦ <b>{to_smallcaps('master admin control — guide')}</b> ✦\n\n"
-            f"• 👑 <code>/admin</code> {to_smallcaps('or')} <code>/panel</code> : {to_smallcaps('open master admin control panel.')}\n"
-            f"• 📊 <code>/stats</code>, <code>/dbstats</code>, <code>/cache</code>, <code>/logs</code> : {to_smallcaps('view live metrics & logs.')}\n"
-            f"• 📢 <code>/broadcast</code>, <code>/pin_broadcast</code>, <code>/grp_broadcast</code>, <code>/chnl_broadcast</code> : {to_smallcaps('multi-target broadcast.')}\n"
-            f"• 🚫 <code>/botban &lt;id&gt;</code> &amp; <code>/botunban &lt;id&gt;</code> : {to_smallcaps('manage bot user access.')}\n"
-            f"• 💬 <code>/chats</code>, <code>/leave</code>, <code>/disable</code>, <code>/enable</code> : {to_smallcaps('manage groups & channels.')}\n"
-            f"• 🔄 <code>/restart</code>, <code>/reboot</code>, <code>/update</code> : {to_smallcaps('server lifecycle controls.')}"
+            f"• 👑 <code>/admin</code>, <code>/panel</code>, <code>/stats</code>, <code>/dbstats</code>, <code>/cache</code>, <code>/logs</code>, <code>/taskreport</code>, <code>/recover</code>, <code>/broadcast</code>, <code>/restart</code>, <code>/update</code>"
             f"{format_watermark_html()}"
         )
 
