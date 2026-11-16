@@ -64,6 +64,7 @@ class Database:
         self.afk_col = self.db.user_afk if self.db is not None else None
         self.autofwd_col = self.db.autoforwards if self.db is not None else None
 
+        # High-speed L1 in-memory caches & complete offline fallbacks
         self._mem_users: Dict[int, Dict[str, Any]] = {}
         self._mem_groups: Dict[int, Dict[str, Any]] = {}
         self._mem_hd_grp: TTLCache = TTLCache(maxsize=2000, ttl=1800)
@@ -85,7 +86,6 @@ class Database:
             "global_antispam": False,
             "log_new_users": True,
             "log_new_groups": True,
-            "ai_enabled": True,
             "public_uptime": True,
             "channel_auto_sign": False,
             "auto_stream_global": True,
@@ -224,6 +224,7 @@ class Database:
             },
         }
 
+    # ─── Generic CRUD Helpers ─────────────────────────────────────────────
     async def create_data(self, collection_name: str, data: dict):
         if self.db is None:
             return None
@@ -256,28 +257,22 @@ class Database:
         except Exception:
             return None
 
+    # ─── Users Management ─────────────────────────────────────────────────
     async def add_user(self, id: int, name: str):
         uid = int(id)
-        name = name or "User"
         if uid not in self._mem_users:
             self._mem_users[uid] = self.new_user(uid, name)
         if self.col is not None:
             try:
-                await self.col.update_one(
-                    {"id": uid},
-                    {"$setOnInsert": self.new_user(uid, name)},
-                    upsert=True,
-                )
-                logger.info("👤 ᴅʙ ᴜsᴇʀ ʀᴇɢɪsᴛᴇʀᴇᴅ › ɪᴅ=%s ɴᴀᴍᴇ=%s", uid, name)
-                return
+                await self.col.update_one({"id": uid}, {"$setOnInsert": self._mem_users[uid]}, upsert=True)
             except Exception as e:
-                logger.debug("⚠️ ᴀᴅᴅ_ᴜsᴇʀ ᴘʀɪᴍᴀʀʏ ғᴀɪʟᴇᴅ › %s", e)
+                logger.debug("⚠️ ᴀᴅᴅ_ᴜsᴇʀ ғᴀʟʟʙᴀᴄᴋ › %s", e)
         try:
             from plugins.core_db import user_repo
-            await user_repo.get_or_create(uid, name)
+            await user_repo.get_or_create(uid, name or "User")
         except Exception:
             pass
-        logger.info("👤 ᴅʙ ᴜsᴇʀ ʀᴇɢɪsᴛᴇʀᴇᴅ (fallback) › ɪᴅ=%s ɴᴀᴍᴇ=%s", uid, name)
+        logger.info("👤 ᴅʙ ᴜsᴇʀ ʀᴇɢɪsᴛᴇʀᴇᴅ › ɪᴅ=%s ɴᴀᴍᴇ=%s", uid, name)
 
     async def is_user_exist(self, id: int) -> bool:
         uid = int(id)
@@ -291,13 +286,6 @@ class Database:
                     return True
             except Exception:
                 pass
-        try:
-            from plugins.core_db import user_repo
-            users = await user_repo.get_all_users()
-            if any(int(u.get("user_id") or u.get("id") or 0) == uid for u in users):
-                return True
-        except Exception:
-            pass
         return False
 
     async def total_users_count(self) -> int:
@@ -323,11 +311,7 @@ class Database:
         user_doc["ban_status"] = ban_status
         if self.col is not None:
             try:
-                await self.col.update_one(
-                    {"id": uid}, {"$set": {"ban_status": ban_status}}, upsert=True,
-                )
-                logger.info("🔓 ᴅʙ ᴜsᴇʀ ᴜɴʙᴀɴɴᴇᴅ › ɪᴅ=%s", uid)
-                return
+                await self.col.update_one({"id": uid}, {"$set": {"ban_status": ban_status}}, upsert=True)
             except Exception:
                 pass
         try:
@@ -335,7 +319,7 @@ class Database:
             await user_repo.unban_user(uid)
         except Exception:
             pass
-        logger.info("🔓 ᴅʙ ᴜsᴇʀ ᴜɴʙᴀɴɴᴇᴅ (fallback) › ɪᴅ=%s", uid)
+        logger.info("🔓 ᴅʙ ᴜsᴇʀ ᴜɴʙᴀɴɴᴇᴅ › ɪᴅ=%s", uid)
 
     async def ban_user(self, user_id: int, ban_reason: str = "ɴᴏ ʀᴇᴀsᴏɴ"):
         uid = int(user_id)
@@ -344,11 +328,7 @@ class Database:
         user_doc["ban_status"] = ban_status
         if self.col is not None:
             try:
-                await self.col.update_one(
-                    {"id": uid}, {"$set": {"ban_status": ban_status}}, upsert=True,
-                )
-                logger.info("🚫 ᴅʙ ᴜsᴇʀ ʙᴀɴɴᴇᴅ › ɪᴅ=%s ʀᴇᴀsᴏɴ=%s", uid, ban_reason)
-                return
+                await self.col.update_one({"id": uid}, {"$set": {"ban_status": ban_status}}, upsert=True)
             except Exception:
                 pass
         try:
@@ -356,7 +336,7 @@ class Database:
             await user_repo.ban_user(uid)
         except Exception:
             pass
-        logger.info("🚫 ᴅʙ ᴜsᴇʀ ʙᴀɴɴᴇᴅ (fallback) › ɪᴅ=%s ʀᴇᴀsᴏɴ=%s", uid, ban_reason)
+        logger.info("🚫 ᴅʙ ᴜsᴇʀ ʙᴀɴɴᴇᴅ › ɪᴅ=%s ʀᴇᴀsᴏɴ=%s", uid, ban_reason)
 
     async def get_ban_status(self, id: int) -> Dict[str, Any]:
         uid = int(id)
@@ -431,28 +411,22 @@ class Database:
                 logger.debug("⚠️ ɢᴇᴛ_ʙᴀɴɴᴇᴅ ᴡᴀʀɴɪɴɢ › %s", e)
         return sorted(b_users), sorted(b_chats)
 
+    # ─── Groups Management ────────────────────────────────────────────────
     async def add_chat(self, chat: int, title: str):
         cid = int(chat)
-        title = title or "Group"
-        if cid not in self._mem_groups:
-            self._mem_groups[cid] = self.new_group(cid, title)
+        chat_doc = self.new_group(cid, title)
+        self._mem_groups.setdefault(cid, chat_doc)
         if self.grp is not None:
             try:
-                await self.grp.update_one(
-                    {"id": cid},
-                    {"$setOnInsert": self.new_group(cid, title)},
-                    upsert=True,
-                )
-                logger.info("💬 ᴅʙ ɢʀᴏᴜᴘ ʀᴇɢɪsᴛᴇʀᴇᴅ › ɪᴅ=%s ᴛɪᴛʟᴇ=%s", cid, title)
-                return
-            except Exception as e:
-                logger.debug("⚠️ ᴀᴅᴅ_ᴄʜᴀᴛ ᴘʀɪᴍᴀʀʏ ғᴀɪʟᴇᴅ › %s", e)
+                await self.grp.update_one({"id": cid}, {"$setOnInsert": chat_doc}, upsert=True)
+            except Exception:
+                pass
         try:
             from plugins.core_db import chat_repo
-            await chat_repo.get_or_create_chat(cid, title, "group")
+            await chat_repo.get_or_create_chat(cid, title or "Group", "group")
         except Exception:
             pass
-        logger.info("💬 ᴅʙ ɢʀᴏᴜᴘ ʀᴇɢɪsᴛᴇʀᴇᴅ (fallback) › ɪᴅ=%s ᴛɪᴛʟᴇ=%s", cid, title)
+        logger.info("💬 ᴅʙ ɢʀᴏᴜᴘ ʀᴇɢɪsᴛᴇʀᴇᴅ › ɪᴅ=%s ᴛɪᴛʟᴇ=%s", cid, title)
 
     async def get_chat(self, chat: int):
         cid = int(chat)
@@ -545,6 +519,7 @@ class Database:
                 pass
         return list(by_id.values())
 
+    # ─── Channels Management & Channel Helper Config ──────────────────────
     async def get_channel_config(self, chat_id: int, title: str = "Channel") -> Dict[str, Any]:
         cid = int(chat_id)
         default = self.default_channel_config(cid, title=title)
@@ -667,6 +642,7 @@ class Database:
                 pass
         return list(self._mem_chnl_cfg.values())
 
+    # ─── Auto-Forward Rules Engine ────────────────────────────────────────
     async def add_autoforward_rule(
         self,
         user_id: int,
@@ -816,6 +792,7 @@ class Database:
                 pass
         return cnt
 
+    # ─── Helpdesk Group Config & Locks ────────────────────────────────────
     async def get_helpdesk_config(self, chat_id: int) -> Dict[str, Any]:
         cid = int(chat_id)
         default = self.default_helpdesk_group_config(cid)
@@ -905,6 +882,7 @@ class Database:
         uid = int(user_id)
         return uid in cfg.get("approved_users", []) or uid in cfg.get("trusted_users", [])
 
+    # ─── Warnings & Mod Logs ──────────────────────────────────────────────
     async def add_warning(
         self,
         chat_id: int,
@@ -1053,6 +1031,7 @@ class Database:
                 pass
         return sum(len(v) for v in self._mem_hd_logs.values())
 
+    # ─── Notes Management ─────────────────────────────────────────────────
     async def save_note(self, chat_id: int, name: str, note_data: Dict[str, Any]) -> None:
         cid = int(chat_id)
         key = name.strip().lower()
@@ -1137,6 +1116,7 @@ class Database:
                 pass
         return len(self._mem_notes)
 
+    # ─── Custom Auto-Filters Management ───────────────────────────────────
     async def save_filter(self, chat_id: int, trigger: str, filter_data: Dict[str, Any]) -> None:
         cid = int(chat_id)
         key = trigger.strip().lower()
@@ -1210,6 +1190,7 @@ class Database:
                 pass
         return len(self._mem_filters)
 
+    # ─── Word Blacklist Management ────────────────────────────────────────
     async def get_blacklist_config(self, chat_id: int) -> Dict[str, Any]:
         cid = int(chat_id)
         default = {"chat_id": cid, "words": [], "mode": "warn"}
@@ -1249,6 +1230,7 @@ class Database:
                 pass
         return dict(curr)
 
+    # ─── AFK Status Management ────────────────────────────────────────────
     async def set_afk(self, user_id: int, reason: str = "") -> Dict[str, Any]:
         uid = int(user_id)
         payload = {
@@ -1299,6 +1281,7 @@ class Database:
             logger.info("🌅 ᴜsᴇʀ ᴄʟᴇᴀʀᴇᴅ ᴀғᴋ › ᴜsᴇʀ=%s", uid)
         return prev
 
+    # ─── Global Bot Config & Storage Telemetry ────────────────────────────
     async def get_bot_config(self) -> Dict[str, Any]:
         if self.adm is not None:
             try:
@@ -1342,6 +1325,7 @@ class Database:
         except Exception as e:
             logger.debug("⚠️ ɢᴇᴛ_ᴅʙ_sᴛᴏʀᴀɢᴇ_sᴛᴀᴛs ᴡᴀʀɴɪɴɢ › %s", e)
             return 0.0, 512.0, 0.0
+
 
     async def get_all_group_notes(self, chat_id: int) -> Dict[str, Dict[str, Any]]:
         cid = int(chat_id)
