@@ -59,7 +59,7 @@ async def start_bot_and_services(bot: MMWProBot, service_tasks=None):
             asyncio.create_task(run_task_recovery_watchdog(bot, interval=Config.TASK_WATCHDOG_INTERVAL), name="mmw-task-recovery"),
         ])
 
-        logger.info(f"⚡ {to_smallcaps('mmw all-in-one pro engine running! stream, auto-forward, group/channel manager, recovery & ai ready.')}")
+        logger.info(f"⚡ {to_smallcaps('mmw all-in-one pro engine running! stream, auto-forward, group/channel manager & auto task recovery ready.')}")
     except Exception as e:
         logger.error(f"❌ {to_smallcaps('error starting bot services')}: {e}", exc_info=True)
 

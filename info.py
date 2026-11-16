@@ -41,26 +41,6 @@ def _parse_prefixes(raw_val: str) -> list:
     return parts
 
 
-def normalize_ai_base_url(raw_url: str) -> str:
-    cleaned = str(raw_url or "https://mmwaiapi.vercel.app/v1").strip().strip("\"'").rstrip("/")
-    if not cleaned.startswith(("http://", "https://")):
-        cleaned = "https://" + cleaned
-    for suffix in (
-        "/v1/models",
-        "/v1/chat/completions",
-        "/v1/chat/stream",
-        "/models",
-        "/chat/completions",
-        "/chat/stream",
-    ):
-        if cleaned.endswith(suffix):
-            cleaned = cleaned[: -len(suffix)].rstrip("/")
-            break
-    if not cleaned.endswith("/v1"):
-        cleaned = f"{cleaned}/v1"
-    return cleaned
-
-
 SESSION = _clean_env("SESSION", "MMW_Pro_Manager")
 API_ID = Config.API_ID
 API_HASH = Config.API_HASH
@@ -81,12 +61,6 @@ PICS = _clean_env("PICS", "https://envs.sh/E6C.mp4").split()
 KEEP_ALIVE_URL = _clean_env("KEEP_ALIVE_URL", Config.BASE_URL)
 FAST_CACHE_ENABLED = is_enabled(_clean_env("FAST_CACHE_ENABLED", "True"), True)
 WORK_DIR = Config.DOWNLOAD_DIR
-
-AI_BASE_URL = normalize_ai_base_url(_clean_env("AI_BASE_URL", "https://mmwaiapi.vercel.app/v1"))
-AI_MODELS_URL = f"{AI_BASE_URL}/models"
-AI_CHAT_STREAM_URL = f"{AI_BASE_URL}/chat/stream"
-AI_CHAT_COMPLETIONS_URL = f"{AI_BASE_URL}/chat/completions"
-AI_DEFAULT_MODEL = _clean_env("AI_DEFAULT_MODEL", "llama-3.3-70b")
 
 ADMINS = list(Config.ADMINS)
 CHANNELS = [
@@ -125,10 +99,10 @@ PROTECT_CONTENT = is_enabled(_clean_env("PROTECT_CONTENT", "False"), False)
 CUSTOM_FILE_CAPTION = _clean_env("CUSTOM_FILE_CAPTION", f"{script.CUSTOM_FILE_CAPTION}")
 BATCH_FILE_CAPTION = _clean_env("BATCH_FILE_CAPTION", CUSTOM_FILE_CAPTION)
 
-LOG_STR = "⚡ ᴍᴍᴡ ᴀʟʟ-ɪɴ-ᴏɴᴇ ᴘʀᴏ ɢʀᴏᴜᴘ & ᴄʜᴀɴɴᴇʟ ᴍᴀɴᴀɢᴇʀ + sᴛʀᴇᴀᴍ + ᴀɪ ᴄᴏɴꜰɪɢ:\n"
+LOG_STR = "⚡ ᴍᴍᴡ ᴀʟʟ-ɪɴ-ᴏɴᴇ ᴘʀᴏ ɢʀᴏᴜᴘ & ᴄʜᴀɴɴᴇʟ ᴍᴀɴᴀɢᴇʀ + sᴛʀᴇᴀᴍ + ʀᴇᴄᴏᴠᴇʀʏ ᴄᴏɴꜰɪɢ:\n"
 LOG_STR += "✅ ᴀᴜᴛᴏ ᴄᴀᴘᴛɪᴏɴ, ᴀᴜᴛᴏ ʀᴇɴᴀᴍᴇ, ᴀᴜᴛᴏ ꜰᴏʀᴡᴀʀᴅ, ᴀᴜᴛᴏ sᴛʀᴇᴀᴍ & ᴀᴜᴛᴏ sᴇᴛ: ᴀᴄᴛɪᴠᴇ ⚡\n"
 LOG_STR += "✅ ᴘʀᴏ ɢʀᴏᴜᴘ ᴍɢᴍᴛ & ʜᴇʟᴘᴅᴇsᴋ sʏsᴛᴇᴍ (/helpdesk): ᴀᴄᴛɪᴠᴇ 🛡️\n"
 LOG_STR += "✅ ᴘʀᴏ ᴄʜᴀɴɴᴇʟ ᴍᴀɴᴀɢᴇʀ & ʜᴇʟᴘᴇʀ (/channelhelp): ᴀᴄᴛɪᴠᴇ 📢\n"
 LOG_STR += "✅ ɴᴏᴛᴇs, ᴀᴜᴛᴏ-ꜰɪʟᴛᴇʀs, ʙʟᴀᴄᴋʟɪsᴛ, ᴀꜰᴋ & ᴛᴀɢᴀʟʟ: ᴀᴄᴛɪᴠᴇ 📝\n"
-LOG_STR += "✅ 24/7 ᴜᴘᴛɪᴍᴇ ᴍᴏɴɪᴛᴏʀ & ᴍᴜʟᴛɪ-ᴍᴏᴅᴇʟ ᴀɪ: ᴀᴄᴛɪᴠᴇ 🚀\n"
+LOG_STR += "✅ 24/7 ᴜᴘᴛɪᴍᴇ ᴍᴏɴɪᴛᴏʀ & ᴛᴀsᴋ ʀᴇᴄᴏᴠᴇʀʏ: ᴀᴄᴛɪᴠᴇ 🚀\n"
 LOG_STR += "✅ ᴅᴜᴀʟ-ʟᴀʏᴇʀ ꜰᴀsᴛ ᴄᴀᴄʜᴇ (ʀᴀᴍ + ᴍᴏɴɢᴏᴅʙ): ᴀᴄᴛɪᴠᴇ 💾\n"

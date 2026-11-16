@@ -487,7 +487,6 @@ class temp(object):
         "global_antispam": False,
         "log_new_users": True,
         "log_new_groups": True,
-        "ai_enabled": True,
         "public_uptime": True,
         "channel_auto_sign": False,
         "auto_stream_global": True,
