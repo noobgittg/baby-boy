@@ -24,7 +24,6 @@ class Config:
     if OWNER_ID not in ADMINS:
         ADMINS.append(OWNER_ID)
 
-    # Single Unified Database Configuration
     MONGO_URI: str = (
         _clean_env("MONGO_URI", "")
         or _clean_env("DATABASE_URI", "")
@@ -65,33 +64,29 @@ class Config:
     CHNL_LNK: str = _clean_env("CHNL_LNK", "https://t.me/mallumovieworldmain1")
     MAIN_CHANNEL: str = _clean_env("MAIN_CHANNEL", "https://t.me/mallumovieworldmain1")
 
-    # Ultra-fast cache and high-throughput streaming configuration
     CACHE_TTL: int = int(re.sub(r"\D", "", _clean_env("CACHE_TTL", "1800")) or "1800")
-    CACHE_MAX_ENTRIES: int = int(re.sub(r"\D", "", _clean_env("CACHE_MAX_ENTRIES", "8000")) or "8000")
+    CACHE_MAX_ENTRIES: int = int(re.sub(r"\D", "", _clean_env("CACHE_MAX_ENTRIES", "12000")) or "12000")
     STREAM_CHUNK_SIZE: int = int(re.sub(r"\D", "", _clean_env("STREAM_CHUNK_SIZE", str(4 * 1024 * 1024))) or str(4 * 1024 * 1024))
     STREAM_SPEED_LIMIT_MBPS: int = int(re.sub(r"\D", "", _clean_env("STREAM_SPEED_LIMIT_MBPS", "100")) or "100")
     STREAM_BUFFER_CHUNKS: int = int(re.sub(r"\D", "", _clean_env("STREAM_BUFFER_CHUNKS", "64")) or "64")
 
     DEFAULT_AUTO_DELETE: int = int(re.sub(r"\D", "", _clean_env("AUTO_DELETE_TIME", "0")) or "0")
     FORCE_SUB_CHANNEL: str = _clean_env("FORCE_SUB_CHANNEL", _clean_env("FORCE_SUB", ""))
-    WORKERS: int = int(re.sub(r"\D", "", _clean_env("WORKERS", "128")) or "128")
-    TG_TRANSMISSION_WORKERS: int = max(1, int(re.sub(r"\D", "", _clean_env("TG_TRANSMISSION_WORKERS", "64")) or "64"))
-    # Unlimited concurrent task admission (0 = unlimited queue + controlled parallel execution without FloodWait)
+    WORKERS: int = int(re.sub(r"\D", "", _clean_env("WORKERS", "64")) or "64")
+    TG_TRANSMISSION_WORKERS: int = max(1, min(16, int(re.sub(r"\D", "", _clean_env("TG_TRANSMISSION_WORKERS", "12")) or "12")))
     MAX_CONCURRENT_TASKS: int = int(re.sub(r"\D", "", _clean_env("MAX_CONCURRENT_TASKS", "0")) or "0")
     FFMPEG_PARALLEL_JOBS: int = max(4, int(re.sub(r"\D", "", _clean_env("FFMPEG_PARALLEL_JOBS", "32")) or "32"))
     KEEPALIVE_INTERVAL: int = max(5, int(re.sub(r"\D", "", _clean_env("KEEPALIVE_INTERVAL", "15")) or "15"))
     RESTART_INTERVAL: int = max(3600, int(re.sub(r"\D", "", _clean_env("RESTART_INTERVAL", "86400")) or "86400"))
 
-    # Centralized Telegram API Rate-Limit & Coalescing Configuration
-    GLOBAL_RPC_RATE_PER_SEC: float = float(_clean_env("GLOBAL_RPC_RATE_PER_SEC", "24.0") or "24.0")
-    PER_CHAT_RPC_RATE_PER_SEC: float = float(_clean_env("PER_CHAT_RPC_RATE_PER_SEC", "1.0") or "1.0")
-    PER_CHAT_EDIT_INTERVAL_SEC: float = float(_clean_env("PER_CHAT_EDIT_INTERVAL_SEC", "2.8") or "2.8")
-    PROGRESS_EDIT_MIN_INTERVAL_SEC: float = float(_clean_env("PROGRESS_EDIT_MIN_INTERVAL_SEC", "3.5") or "3.5")
+    GLOBAL_RPC_RATE_PER_SEC: float = float(_clean_env("GLOBAL_RPC_RATE_PER_SEC", "28.0") or "28.0")
+    PER_CHAT_RPC_RATE_PER_SEC: float = float(_clean_env("PER_CHAT_RPC_RATE_PER_SEC", "4.0") or "4.0")
+    PER_CHAT_EDIT_INTERVAL_SEC: float = float(_clean_env("PER_CHAT_EDIT_INTERVAL_SEC", "2.0") or "2.0")
+    PROGRESS_EDIT_MIN_INTERVAL_SEC: float = float(_clean_env("PROGRESS_EDIT_MIN_INTERVAL_SEC", "3.0") or "3.0")
 
-    # Fault-Tolerant Persistent Task Recovery Configuration
     TASK_RECOVERY_ENABLED: bool = _clean_env("TASK_RECOVERY_ENABLED", "true").lower() in ("true", "1", "yes", "on")
     TASK_MAX_RETRIES: int = max(1, int(re.sub(r"\D", "", _clean_env("TASK_MAX_RETRIES", "4")) or "4"))
-    TASK_WATCHDOG_INTERVAL: int = max(5, int(re.sub(r"\D", "", _clean_env("TASK_WATCHDOG_INTERVAL", "12")) or "12"))
+    TASK_WATCHDOG_INTERVAL: int = max(5, int(re.sub(r"\D", "", _clean_env("TASK_WATCHDOG_INTERVAL", "15")) or "15"))
 
     DOWNLOAD_DIR: str = os.path.join(os.getcwd(), "downloads")
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)

@@ -23,6 +23,7 @@ from config import Config
 from database.users_chats_db import db
 from info import *
 from plugins.core_utils import (
+    cache,
     LOG_FILE_PATH,
     MEMORY_LOGS,
     FLOODWAIT_STATS,
@@ -202,10 +203,12 @@ async def safe_edit_message(
                 )
                 rate_limit_manager.record_rpc_success()
                 rate_limit_manager.commit_signature(chat_id, msg_id, sig)
+                cache.auto_clear_after_response_sync()
                 return True
             except MessageNotModified:
                 rate_limit_manager.record_rpc_success()
                 rate_limit_manager.commit_signature(chat_id, msg_id, sig)
+                cache.auto_clear_after_response_sync()
                 return True
             except FloodWait as fw:
                 wait_s = _flood_wait_seconds(fw)
@@ -247,7 +250,6 @@ def _read_all_log_lines() -> List[str]:
     if fsize > 0 and os.path.isfile(LOG_FILE_PATH):
         try:
             with open(LOG_FILE_PATH, "r", encoding="utf-8", errors="ignore") as f:
-                # If log file is huge (>1MB), read the last 512KB for fast responsiveness
                 if fsize > 1024 * 1024:
                     f.seek(max(0, fsize - 512 * 1024))
                     f.readline()
@@ -502,6 +504,7 @@ async def auto_clean_expired_cache_job() -> None:
             await asyncio.sleep(300)
             before = len(USER_CACHE._store)
             USER_CACHE._purge_expired()
+            await cache.auto_clear_after_response()
             after = len(USER_CACHE._store)
             if before != after:
                 logger.info("🧹 ᴄᴀᴄʜᴇ ᴘᴜʀɢᴇ ᴄʏᴄʟᴇ › ʀᴇᴍᴏᴠᴇᴅ=%s ʀᴇᴍᴀɪɴɪɴɢ=%s", before - after, after)
