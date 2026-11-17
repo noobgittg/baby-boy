@@ -327,7 +327,13 @@ async def extract_all_commands_handler(client: Client, message: Message):
 
     except Exception as e:
         logger.error("❌ ᴇʀʀᴏʀ ᴅᴜʀɪɴɢ ᴄᴏᴍᴍᴀɴᴅ ᴇxᴛʀᴀᴄᴛɪᴏɴ: %s", e, exc_info=True)
-        await status_msg.edit_text(
-            f"❌ **{to_smallcap('Extraction Failed')}**\n`{str(e)}`",
-            parse_mode=enums.ParseMode.MARKDOWN,
-        )
+        try:
+            await status_msg.edit_text(
+                f"❌ **{to_smallcap('Extraction Failed')}**\n`{str(e)}`",
+                parse_mode=enums.ParseMode.MARKDOWN,
+            )
+        except Exception:
+            await message.reply_text(
+                f"❌ **{to_smallcap('Extraction Failed')}**\n`{str(e)}`",
+                parse_mode=enums.ParseMode.MARKDOWN,
+            )

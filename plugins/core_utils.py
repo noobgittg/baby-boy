@@ -220,8 +220,66 @@ def _flood_wait_seconds(error: Exception) -> int:
         return 1
 
 
-def _compute_edit_signature(text: str, reply_markup: Any = None) -> str:
+def get_msg_text(msg: Any) -> str:
+    """Safely extract text or caption from a Message (or return string directly if msg is already a str)."""
+    if msg is None:
+        return ""
+    if isinstance(msg, str):
+        return msg
+    txt = getattr(msg, "text", None)
+    if isinstance(txt, str):
+        return txt
+    cap = getattr(msg, "caption", None)
+    if isinstance(cap, str):
+        return cap
+    return str(txt or cap or "")
+
+
+def _normalize_reply_markup(reply_markup: Any) -> Any:
+    """Normalize InlineKeyboardMarkup rows so strings or 1D button lists never raise AttributeError on .text."""
+    if reply_markup is None:
+        return None
+    try:
+        from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        rows = getattr(reply_markup, "inline_keyboard", None)
+        if rows is not None:
+            norm_rows = []
+            for r in rows:
+                if isinstance(r, (list, tuple)):
+                    row_btns = []
+                    for b in r:
+                        if isinstance(b, str):
+                            row_btns.append(InlineKeyboardButton(b, callback_data="noop"))
+                        elif isinstance(b, dict):
+                            row_btns.append(
+                                InlineKeyboardButton(
+                                    str(b.get("text", "Button")),
+                                    callback_data=b.get("callback_data"),
+                                    url=b.get("url"),
+                                )
+                            )
+                        elif b is not None:
+                            if not hasattr(b, "text"):
+                                setattr(b, "text", str(b))
+                            row_btns.append(b)
+                    if row_btns:
+                        norm_rows.append(row_btns)
+                elif isinstance(r, str):
+                    norm_rows.append([InlineKeyboardButton(r, callback_data="noop")])
+                elif r is not None:
+                    if not hasattr(r, "text"):
+                        setattr(r, "text", str(r))
+                    norm_rows.append([r])
+            reply_markup.inline_keyboard = norm_rows
+    except Exception:
+        pass
+    return reply_markup
+
+
+def _compute_edit_signature(text: Any, reply_markup: Any = None) -> str:
     """Compute a deterministic hash signature of message text + inline keyboard markup."""
+    if not isinstance(text, str):
+        text = get_msg_text(text)
     markup_str = ""
     if reply_markup is not None:
         try:
@@ -229,8 +287,14 @@ def _compute_edit_signature(text: str, reply_markup: Any = None) -> str:
             if rows:
                 parts = []
                 for r in rows:
-                    for b in r:
-                        parts.append(f"{getattr(b, 'text', '')}:{getattr(b, 'callback_data', '')}:{getattr(b, 'url', '')}")
+                    row_iter = r if isinstance(r, (list, tuple)) else [r]
+                    for b in row_iter:
+                        if isinstance(b, str):
+                            parts.append(f"{b}::")
+                        elif isinstance(b, dict):
+                            parts.append(f"{b.get('text', '')}:{b.get('callback_data', '')}:{b.get('url', '')}")
+                        else:
+                            parts.append(f"{getattr(b, 'text', '')}:{getattr(b, 'callback_data', '')}:{getattr(b, 'url', '')}")
                 markup_str = "|".join(parts)
             else:
                 markup_str = str(reply_markup)
@@ -241,7 +305,7 @@ def _compute_edit_signature(text: str, reply_markup: Any = None) -> str:
 
 
 def _extract_msg_identity(message: Any) -> Tuple[int, int]:
-    if message is None:
+    if message is None or isinstance(message, (str, bytes, int, float, bool)):
         return (0, 0)
     chat = getattr(message, "chat", None)
     chat_id = int(getattr(chat, "id", 0) or getattr(message, "chat_id", 0) or 0)
@@ -777,7 +841,7 @@ async def execute_with_floodwait(
     return None
 
 
-async def safe_edit_text(message: Any, text: str, **kwargs: Any) -> Any:
+async def safe_edit_text(message: Any, text: Any = "", **kwargs: Any) -> Any:
     """
     Centralized, deduplicated, and coalesced message editor:
     - Avoids editing unchanged messages (content + reply_markup signature check).
@@ -788,6 +852,14 @@ async def safe_edit_text(message: Any, text: str, **kwargs: Any) -> Any:
     global _TELEGRAM_WRITE_BLOCK_UNTIL, _PROGRESS_EDIT_BLOCK_UNTIL
     if message is None:
         return None
+    if isinstance(message, str) and not isinstance(text, str) and hasattr(text, "chat"):
+        message, text = text, message
+    if isinstance(message, (str, bytes, int, float, bool)):
+        return None
+    if not isinstance(text, str):
+        text = get_msg_text(text)
+    if "reply_markup" in kwargs and kwargs["reply_markup"] is not None:
+        kwargs["reply_markup"] = _normalize_reply_markup(kwargs["reply_markup"])
 
     chat_id, msg_id = _extract_msg_identity(message)
     reply_markup = kwargs.get("reply_markup")
@@ -890,11 +962,19 @@ async def safe_edit_text(message: Any, text: str, **kwargs: Any) -> Any:
         return message
 
 
-async def safe_reply_text(target: Any, text: str, **kwargs: Any) -> Any:
+async def safe_reply_text(target: Any, text: Any = "", **kwargs: Any) -> Any:
     """Reliable reply creation with centralized rate-limit pacing, FloodWait retry, and auto post-response cache clear."""
     global _TELEGRAM_WRITE_BLOCK_UNTIL
     if target is None:
         return None
+    if isinstance(target, str) and not isinstance(text, str) and hasattr(text, "chat"):
+        target, text = text, target
+    if isinstance(target, (str, bytes, int, float, bool)):
+        return None
+    if not isinstance(text, str):
+        text = get_msg_text(text)
+    if "reply_markup" in kwargs and kwargs["reply_markup"] is not None:
+        kwargs["reply_markup"] = _normalize_reply_markup(kwargs["reply_markup"])
     chat_id, _ = _extract_msg_identity(target)
     for attempt in range(4):
         try:

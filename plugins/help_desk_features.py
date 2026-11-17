@@ -2705,7 +2705,7 @@ def _check_message_violates_locks(message: Message, locks: Dict[str, Any]) -> Op
 
 @Client.on_message(filters.group & filters.incoming & ~filters.service, group=3)
 async def hd_security_and_flood_watchdog(client: Client, message: Message):
-    if not message.from_user or message.from_user.is_self:
+    if not message.from_user or getattr(message.from_user, "is_self", False):
         return
 
     chat_id = message.chat.id
@@ -2841,14 +2841,17 @@ async def hd_security_and_flood_watchdog(client: Client, message: Message):
 @Client.on_message(filters.command(["nightmode", "gautoreact", "cleanblue"], prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def hd_extra_pro_group_cmds(client: Client, message: Message):
     """Toggle Night Mode (media/sticker/link lock), Group Auto-Reaction, or Clean Blue Command Deletion."""
-    ok, chat_id, _, cfg = await verify_group_and_permissions(
+    ok, _, _, _ = await verify_group_and_permissions(
         client, message, require_bot_admin=False, allow_channel=False
     )
     if not ok:
         return
 
+    chat_id = message.chat.id
+    cfg = await db.get_helpdesk_config(chat_id)
     cmd = message.command[0].lower()
-    arg = message.text.split(None, 1)[1].strip() if message.text and len(message.text.split(None, 1)) > 1 else ""
+    msg_txt = getattr(message, "text", None) or getattr(message, "caption", None) or ""
+    arg = msg_txt.split(None, 1)[1].strip() if msg_txt and len(msg_txt.split(None, 1)) > 1 else ""
 
     if cmd == "nightmode":
         nm = not bool(cfg.get("nightmode_enabled", False)) if not arg else (arg.lower() in ("on", "true", "1", "yes", "enable"))

@@ -9,7 +9,7 @@ from pyrogram.types import (
 from config import Config
 from info import COMMAND_PREFIXES
 from plugins.core_db import file_repo, user_repo
-from plugins.core_utils import cache, to_smallcaps, format_watermark, humanbytes, time_formatter, logger, safe_forward_message, safe_edit_text, execute_with_floodwait
+from plugins.core_utils import cache, to_smallcaps, format_watermark, humanbytes, time_formatter, logger, safe_forward_message, safe_edit_text, safe_reply_text, execute_with_floodwait
 from plugins.media_types import is_code_file, detect_code_language
 from plugins.core_web import build_4_external_player_links
 from plugins.core_services import telegram_media_metadata
@@ -67,7 +67,7 @@ async def stream_callback_entry(client: Client, query: CallbackQuery):
 
 
 async def generate_stream_response(client: Client, media_msg: Message, target_reply: Message, is_callback: bool = False):
-    status = await (safe_edit_text if is_callback else target_reply.reply_text)(target_reply, 
+    status = await (safe_edit_text if is_callback else safe_reply_text)(target_reply, 
         f"⚡ **{to_smallcaps('generating adaptive range stream link...')}**"
     )
 

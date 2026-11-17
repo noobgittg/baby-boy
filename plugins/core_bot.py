@@ -36,6 +36,12 @@ def _wrap_handler_with_auto_cache(callback):
     @functools.wraps(callback)
     async def _wrapped(client, update, *args, **kwargs):
         propagated = False
+        if update is not None and not isinstance(update, str):
+            if getattr(update, "text", None) is None and getattr(update, "caption", None) is not None and getattr(update, "command", None):
+                try:
+                    setattr(update, "text", update.caption)
+                except Exception:
+                    pass
         async with cache.response_scope(getattr(callback, "__name__", "handler")) as scope_ctx:
             try:
                 return await callback(client, update, *args, **kwargs)
@@ -114,6 +120,34 @@ class MMWProBot(Client):
                     raise
                 await pro_floodwait_sleep(wait_s, f"MMWProBot.invoke({rpc_name})")
                 continue
+
+    async def send_poll(self, chat_id: Union[int, str], question: str, options: list, *args, **kwargs):
+        norm_opts = []
+        try:
+            from pyrogram.types import InputPollOption
+            has_ipo = True
+        except ImportError:
+            InputPollOption = None
+            has_ipo = False
+
+        class _CompatPollOption(str):
+            def __new__(cls, val: str):
+                obj = super().__new__(cls, str(val))
+                obj.text = str(val)
+                obj.entities = []
+                obj.parse_mode = None
+                return obj
+
+        for opt in (options or []):
+            if isinstance(opt, str):
+                norm_opts.append(InputPollOption(text=opt) if has_ipo else _CompatPollOption(opt))
+            else:
+                norm_opts.append(opt)
+        try:
+            return await super().send_poll(chat_id, question, norm_opts, *args, **kwargs)
+        except (AttributeError, TypeError):
+            fallback_opts = [_CompatPollOption(getattr(o, "text", str(o))) for o in (options or [])]
+            return await super().send_poll(chat_id, question, fallback_opts, *args, **kwargs)
 
     async def start(self):
         t0 = time.perf_counter()

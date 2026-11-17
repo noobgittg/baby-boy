@@ -5,7 +5,10 @@ import json
 import logging
 import operator
 from urllib.parse import quote_plus
-import aiohttp
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from info import COMMAND_PREFIXES

@@ -286,8 +286,8 @@ async def pro_extaudio_callback(client: Client, query: CallbackQuery):
     await run_extract_all_audio(client, original, query.message, is_callback=True)
 
 async def run_extract_all_audio(client: Client, media_msg: Message, target_msg: Message, is_callback: bool = False):
-    status = await (target_msg.edit_text if is_callback else target_msg.reply_text)(
-        f"⏳ **{to_smallcaps('initializing audio extraction...')}**"
+    status = await (safe_edit_text if is_callback else safe_reply_text)(
+        target_msg, f"⏳ **{to_smallcaps('initializing audio extraction...')}**"
     )
 
     media = media_msg.video or media_msg.document
@@ -382,8 +382,8 @@ async def pro_extsub_callback(client: Client, query: CallbackQuery):
     await run_extract_all_sub(client, original, query.message, is_callback=True)
 
 async def run_extract_all_sub(client: Client, media_msg: Message, target_msg: Message, is_callback: bool = False):
-    status = await (target_msg.edit_text if is_callback else target_msg.reply_text)(
-        f"⏳ **{to_smallcaps('initializing subtitle extraction...')}**"
+    status = await (safe_edit_text if is_callback else safe_reply_text)(
+        target_msg, f"⏳ **{to_smallcaps('initializing subtitle extraction...')}**"
     )
 
     media = media_msg.video or media_msg.document

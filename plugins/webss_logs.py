@@ -104,7 +104,7 @@ async def web_cmd(client: Client, message: Message):
     try:
         resp = await asyncio.to_thread(requests.get, url, timeout=10)
         resp.raise_for_status()
-        raw_text = resp.text
+        raw_text = resp if isinstance(resp, str) else (await resp.text() if callable(getattr(resp, 'text', None)) else str(getattr(resp, 'text', '') or ''))
 
         if len(raw_text) > 5 * 1024 * 1024:
             await safe_edit_message(status_msg, "⚠️ <b>ᴛᴇxᴛ ᴛᴏᴏ ʟᴀʀɢᴇ</b> (&gt;5ᴍʙ). ᴄᴀɴ'ᴛ ғᴇᴛᴄʜ.", parse_mode=enums.ParseMode.HTML)
@@ -200,7 +200,7 @@ async def web_cmdi(client: Client, message: Message):
                         parse_mode=enums.ParseMode.HTML,
                     )
                     return
-                raw_text = await resp.text()
+                raw_text = resp if isinstance(resp, str) else (await resp.text() if callable(getattr(resp, 'text', None)) else str(getattr(resp, 'text', '') or ''))
                 if len(raw_text) > 5 * 1024 * 1024:
                     await safe_edit_message(status_msg, "⚠️ <b>ᴛᴇxᴛ ᴛᴏᴏ ʟᴀʀɢᴇ</b> (&gt;5ᴍʙ). ᴄᴀɴ'ᴛ ғᴇᴛᴄʜ.", parse_mode=enums.ParseMode.HTML)
                     return
@@ -239,7 +239,7 @@ async def web_cmdi(client: Client, message: Message):
 
     except asyncio.TimeoutError:
         await safe_edit_message(status_msg, "❌ <b>ғᴀɪʟᴇᴅ:</b> ʀᴇǫᴜᴇsᴛ ᴛɪᴍᴇᴅ ᴏᴜᴛ.", parse_mode=enums.ParseMode.HTML)
-    except aiohttp.ClientError as e:
+    except Exception as e:
         await safe_edit_message(status_msg, f"❌ <b>ғᴀɪʟᴇᴅ:</b> ɴᴇᴛᴡᴏʀᴋ ᴇʀʀᴏʀ — <code>{html.escape(str(e))}</code>", parse_mode=enums.ParseMode.HTML)
     except Exception as e:
         await safe_edit_message(status_msg, f"❌ <b>ғᴀɪʟᴇᴅ:</b> <code>{html.escape(str(e))}</code>", parse_mode=enums.ParseMode.HTML)

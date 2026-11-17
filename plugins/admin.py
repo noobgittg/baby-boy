@@ -10,7 +10,10 @@ import subprocess
 import sys
 import time
 
-import psutil
+try:
+    import psutil
+except ImportError:
+    from plugins.PING import psutil
 from pyrogram import Client, enums, filters
 from pyrogram.types import (
     CallbackQuery,

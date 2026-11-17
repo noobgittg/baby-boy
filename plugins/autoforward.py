@@ -296,7 +296,7 @@ async def customize_autoforward_template_cmd(client: Client, message: Message):
         "fsetheader": "header_text",
         "fsetfooter": "footer_text",
     }
-    field = field_map[cmd]
+    field = field_map.get(cmd, "footer_text")
     updated = await db.update_autoforward_rule(rid, {field: val})
     if not updated:
         return await message.reply_text(f"❌ <b>{to_smallcaps('route not found')}:</b> <code>{html.escape(rid)}</code>", parse_mode=enums.ParseMode.HTML)

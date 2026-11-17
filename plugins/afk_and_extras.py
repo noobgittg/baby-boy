@@ -23,7 +23,8 @@ async def set_afk_cmd(client: Client, message: Message):
     """Set user status as AFK (Away From Keyboard) with an optional reason."""
     if not message.from_user:
         return
-    reason = message.text.split(None, 1)[1].strip() if len(message.text.split(None, 1)) > 1 else "ʙᴜsʏ / ᴀᴡᴀʏ ғʀᴏᴍ ᴋᴇʏʙᴏᴀʀᴅ"
+    msg_txt = getattr(message, "text", None) or getattr(message, "caption", None) or ""
+    reason = msg_txt.split(None, 1)[1].strip() if len(msg_txt.split(None, 1)) > 1 else "ʙᴜsʏ / ᴀᴡᴀʏ ғʀᴏᴍ ᴋᴇʏʙᴏᴀʀᴅ"
     await db.set_afk(message.from_user.id, reason)
     await message.reply_text(
         f"💤 <b>{message.from_user.mention} ɪs ɴᴏᴡ ᴀғᴋ!</b>\n"
@@ -340,61 +341,43 @@ async def list_group_bots_cmd(client: Client, message: Message):
 
 @Client.on_message(filters.command(["poll", "cpoll"], prefixes=COMMAND_PREFIXES))
 async def create_poll_cmd(client: Client, message: Message):
-    if not isinstance(message, Message):
-        logger.error(
-            "Poll handler received invalid object: %s",
-            type(message).__name__
-        )
+    """Create an interactive Telegram poll in the group or channel."""
+    ok, _, _, _ = await verify_group_and_permissions(
+        client, message, require_bot_admin=False, allow_channel=True
+    )
+    if not ok:
         return
 
-    try:
-        ok, _, _, _ = await verify_group_and_permissions(
-            client,
-            message,
-            require_bot_admin=False,
-            allow_channel=True
+    raw = message.text.split(None, 1)[1].strip() if message.text and len(message.text.split(None, 1)) > 1 else ""
+    parts = [p.strip() for p in raw.split("|") if p.strip()]
+    if len(parts) < 3:
+        return await message.reply_text(
+            "⚠️ <b>ᴜsᴀɢᴇ:</b> <code>/poll Question | Option 1 | Option 2 | Option 3</code>\n"
+            "<i>(ᴘʀᴏᴠɪᴅᴇ ᴀ ǫᴜᴇsᴛɪᴏɴ ᴀɴᴅ 2–10 ᴏᴘᴛɪᴏɴs sᴇᴘᴀʀᴀᴛᴇᴅ ʙʏ <code>|</code>)</i>",
+            quote=True,
+            parse_mode=enums.ParseMode.HTML,
         )
 
-        if not ok:
-            return
-
-        text = message.text or message.caption or ""
-        args = text.split(maxsplit=1)
-        raw = args[1].strip() if len(args) > 1 else ""
-
-        parts = [p.strip() for p in raw.split("|") if p.strip()]
-
-        if len(parts) < 3 or len(parts) > 11:
-            return await message.reply_text(
-                "⚠️ <b>ᴜsᴀɢᴇ:</b>\n"
-                "<code>/poll Question | Option 1 | Option 2</code>\n\n"
-                "<i>ᴘʀᴏᴠɪᴅᴇ 1 ǫᴜᴇsᴛɪᴏɴ ᴀɴᴅ 2–10 ᴏᴘᴛɪᴏɴs.</i>",
-                quote=True,
-                parse_mode=enums.ParseMode.HTML
-            )
-
-        question = parts[0][:255]
-        options = [option[:100] for option in parts[1:]]
-
+    question = parts[0][:255]
+    raw_options = [o[:100] for o in parts[1:11]]
+    try:
+        from pyrogram.types import InputPollOption
+        options = [InputPollOption(text=o) for o in raw_options]
+    except ImportError:
+        class _PollOpt(str):
+            def __new__(cls, v: str):
+                obj = super().__new__(cls, v)
+                obj.text = v
+                obj.entities = []
+                return obj
+        options = [_PollOpt(o) for o in raw_options]
+    try:
         await client.send_poll(
-            chat_id=message.chat.id,
+            message.chat.id,
             question=question,
             options=options,
-            is_anonymous=message.chat.type == enums.ChatType.CHANNEL
+            is_anonymous=False if message.chat.type != enums.ChatType.CHANNEL else True,
         )
-
-        logger.info(
-            "Poll created successfully: chat=%s options=%s",
-            message.chat.id,
-            len(options)
-        )
-
+        logger.info("📊 /poll ᴄʀᴇᴀᴛᴇᴅ › ᴄʜᴀᴛ=%s ᴏᴘᴛɪᴏɴs=%s", message.chat.id, len(options))
     except Exception as e:
-        logger.exception("Poll creation failed")
-
-        await message.reply_text(
-            f"❌ <b>ᴘᴏʟʟ ᴇʀʀᴏʀ:</b>\n"
-            f"<code>{html.escape(str(e))}</code>",
-            quote=True,
-            parse_mode=enums.ParseMode.HTML
-        )
+        await message.reply_text(f"❌ <b>ᴘᴏʟʟ ᴇʀʀᴏʀ:</b> <code>{html.escape(str(e))}</code>", quote=True, parse_mode=enums.ParseMode.HTML)

@@ -10,8 +10,13 @@ from utils import format_watermark_html, safe_edit_message
 @Client.on_message(filters.private & filters.photo)
 async def auto_save_photo_as_thumb(client: Client, message: Message):
     """Automatically saves any photo sent in private chat as the user's custom thumbnail."""
+    if not message.from_user or not message.photo:
+        return
     user_id = message.from_user.id
-    thumb_id = message.photo.file_id
+    photo_obj = message.photo[-1] if isinstance(message.photo, list) else message.photo
+    thumb_id = getattr(photo_obj, "file_id", None)
+    if not thumb_id:
+        return
     await user_repo.update_user(user_id, {"thumb_id": thumb_id})
     buttons = [
         [
@@ -37,7 +42,8 @@ async def auto_save_photo_as_thumb(client: Client, message: Message):
 async def set_thumb_handler(client: Client, message: Message):
     user_id = message.from_user.id
     if message.reply_to_message and message.reply_to_message.photo:
-        thumb_id = message.reply_to_message.photo.file_id
+        r_photo = message.reply_to_message.photo[-1] if isinstance(message.reply_to_message.photo, list) else message.reply_to_message.photo
+        thumb_id = getattr(r_photo, "file_id", None)
         await user_repo.update_user(user_id, {"thumb_id": thumb_id})
         return await message.reply_text(
             f"✦ **{to_smallcaps('thumbnail updated')}** ✦\n\n"

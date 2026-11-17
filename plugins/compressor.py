@@ -58,7 +58,14 @@ from plugins.core_services import (
 from plugins.media_types import is_code_file, detect_code_language, is_audio_mime, is_video_mime, normalize_mime
 
 MAX_BOT_FILE_SIZE = int(getattr(Config, "LARGE_FILE_THRESHOLD_BYTES", 2 * 1024 * 1024 * 1024))
-_RECOVERY_LOCK = asyncio.Lock()
+_RECOVERY_LOCK = None
+
+
+def _get_recovery_lock() -> asyncio.Lock:
+    global _RECOVERY_LOCK
+    if _RECOVERY_LOCK is None:
+        _RECOVERY_LOCK = asyncio.Lock()
+    return _RECOVERY_LOCK
 _IN_FLIGHT_IDEMPOTENCY: Dict[str, str] = {}
 
 
@@ -1642,7 +1649,7 @@ async def recover_and_complete_pending_tasks(bot: Any, trigger_source: str = "st
     if not getattr(Config, "TASK_RECOVERY_ENABLED", True):
         return await generate_task_execution_report()
 
-    async with _RECOVERY_LOCK:
+    async with _get_recovery_lock():
         task_manager._recovery_metrics["last_recovery_run_ts"] = float(time.time())
         task_manager._recovery_metrics["status"] = f"recovering ({trigger_source})"
         recoverable = await task_repo.get_recoverable_tasks()
