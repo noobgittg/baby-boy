@@ -66,6 +66,10 @@ class Config:
 
     CACHE_TTL: int = int(re.sub(r"\D", "", _clean_env("CACHE_TTL", "1800")) or "1800")
     CACHE_MAX_ENTRIES: int = int(re.sub(r"\D", "", _clean_env("CACHE_MAX_ENTRIES", "12000")) or "12000")
+    CACHE_CLEANUP_INTERVAL: int = max(30, int(re.sub(r"\D", "", _clean_env("CACHE_CLEANUP_INTERVAL", "300")) or "300"))
+    # Rename/upload workflows remain limited to files at or below 2 GiB.
+    # Compression and HTTP range streaming intentionally do not use this limit.
+    LARGE_FILE_THRESHOLD_BYTES: int = 2 * 1024 * 1024 * 1024
     STREAM_CHUNK_SIZE: int = int(re.sub(r"\D", "", _clean_env("STREAM_CHUNK_SIZE", str(4 * 1024 * 1024))) or str(4 * 1024 * 1024))
     STREAM_SPEED_LIMIT_MBPS: int = int(re.sub(r"\D", "", _clean_env("STREAM_SPEED_LIMIT_MBPS", "100")) or "100")
     STREAM_BUFFER_CHUNKS: int = int(re.sub(r"\D", "", _clean_env("STREAM_BUFFER_CHUNKS", "64")) or "64")

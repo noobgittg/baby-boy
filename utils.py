@@ -498,16 +498,18 @@ class temp(object):
 
 
 async def auto_clean_expired_cache_job() -> None:
-    logger.info("🧹 ᴄᴀᴄʜᴇ ᴄʟᴇᴀɴᴜᴘ ʙᴀᴄᴋɢʀᴏᴜɴᴅ ᴡᴏʀᴋᴇᴅ ɪɴɪᴛɪᴀʟɪᴢᴇᴅ (300s ᴄʏᴄʟᴇ)")
+    interval = max(30, int(getattr(Config, "CACHE_CLEANUP_INTERVAL", 300)))
+    logger.info("🧹 ᴄᴀᴄʜᴇ ᴄʟᴇᴀɴᴜᴘ ᴡᴏʀᴋᴇʀ ɪɴɪᴛɪᴀʟɪᴢᴇᴅ (%ss ᴄʏᴄʟᴇ)", interval)
     while True:
         try:
-            await asyncio.sleep(300)
+            await asyncio.sleep(interval)
             before = len(USER_CACHE._store)
             USER_CACHE._purge_expired()
-            await cache.auto_clear_after_response()
+            removed_shared = await cache.auto_clear_after_response(preserve_workflows=True)
             after = len(USER_CACHE._store)
-            if before != after:
-                logger.info("🧹 ᴄᴀᴄʜᴇ ᴘᴜʀɢᴇ ᴄʏᴄʟᴇ › ʀᴇᴍᴏᴠᴇᴅ=%s ʀᴇᴍᴀɪɴɪɴɢ=%s", before - after, after)
+            removed_user = max(0, before - after)
+            if removed_user or removed_shared:
+                logger.info("🧹 ᴄᴀᴄʜᴇ ᴘᴜʀɢᴇ ᴄʏᴄʟᴇ › ᴜsᴇʀ=%s sʜᴀʀᴇᴅ=%s ʀᴇᴍᴀɪɴɪɴɢ=%s", removed_user, removed_shared, after)
         except asyncio.CancelledError:
             logger.info("🛑 ᴄᴀᴄʜᴇ ᴄʟᴇᴀɴᴜᴘ ᴡᴏʀᴋᴇʀ sᴛᴏᴘᴘᴇᴅ")
             raise
