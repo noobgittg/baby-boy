@@ -46,7 +46,7 @@ from plugins.core_services import (
 )
 from plugins.media_types import is_audio_mime, is_video_mime, normalize_mime
 
-MAX_BOT_FILE_SIZE = 2000 * 1024 * 1024
+MAX_BOT_FILE_SIZE = int(getattr(Config, "LARGE_FILE_THRESHOLD_BYTES", 2 * 1024 * 1024 * 1024))
 _USER_MEDIA_LOCKS: dict[int, asyncio.Lock] = {}
 _USER_LAST_MEDIA_TS: dict[int, float] = {}
 

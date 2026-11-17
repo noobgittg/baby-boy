@@ -36,6 +36,8 @@ _MSG_RESOLVE_LOCKS: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 def parse_range_header(value: Optional[str], file_size: int):
     """Parse HTTP Range header, including open-ended and suffix byte ranges."""
+    if file_size <= 0:
+        return None
     if not value:
         return 0, file_size - 1
     try:
@@ -482,7 +484,7 @@ async def stream_media_endpoint(request: Request, file_id: str, range: str = Hea
         "ETag": etag,
         "X-Stream-Mode": "turbo-http-206-byte-range",
         "X-Stream-Chunk-Size": str(CHUNK_SIZE),
-        "Cache-Control": "public, max-age=86400",
+        "Cache-Control": "public, max-age=86400, no-transform",
         "Connection": "keep-alive",
         "Vary": "Range",
         "Access-Control-Allow-Origin": "*",
@@ -543,7 +545,7 @@ async def download_media_endpoint(request: Request, file_id: str, range: str = H
         "X-Stream-Mode": "turbo-http-206-byte-range",
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges, ETag",
-        "Cache-Control": "public, max-age=86400",
+        "Cache-Control": "public, max-age=86400, no-transform",
         "Connection": "keep-alive",
         "Vary": "Range",
     }

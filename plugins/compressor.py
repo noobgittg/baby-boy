@@ -53,7 +53,7 @@ from plugins.core_services import (
     get_ffmpeg_status
 )
 
-MAX_BOT_FILE_SIZE = 2000 * 1024 * 1024
+MAX_BOT_FILE_SIZE = int(getattr(Config, "LARGE_FILE_THRESHOLD_BYTES", 2 * 1024 * 1024 * 1024))
 _RECOVERY_LOCK = asyncio.Lock()
 _IN_FLIGHT_IDEMPOTENCY: Dict[str, str] = {}
 

@@ -42,14 +42,17 @@ async def toggle_autostream_cmd(client: Client, message: Message):
 
 @Client.on_message(filters.command(["stream", "filestream", "link"], prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def stream_command_entry(client: Client, message: Message):
-    if not message.reply_to_message or not message.reply_to_message.media:
+    from plugins.rename import resolve_target_media_message
+    user_id = message.from_user.id if message.from_user else message.chat.id
+    media_msg = await resolve_target_media_message(client, message, user_id=user_id)
+    if not media_msg or not media_msg.media:
         return await message.reply_text(
             f"⚠️ **{to_smallcaps('please reply to a video, audio, or document to generate an adaptive range stream link.')}**\n\n"
             f"• 📝 **{to_smallcaps('usage')}** : {to_smallcaps('reply to any media with')} `/stream` {to_smallcaps('or')} `/filestream`"
             f"{format_watermark()}"
         )
-    logger.info("🎬 /stream ɪɴᴠᴏᴋᴇᴅ › ᴜsᴇʀ=%s ᴄʜᴀᴛ=%s ᴍsɢ=%s", message.from_user.id if message.from_user else 0, message.chat.id, message.reply_to_message.id)
-    await generate_stream_response(client, message.reply_to_message, message, is_callback=False)
+    logger.info("🎬 /stream ɪɴᴠᴏᴋᴇᴅ › ᴜsᴇʀ=%s ᴄʜᴀᴛ=%s ᴍsɢ=%s", user_id, message.chat.id, media_msg.id)
+    await generate_stream_response(client, media_msg, message, is_callback=False)
 
 
 @Client.on_callback_query(filters.regex(r"^stream_(\d+)"))
@@ -69,6 +72,9 @@ async def generate_stream_response(client: Client, media_msg: Message, target_re
 
     bin_chan = Config.BIN_CHANNEL if Config.BIN_CHANNEL != 0 else media_msg.chat.id
     log_msg = await safe_forward_message(media_msg, bin_chan) if bin_chan != media_msg.chat.id else media_msg
+    if log_msg is None:
+        logger.warning("⚠️ sᴛʀᴇᴀᴍ ᴀʀᴄʜɪᴠᴇ ғᴏʀᴡᴀʀᴅ ғᴀɪʟᴇᴅ; ᴜsɪɴɢ ᴏʀɪɢɪɴᴀʟ ᴍᴇᴅɪᴀ ᴍᴇssᴀɢᴇ")
+        log_msg = media_msg
 
     media = media_msg.document or media_msg.video or media_msg.audio
     raw_name = getattr(media, "file_name", None) or "stream_media.mp4"
