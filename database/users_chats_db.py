@@ -64,7 +64,6 @@ class Database:
         self.afk_col = self.db.user_afk if self.db is not None else None
         self.autofwd_col = self.db.autoforwards if self.db is not None else None
 
-        # High-speed L1 in-memory caches & complete offline fallbacks
         self._mem_users: Dict[int, Dict[str, Any]] = {}
         self._mem_groups: Dict[int, Dict[str, Any]] = {}
         self._mem_hd_grp: TTLCache = TTLCache(maxsize=2000, ttl=1800)
@@ -224,7 +223,6 @@ class Database:
             },
         }
 
-    # ─── Generic CRUD Helpers ─────────────────────────────────────────────
     async def create_data(self, collection_name: str, data: dict):
         if self.db is None:
             return None
@@ -257,7 +255,6 @@ class Database:
         except Exception:
             return None
 
-    # ─── Users Management ─────────────────────────────────────────────────
     async def add_user(self, id: int, name: str):
         uid = int(id)
         if uid not in self._mem_users:
@@ -411,7 +408,6 @@ class Database:
                 logger.debug("⚠️ ɢᴇᴛ_ʙᴀɴɴᴇᴅ ᴡᴀʀɴɪɴɢ › %s", e)
         return sorted(b_users), sorted(b_chats)
 
-    # ─── Groups Management ────────────────────────────────────────────────
     async def add_chat(self, chat: int, title: str):
         cid = int(chat)
         chat_doc = self.new_group(cid, title)
@@ -519,7 +515,6 @@ class Database:
                 pass
         return list(by_id.values())
 
-    # ─── Channels Management & Channel Helper Config ──────────────────────
     async def get_channel_config(self, chat_id: int, title: str = "Channel") -> Dict[str, Any]:
         cid = int(chat_id)
         default = self.default_channel_config(cid, title=title)
@@ -642,7 +637,6 @@ class Database:
                 pass
         return list(self._mem_chnl_cfg.values())
 
-    # ─── Auto-Forward Rules Engine ────────────────────────────────────────
     async def add_autoforward_rule(
         self,
         user_id: int,
@@ -792,7 +786,6 @@ class Database:
                 pass
         return cnt
 
-    # ─── Helpdesk Group Config & Locks ────────────────────────────────────
     async def get_helpdesk_config(self, chat_id: int) -> Dict[str, Any]:
         cid = int(chat_id)
         default = self.default_helpdesk_group_config(cid)
@@ -882,7 +875,6 @@ class Database:
         uid = int(user_id)
         return uid in cfg.get("approved_users", []) or uid in cfg.get("trusted_users", [])
 
-    # ─── Warnings & Mod Logs ──────────────────────────────────────────────
     async def add_warning(
         self,
         chat_id: int,
@@ -1031,7 +1023,6 @@ class Database:
                 pass
         return sum(len(v) for v in self._mem_hd_logs.values())
 
-    # ─── Notes Management ─────────────────────────────────────────────────
     async def save_note(self, chat_id: int, name: str, note_data: Dict[str, Any]) -> None:
         cid = int(chat_id)
         key = name.strip().lower()
@@ -1116,7 +1107,6 @@ class Database:
                 pass
         return len(self._mem_notes)
 
-    # ─── Custom Auto-Filters Management ───────────────────────────────────
     async def save_filter(self, chat_id: int, trigger: str, filter_data: Dict[str, Any]) -> None:
         cid = int(chat_id)
         key = trigger.strip().lower()
@@ -1190,7 +1180,6 @@ class Database:
                 pass
         return len(self._mem_filters)
 
-    # ─── Word Blacklist Management ────────────────────────────────────────
     async def get_blacklist_config(self, chat_id: int) -> Dict[str, Any]:
         cid = int(chat_id)
         default = {"chat_id": cid, "words": [], "mode": "warn"}
@@ -1230,7 +1219,6 @@ class Database:
                 pass
         return dict(curr)
 
-    # ─── AFK Status Management ────────────────────────────────────────────
     async def set_afk(self, user_id: int, reason: str = "") -> Dict[str, Any]:
         uid = int(user_id)
         payload = {
@@ -1281,7 +1269,6 @@ class Database:
             logger.info("🌅 ᴜsᴇʀ ᴄʟᴇᴀʀᴇᴅ ᴀғᴋ › ᴜsᴇʀ=%s", uid)
         return prev
 
-    # ─── Global Bot Config & Storage Telemetry ────────────────────────────
     async def get_bot_config(self) -> Dict[str, Any]:
         if self.adm is not None:
             try:
