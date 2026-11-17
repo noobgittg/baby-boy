@@ -2,12 +2,12 @@ import time
 import asyncio
 import functools
 from typing import Union
-from pyrogram import Client, utils as pyroutils
+from pyrogram import Client, ContinuePropagation, StopPropagation, utils as pyroutils
 from pyrogram.errors import FloodWait, MessageNotModified
 from config import Config
 from info import LOG_STR, LOG_CHANNEL
 from database.users_chats_db import db
-from utils import temp
+from utils import temp, USER_CACHE
 from plugins.core_utils import (
     cache,
     logger,
@@ -35,8 +35,22 @@ def _wrap_handler_with_auto_cache(callback):
 
     @functools.wraps(callback)
     async def _wrapped(client, update, *args, **kwargs):
-        async with cache.response_scope(getattr(callback, "__name__", "handler")):
-            return await callback(client, update, *args, **kwargs)
+        propagated = False
+        async with cache.response_scope(getattr(callback, "__name__", "handler")) as scope_ctx:
+            try:
+                return await callback(client, update, *args, **kwargs)
+            except ContinuePropagation:
+                propagated = True
+                scope_ctx["__skip_sweep__"] = True
+                raise
+            except StopPropagation:
+                raise
+            finally:
+                if not propagated:
+                    try:
+                        USER_CACHE._purge_expired()
+                    except Exception:
+                        pass
 
     setattr(_wrapped, "_mmw_auto_cache_wrapped", True)
     return _wrapped
@@ -62,7 +76,6 @@ class MMWProBot(Client):
         return super().add_handler(handler, group=group)
 
     async def invoke(self, query, retries: int = 4, timeout: float = 20, sleep_threshold: float = None):
-        """Global Centralized Rate-Limit Manager & Pro FloodWait Solver using asyncio.sleep()."""
         rpc_name = type(query).__name__
 
         if rpc_name in _PACED_RPC_NAMES:
@@ -104,7 +117,7 @@ class MMWProBot(Client):
 
     async def start(self):
         t0 = time.perf_counter()
-        logger.info(f"🚀 {to_smallcaps('initializing mmw all-in-one pro client engine...')}")
+        logger.info(f"🚀 {to_smallcaps('initializing mmw all-in-one pro client engine (mallu branch)...')}")
         await db.ensure_indexes()
         b_users, b_chats = await db.get_banned()
         temp.BANNED_USERS = b_users
@@ -135,8 +148,9 @@ class MMWProBot(Client):
                     int(LOG_CHANNEL),
                     f"⚡ <b>{to_smallcaps('mmw all-in-one pro bot online & ready!')}</b> 🚀✨\n"
                     f"• 🤖 <b>{to_smallcaps('bot')}:</b> @{me.username} (<code>{me.id}</code>)\n"
+                    f"• 🌿 <b>{to_smallcaps('branch')}:</b> <code>MALLU</code>\n"
                     f"• ⏱️ <b>{to_smallcaps('boot latency')}:</b> <code>{boot_ms:.0f} ms</code>\n"
-                    f"• 🛡️ <b>{to_smallcaps('modules')}:</b> <code>/admin</code> │ <code>/helpdesk</code> │ <code>/channelhelp</code> │ <code>/autoset</code> │ <code>/autoforward</code>",
+                    f"• 🛡️ <b>{to_smallcaps('modules')}:</b> <code>/admin</code> │ <code>/helpdesk</code> │ <code>/channelhelp</code> │ <code>/autoset</code> │ <code>/codepro</code>",
                 )
             except Exception as e:
                 logger.debug(f"⚠️ {to_smallcaps('log channel startup notify skipped')}: {e}")

@@ -14,7 +14,7 @@ from database.users_chats_db import db
 logger = logging.getLogger("MMWChatAdmin")
 
 
-@Client.on_message(filters.new_chat_members & filters.group)
+@Client.on_message(filters.new_chat_members & filters.group, group=1)
 async def save_group(bot: Client, message: Message):
     r_j_check = [u.id for u in message.new_chat_members]
 

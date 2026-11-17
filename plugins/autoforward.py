@@ -567,7 +567,7 @@ async def autoforward_callback_router(client: Client, query: CallbackQuery):
         await safe_edit_message(query.message, detail_txt, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
 
 
-@Client.on_message((filters.channel | filters.group) & filters.incoming & ~filters.service, group=3)
+@Client.on_message((filters.channel | filters.group) & filters.incoming & ~filters.service, group=7)
 async def live_autoforward_dispatcher(client: Client, message: Message):
     """Real-time watcher that dispatches incoming posts across all matching Auto-Forward routes."""
     if not temp.BOT_CONFIG.get("auto_forward_global", True):

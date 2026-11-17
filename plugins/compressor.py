@@ -50,8 +50,12 @@ from plugins.core_services import (
     extract_and_format_caption,
     schedule_deletion,
     download_media_with_auth_recovery,
-    get_ffmpeg_status
+    get_ffmpeg_status,
+    analyze_code_file,
+    optimize_code_file,
+    compress_file_to_zip,
 )
+from plugins.media_types import is_code_file, detect_code_language, is_audio_mime, is_video_mime, normalize_mime
 
 MAX_BOT_FILE_SIZE = int(getattr(Config, "LARGE_FILE_THRESHOLD_BYTES", 2 * 1024 * 1024 * 1024))
 _RECOVERY_LOCK = asyncio.Lock()
@@ -361,12 +365,28 @@ async def show_compression_menu(media_msg: Message, target_msg: Message, is_call
     dur_val = int(getattr(media, "duration", 0) or 0)
     dur_str = time_formatter(seconds=dur_val) if dur_val > 0 else "Auto-Detect"
     is_oversized = file_size_bytes > MAX_BOT_FILE_SIZE
+    mime_t = normalize_mime(getattr(media, "mime_type", ""))
+    is_code = is_code_file(raw_file_name, mime_t)
+    is_vid_or_aud = bool(media_msg.video or media_msg.audio or is_video_mime(mime_t) or is_audio_mime(mime_t)) and not is_code
 
-    btn = [
-        [
-            InlineKeyboardButton("🎛️ ᴄᴜsᴛᴏᴍ ᴄᴏᴍᴘʀᴇss (sɪᴢᴇ & ǫᴜᴀʟɪᴛʏ ⚡ 5-10ᴍ)", callback_data=f"custcomp_open_{msg_id}"),
-        ],
-    ]
+    btn = []
+    if is_code:
+        code_lang = detect_code_language(raw_file_name, mime_t).upper()
+        btn.append([
+            InlineKeyboardButton(f"⚡ ᴍɪɴɪғʏ & ᴏᴘᴛɪᴍɪᴢᴇ {code_lang} ᴄᴏᴅᴇ", callback_data=f"do_comp_{msg_id}_0_0_codeopt"),
+        ])
+        btn.append([
+            InlineKeyboardButton("🗜️ ᴄᴏᴍᴘʀᴇss ᴛᴏ .ᴢɪᴘ ᴀʀᴄʜɪᴠᴇ (ʟ9)", callback_data=f"do_comp_{msg_id}_0_0_zip"),
+            InlineKeyboardButton("💻 ᴄᴏᴅᴇ ᴘʀᴏ sᴛᴜᴅɪᴏ", callback_data=f"codepro_menu_{msg_id}"),
+        ])
+    elif not is_vid_or_aud:
+        btn.append([
+            InlineKeyboardButton("🗜️ ᴄᴏᴍᴘʀᴇss ғɪʟᴇ ᴛᴏ .ᴢɪᴘ (ғᴀsᴛ ʟ9)", callback_data=f"do_comp_{msg_id}_0_0_zip"),
+        ])
+
+    btn.append([
+        InlineKeyboardButton("🎛️ ᴄᴜsᴛᴏᴍ ᴄᴏᴍᴘʀᴇss (sɪᴢᴇ & ǫᴜᴀʟɪᴛʏ ⚡ 5-10ᴍ)", callback_data=f"custcomp_open_{msg_id}"),
+    ])
     if is_oversized:
         btn.append([
             InlineKeyboardButton("🎯 ᴀᴜᴛᴏ-ғɪᴛ < 2ɢʙ (1.85 ɢʙ ғғᴍᴘᴇɢ)", callback_data=f"do_comptarget_{msg_id}_1850"),
@@ -882,7 +902,13 @@ async def perform_compression_job(
     vcodec = "libx265" if is_hevc else "libx264"
     res_tag = f"{scale_h}p_" if scale_h > 0 else ""
     codec_tag = "HEVC_" if is_hevc else ""
-    if is_target_mode and target_mb:
+    orig_ext = os.path.splitext(clean_name)[1] or ".mp4"
+    is_code_input = is_code_file(clean_name, mime_type)
+    if preset == "codeopt" or (is_code_input and preset not in ("zip", "remux") and not is_target_mode):
+        default_out_name = sanitize_filename(f"optimized_{base_n}{orig_ext}")
+    elif preset == "zip":
+        default_out_name = sanitize_filename(f"compressed_{base_n}{orig_ext}.zip")
+    elif is_target_mode and target_mb:
         safe_target_mb = min(1900.0, float(target_mb))
         default_out_name = sanitize_filename(f"compressed_{int(safe_target_mb)}MB_{res_tag}{base_n}.mp4")
     elif preset == "remux":
@@ -1033,17 +1059,31 @@ async def perform_compression_job(
             else int(expected_input_size or os.path.getsize(output_path))
         )
 
-        if os.path.exists(input_path):
-            streams = await check_media_streams(input_path)
-            in_attrs = await get_media_attributes(input_path)
+        is_doc_or_code_mode = bool(preset in ("codeopt", "zip") or is_code_input)
+        if not is_doc_or_code_mode:
+            if os.path.exists(input_path):
+                streams = await check_media_streams(input_path)
+                in_attrs = await get_media_attributes(input_path)
+            else:
+                streams = await check_media_streams(output_path)
+                in_attrs = await get_media_attributes(output_path)
+            if not streams.get("has_video") and not streams.get("has_audio"):
+                is_doc_or_code_mode = True
         else:
-            streams = await check_media_streams(output_path)
-            in_attrs = await get_media_attributes(output_path)
+            streams = {"has_video": False, "has_audio": False, "duration": 0}
+            in_attrs = {"width": 0, "height": 0, "duration": 0}
 
         tg_dur = int(streams.get("duration") or in_attrs.get("duration") or getattr(media, "duration", 0) or 0)
-        is_audio_only = (not streams["has_video"]) and streams["has_audio"]
+        is_audio_only = (not is_doc_or_code_mode) and (not streams["has_video"]) and streams["has_audio"]
 
-        if is_audio_only and not already_encoded:
+        if is_doc_or_code_mode and not already_encoded:
+            if preset == "codeopt" or (is_code_input and preset != "zip"):
+                out_name = sanitize_filename(f"optimized_{base_n}{orig_ext}")
+            else:
+                out_name = sanitize_filename(f"compressed_{base_n}{orig_ext}.zip")
+            output_path = os.path.join(download_dir, out_name)
+            await task_repo.update_task(task_id, {"output_path": output_path})
+        elif is_audio_only and not already_encoded:
             out_name = sanitize_filename(f"compressed_{base_n}.m4a")
             output_path = os.path.join(download_dir, out_name)
             await task_repo.update_task(task_id, {"output_path": output_path})
@@ -1060,7 +1100,15 @@ async def perform_compression_job(
                     if os.path.exists(output_path):
                         clean_temp_files(output_path)
 
-                    if is_audio_only:
+                    if is_doc_or_code_mode:
+                        if preset == "codeopt" or (is_code_input and preset != "zip"):
+                            lang_lbl = detect_code_language(clean_name, mime_type).upper()
+                            await safe_edit_text(status, f"⚡ **{to_smallcaps(f'optimizing & minifying {lang_lbl} code file...')}**")
+                            encode_success = await optimize_code_file(input_path, output_path, clean_name)
+                        else:
+                            await safe_edit_text(status, f"🗜️ **{to_smallcaps('compressing file to high-speed .zip archive...')}**")
+                            encode_success = await compress_file_to_zip(input_path, output_path, clean_name)
+                    elif is_audio_only:
                         abr_val = str(audio_bitrate if audio_bitrate not in ("auto", "copy") else "96k")
                         await safe_edit_text(status, f"🎵 **{to_smallcaps(f'compressing audio stream with ffmpeg (aac {abr_val})...')}**")
                         encode_success = await compress_audio(input_path, output_path, bitrate=abr_val)
@@ -1125,7 +1173,10 @@ async def perform_compression_job(
                             respect_custom_height=respect_custom_height,
                         )
 
-                    if encode_success and await validate_media_output(output_path):
+                    if encode_success and (
+                        (is_doc_or_code_mode and os.path.exists(output_path) and os.path.getsize(output_path) > 0)
+                        or await validate_media_output(output_path)
+                    ):
                         break
                     encode_success = False
                     task_manager.record_metric(retries=1, error=f"FFmpeg validation failed on attempt {enc_attempt+1} for {task_id}")
@@ -1147,7 +1198,10 @@ async def perform_compression_job(
                     if enc_attempt < max_retries - 1:
                         await asyncio.sleep(1.5 * (enc_attempt + 1))
 
-            if not encode_success or not await validate_media_output(output_path):
+            if not encode_success or not (
+                (is_doc_or_code_mode and os.path.exists(output_path) and os.path.getsize(output_path) > 0)
+                or await validate_media_output(output_path)
+            ):
                 await task_repo.update_task(task_id, {"status": "failed", "stage": "encoding"})
                 task_manager.record_metric(failed=1, error=f"FFmpeg compression failed after {max_retries} attempts ({task_id})")
                 clean_temp_files(input_path, output_path, download_dir)
@@ -1240,7 +1294,7 @@ async def perform_compression_job(
         last_up_err = None
 
         from utils import temp as _t
-        attach_stream = bool(_t.BOT_CONFIG.get("auto_stream_global", True) and (not u or u.get("auto_stream", True)))
+        attach_stream = bool(_t.BOT_CONFIG.get("auto_stream_global", True) and u and u.get("auto_stream", False))
         new_fid = secrets.token_urlsafe(10) if attach_stream else ""
         w_url = f"{Config.BASE_URL}/watch/{new_fid}" if new_fid else ""
         d_url = f"{Config.BASE_URL}/download/{new_fid}" if new_fid else ""
@@ -1248,7 +1302,19 @@ async def perform_compression_job(
         cur_thumb = thumb_path
         for up_attempt in range(max_retries):
             try:
-                if is_audio_only:
+                if is_doc_or_code_mode:
+                    sent_msg = await execute_with_floodwait(
+                        client.send_document,
+                        chat_id=target_chat_id,
+                        document=output_path,
+                        file_name=out_name,
+                        caption=final_caption,
+                        thumb=cur_thumb,
+                        force_document=True,
+                        progress=progress_for_pyrogram,
+                        progress_args=("📤 uploading compressed file", status, upload_start)
+                    )
+                elif is_audio_only:
                     sent_msg = await execute_with_floodwait(
                         client.send_audio,
                         chat_id=target_chat_id,
@@ -1328,40 +1394,49 @@ async def perform_compression_job(
             time.time() - start_dl,
         )
 
-        if sent_msg and attach_stream and new_fid:
+        if sent_msg:
             try:
-                out_media = sent_msg.video or sent_msg.document or sent_msg.audio
-                await file_repo.save_file(
-                    file_id=new_fid,
-                    chat_id=sent_msg.chat.id,
-                    message_id=sent_msg.id,
-                    file_name=out_name,
-                    file_size=getattr(out_media, "file_size", comp_size),
-                    mime_type=getattr(out_media, "mime_type", "video/mp4"),
-                    user_id=user_id,
-                    metadata=telegram_media_metadata(out_media, sent_msg),
-                    tg_file_id=getattr(out_media, "file_id", None)
-                )
-                stream_kb = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton(f"🎬 {to_smallcaps('watch (4 players)')}", url=w_url),
-                        InlineKeyboardButton(f"⬇️ {to_smallcaps('fast download')}", url=d_url),
-                    ],
-                    [
-                        InlineKeyboardButton(f"⚡ {to_smallcaps('stream card')}", callback_data=f"stream_{sent_msg.id}"),
+                if attach_stream and new_fid:
+                    out_media = sent_msg.video or sent_msg.document or sent_msg.audio
+                    await file_repo.save_file(
+                        file_id=new_fid,
+                        chat_id=sent_msg.chat.id,
+                        message_id=sent_msg.id,
+                        file_name=out_name,
+                        file_size=getattr(out_media, "file_size", comp_size),
+                        mime_type=getattr(out_media, "mime_type", "video/mp4"),
+                        user_id=user_id,
+                        metadata=telegram_media_metadata(out_media, sent_msg),
+                        tg_file_id=getattr(out_media, "file_id", None)
+                    )
+                    stream_kb = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton(f"🎬 {to_smallcaps('watch (4 players)')}", url=w_url),
+                            InlineKeyboardButton(f"⬇️ {to_smallcaps('fast download')}", url=d_url),
+                        ],
+                        [
+                            InlineKeyboardButton(f"⚡ {to_smallcaps('stream card')}", callback_data=f"stream_{sent_msg.id}"),
+                            InlineKeyboardButton(f"✏️ {to_smallcaps('rename')}", callback_data=f"rename_{sent_msg.id}"),
+                        ]
+                    ])
+                    await sent_msg.edit_reply_markup(reply_markup=stream_kb)
+                    bin_chan = Config.BIN_CHANNEL if Config.BIN_CHANNEL != 0 else sent_msg.chat.id
+                    if bin_chan != sent_msg.chat.id:
+                        async def _bg_fwd_comp(fid_val: str, s_msg: Message, b_ch: int):
+                            try:
+                                fwd = await safe_forward_message(s_msg, b_ch)
+                                if fwd and getattr(fwd, "chat", None) and getattr(fwd, "id", None):
+                                    await file_repo.update_file(fid_val, {"chat_id": fwd.chat.id, "message_id": fwd.id})
+                            except Exception:
+                                pass
+                        asyncio.create_task(_bg_fwd_comp(new_fid, sent_msg, bin_chan))
+                else:
+                    on_demand_btns = [
+                        InlineKeyboardButton(f"🎬 {to_smallcaps('generate file stream')}", callback_data=f"stream_{sent_msg.id}"),
                     ]
-                ])
-                await sent_msg.edit_reply_markup(reply_markup=stream_kb)
-                bin_chan = Config.BIN_CHANNEL if Config.BIN_CHANNEL != 0 else sent_msg.chat.id
-                if bin_chan != sent_msg.chat.id:
-                    async def _bg_fwd_comp(fid_val: str, s_msg: Message, b_ch: int):
-                        try:
-                            fwd = await safe_forward_message(s_msg, b_ch)
-                            if fwd and getattr(fwd, "chat", None) and getattr(fwd, "id", None):
-                                await file_repo.update_file(fid_val, {"chat_id": fwd.chat.id, "message_id": fwd.id})
-                        except Exception:
-                            pass
-                    asyncio.create_task(_bg_fwd_comp(new_fid, sent_msg, bin_chan))
+                    if comp_size <= MAX_BOT_FILE_SIZE:
+                        on_demand_btns.append(InlineKeyboardButton(f"✏️ {to_smallcaps('rename')}", callback_data=f"rename_{sent_msg.id}"))
+                    await sent_msg.edit_reply_markup(reply_markup=InlineKeyboardMarkup([on_demand_btns]))
             except Exception:
                 pass
 

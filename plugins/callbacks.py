@@ -106,7 +106,7 @@ async def render_settings_menu(target_msg: Message, user, is_edit: bool = True):
     suffix_str = html.escape(str(u.get("suffix") or to_smallcaps("none")))
     auto_ren = "🟢 ᴏɴ" if u.get("auto_rename") else "⚪ ᴏғғ"
     auto_comp = "🟢 ᴏɴ" if u.get("auto_compress") else "⚪ ᴏғғ"
-    auto_str = "🟢 ᴏɴ" if u.get("auto_stream", True) else "⚪ ᴏғғ"
+    auto_str = "🟢 ᴏɴ" if u.get("auto_stream", False) else "⚪ ᴏғғ"
     auto_cap = "🟢 ᴏɴ" if u.get("auto_caption", True) else "⚪ ᴏғғ"
     up_mode = "🎬 ᴠɪᴅᴇᴏ" if u.get("upload_mode", "video") == "video" else "📁 ᴅᴏᴄ"
 
@@ -301,7 +301,7 @@ async def help_subpages(client: Client, query: CallbackQuery):
         text = (
             f"✦ <b>{to_smallcaps('auto & pro renamer — guide')}</b> ✦\n\n"
             f"• ✏️ <b>{to_smallcaps('manual rename')}</b> :\n"
-            f"  1. {to_smallcaps('send any file or video and click')} <code>[✏️ {to_smallcaps('rename')}]</code>.\n"
+            f"  1. {to_smallcaps('send any file <= 2gb (rename restricted > 2gb) and click')} <code>[✏️ {to_smallcaps('fast rename')}]</code>.\n"
             f"  2. {to_smallcaps('or reply to a file with')} <code>/rename new_name.mp4</code>.\n\n"
             f"• ⚡ <b>{to_smallcaps('auto-rename mode')}</b> :\n"
             f"  • <code>/autorename</code> : {to_smallcaps('toggle automatic renaming on/off.')}\n"
@@ -420,7 +420,7 @@ async def settings_actions(client: Client, query: CallbackQuery):
         return await render_settings_menu(query.message, user, is_edit=True)
 
     elif action == "toggle_autostream":
-        new_val = not bool(u.get("auto_stream", True))
+        new_val = not bool(u.get("auto_stream", False))
         await user_repo.update_user(user_id, {"auto_stream": new_val})
         await query.answer(to_smallcaps(f"auto stream {'enabled' if new_val else 'disabled'}!"))
         return await render_settings_menu(query.message, user, is_edit=True)
@@ -510,7 +510,7 @@ async def settings_actions(client: Client, query: CallbackQuery):
                 "suffix": "",
                 "auto_rename": False,
                 "auto_compress": False,
-                "auto_stream": True,
+                "auto_stream": False,
                 "auto_caption": True,
                 "upload_mode": "video",
                 "auto_delete_time": 0,

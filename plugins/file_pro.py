@@ -43,7 +43,11 @@ from plugins.core_services import (
     generate_video_sample,
     strip_video_audio,
     remux_container,
+    analyze_code_file,
+    optimize_code_file,
+    compress_file_to_zip,
 )
+from plugins.media_types import is_code_file, detect_code_language, normalize_mime
 
 MAX_BOT_FILE_SIZE = 2000 * 1024 * 1024
 
@@ -143,7 +147,7 @@ async def pro_mediainfo_callback(client: Client, query: CallbackQuery):
     original = await client.get_messages(query.message.chat.id, msg_id)
     if not original or not original.media:
         return await query.answer(to_smallcaps("media not found!"), show_alert=True)
-
+    await query.answer("📊 ᴇxᴛʀᴀᴄᴛɪɴɢ ᴍᴇᴅɪᴀɪɴғᴏ...")
     status = await safe_edit_text(query.message, f"🔍 **{to_smallcaps('generating detailed mediainfo...')}**")
 
     media = original.video or original.document or original.audio
@@ -164,6 +168,32 @@ async def pro_mediainfo_callback(client: Client, query: CallbackQuery):
     except Exception as e:
         clean_temp_files(temp_path, download_dir)
         return await safe_edit_text(status, f"❌ **{to_smallcaps('download failed')}** : `{e}`")
+
+    if is_code_file(clean_name, getattr(media, "mime_type", "")):
+        cinfo = await analyze_code_file(temp_path, clean_name)
+        clean_temp_files(temp_path, download_dir)
+        st_badge = "✅ ᴠᴀʟɪᴅ" if cinfo.get("syntax_ok") else "❌ sʏɴᴛᴀx ᴇʀʀᴏʀ"
+        txt = (
+            f"✦ **{to_smallcaps('code file analysis & metadata')}** ✦ 💻\n\n"
+            f"• 📁 **{to_smallcaps('file name')}** : `{clean_name}`\n"
+            f"• 📦 **{to_smallcaps('file size')}** : `{humanbytes(cinfo.get('size_bytes', 0))}`\n"
+            f"• 🏷️ **{to_smallcaps('language')}** : `{cinfo.get('language', 'code').upper()}`\n"
+            f"• 📏 **{to_smallcaps('lines')}** : `{cinfo.get('lines', 0)}` (`{cinfo.get('active_lines', 0)}` active)\n"
+            f"• 🛡️ **{to_smallcaps('syntax status')}** : `{st_badge}`\n"
+            f"• 🔍 **{to_smallcaps('details')}** : `{cinfo.get('syntax_detail', 'N/A')}`"
+            f"{format_watermark()}"
+        )
+        btn = [
+            [
+                InlineKeyboardButton(f"💻 {to_smallcaps('code pro studio')}", callback_data=f"codepro_menu_{msg_id}"),
+                InlineKeyboardButton(f"🎬 {to_smallcaps('media studio')}", callback_data=f"back_to_media_{msg_id}"),
+            ],
+            [
+                InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home"),
+                InlineKeyboardButton(f"❌ {to_smallcaps('close')}", callback_data="close_data"),
+            ]
+        ]
+        return await safe_edit_text(status, txt, reply_markup=InlineKeyboardMarkup(btn))
 
     info = await get_detailed_mediainfo(temp_path)
     clean_temp_files(temp_path, download_dir)
@@ -252,6 +282,7 @@ async def pro_extaudio_callback(client: Client, query: CallbackQuery):
     original = await client.get_messages(query.message.chat.id, msg_id)
     if not original or not original.media:
         return await query.answer(to_smallcaps("media not found!"), show_alert=True)
+    await query.answer("🎵 ᴇxᴛʀᴀᴄᴛɪɴɢ ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋs...")
     await run_extract_all_audio(client, original, query.message, is_callback=True)
 
 async def run_extract_all_audio(client: Client, media_msg: Message, target_msg: Message, is_callback: bool = False):
@@ -438,10 +469,15 @@ async def add_audio_cmd(client: Client, message: Message):
 @Client.on_callback_query(filters.regex(r"^pro_addaudio_ask_(\d+)"))
 async def pro_addaudio_callback(client: Client, query: CallbackQuery):
     msg_id = int(query.matches[0].group(1))
-    await query.message.delete()
-    await prompt_add_audio(client, query.message.chat.id, msg_id)
+    await query.answer("🎵 sᴇɴᴅ ᴀᴜᴅɪᴏ ғɪʟᴇ ᴛᴏ ᴍᴜx")
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    uid = query.from_user.id if query.from_user else query.message.chat.id
+    await prompt_add_audio(client, query.message.chat.id, msg_id, user_id=uid)
 
-async def prompt_add_audio(client: Client, chat_id: int, video_msg_id: int):
+async def prompt_add_audio(client: Client, chat_id: int, video_msg_id: int, user_id: int = 0):
     await client.send_message(
         chat_id=chat_id,
         text=(
@@ -453,6 +489,8 @@ async def prompt_add_audio(client: Client, chat_id: int, video_msg_id: int):
         reply_markup=ForceReply(placeholder=to_smallcaps("send or reply with audio file..."))
     )
     await cache.set(f"waiting_addaudio_{chat_id}", video_msg_id, ttl=300)
+    if user_id and user_id != chat_id:
+        await cache.set(f"waiting_addaudio_{user_id}", video_msg_id, ttl=300)
 
 @Client.on_callback_query(filters.regex(r"^pro_addaud_mode_(\d+)_(\d+)_(add|replace)"))
 async def execute_add_audio(client: Client, query: CallbackQuery):
@@ -461,7 +499,7 @@ async def execute_add_audio(client: Client, query: CallbackQuery):
     mode = query.matches[0].group(3)
     replace = (mode == "replace")
     user_id = query.from_user.id
-
+    await query.answer("🎛️ ᴍᴜxɪɴɢ ᴀᴜᴅɪᴏ ɪɴᴛᴏ ᴠɪᴅᴇᴏ...")
     status = await safe_edit_text(query.message, f"⏳ **{to_smallcaps('initializing audio muxing...')}**")
 
     video_msg = await client.get_messages(query.message.chat.id, video_id)
@@ -565,10 +603,15 @@ async def add_sub_cmd(client: Client, message: Message):
 @Client.on_callback_query(filters.regex(r"^pro_addsub_ask_(\d+)"))
 async def pro_addsub_callback(client: Client, query: CallbackQuery):
     msg_id = int(query.matches[0].group(1))
-    await query.message.delete()
-    await prompt_add_sub(client, query.message.chat.id, msg_id)
+    await query.answer("💬 sᴇɴᴅ sᴜʙᴛɪᴛʟᴇ ғɪʟᴇ (.sʀᴛ/.ᴀss/.ᴠᴛᴛ)")
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    uid = query.from_user.id if query.from_user else query.message.chat.id
+    await prompt_add_sub(client, query.message.chat.id, msg_id, user_id=uid)
 
-async def prompt_add_sub(client: Client, chat_id: int, video_msg_id: int):
+async def prompt_add_sub(client: Client, chat_id: int, video_msg_id: int, user_id: int = 0):
     await client.send_message(
         chat_id=chat_id,
         text=(
@@ -580,6 +623,8 @@ async def prompt_add_sub(client: Client, chat_id: int, video_msg_id: int):
         reply_markup=ForceReply(placeholder=to_smallcaps("send or reply with subtitle file..."))
     )
     await cache.set(f"waiting_addsub_{chat_id}", video_msg_id, ttl=300)
+    if user_id and user_id != chat_id:
+        await cache.set(f"waiting_addsub_{user_id}", video_msg_id, ttl=300)
 
 async def execute_add_subtitle(client: Client, reply_msg: Message, video_id: int, sub_msg: Message):
     status = await reply_msg.reply_text(f"⏳ **{to_smallcaps('initializing subtitle muxing...')}**")
@@ -684,10 +729,15 @@ async def trim_video_cmd(client: Client, message: Message):
 @Client.on_callback_query(filters.regex(r"^pro_trim_ask_(\d+)"))
 async def pro_trim_callback(client: Client, query: CallbackQuery):
     msg_id = int(query.matches[0].group(1))
-    await query.message.delete()
-    await prompt_trim(client, query.message.chat.id, msg_id)
+    await query.answer("✂️ ᴇɴᴛᴇʀ sᴛᴀʀᴛ & ᴇɴᴅ ᴛɪᴍᴇ")
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    uid = query.from_user.id if query.from_user else query.message.chat.id
+    await prompt_trim(client, query.message.chat.id, msg_id, user_id=uid)
 
-async def prompt_trim(client: Client, chat_id: int, video_msg_id: int):
+async def prompt_trim(client: Client, chat_id: int, video_msg_id: int, user_id: int = 0):
     await client.send_message(
         chat_id=chat_id,
         text=(
@@ -703,6 +753,8 @@ async def prompt_trim(client: Client, chat_id: int, video_msg_id: int):
         reply_markup=ForceReply(placeholder=to_smallcaps("e.g. 00:01:30 00:05:00"))
     )
     await cache.set(f"waiting_trim_{chat_id}", video_msg_id, ttl=300)
+    if user_id and user_id != chat_id:
+        await cache.set(f"waiting_trim_{user_id}", video_msg_id, ttl=300)
 
 async def execute_trim_video(client: Client, reply_msg: Message, video_id: int, time_text: str):
     start_sec, end_sec = parse_time_range(time_text)
@@ -1013,3 +1065,177 @@ async def _run_sample_or_mute_or_remux(client: Client, media_msg: Message, targe
     except Exception as e:
         clean_temp_files(work_dir)
         await safe_edit_text(status, f"❌ **{to_smallcaps('processing failed')}** : `{e}`")
+
+
+@Client.on_message(filters.private & filters.command(["codepro", "minify", "checkcode", "pycheck"], prefixes=COMMAND_PREFIXES))
+async def code_pro_command_entry(client: Client, message: Message):
+    from plugins.rename import resolve_target_media_message
+    target = await resolve_target_media_message(client, message)
+    if not target or not target.document:
+        return await safe_reply_text(
+            message,
+            f"⚠️ **{to_smallcaps('please reply to a .py, .html, .css, .php, .js, or .json code file!')}**\n\n"
+            f"• **{to_smallcaps('usage')}** : {to_smallcaps('reply to any code file with')} `/codepro`, `/minify`, {to_smallcaps('or')} `/checkcode`"
+            f"{format_watermark()}"
+        )
+    cmd = (message.command[0] if message.command else "codepro").lower()
+    if cmd == "minify":
+        return await _execute_code_pro_action(client, target, message, action="opt", is_callback=False)
+    if cmd in ("checkcode", "pycheck"):
+        return await _execute_code_pro_action(client, target, message, action="check", is_callback=False)
+    await show_code_pro_menu(target, message, is_callback=False)
+
+
+@Client.on_callback_query(filters.regex(r"^codepro_(menu|opt|zip|check)_(\d+)$"))
+async def code_pro_callback_router(client: Client, query: CallbackQuery):
+    action = query.matches[0].group(1)
+    msg_id = int(query.matches[0].group(2))
+    original = await client.get_messages(query.message.chat.id, msg_id)
+    if not original or not original.document:
+        return await query.answer(to_smallcaps("code file not found!"), show_alert=True)
+    if action == "menu":
+        await query.answer("💻 ᴄᴏᴅᴇ ᴘʀᴏ sᴛᴜᴅɪᴏ")
+        return await show_code_pro_menu(original, query.message, is_callback=True)
+    await query.answer(f"⚡ ʀᴜɴɴɪɴɢ ᴄᴏᴅᴇ {action.upper()}...")
+    await _execute_code_pro_action(client, original, query.message, action=action, is_callback=True)
+
+
+async def show_code_pro_menu(media_msg: Message, target_msg: Message, is_callback: bool = False):
+    msg_id = media_msg.id
+    doc = media_msg.document
+    raw_name = getattr(doc, "file_name", None) or f"script_{msg_id}.py"
+    clean_name = raw_name.replace("`", "'")
+    fsize = humanbytes(getattr(doc, "file_size", 0))
+    lang = detect_code_language(raw_name, getattr(doc, "mime_type", "")).upper()
+
+    text = (
+        f"✦ **{to_smallcaps('code pro studio (py • html • css • php)')}** ✦ 💻⚡\n\n"
+        f"• 📁 **{to_smallcaps('file name')}** : `{clean_name}`\n"
+        f"• 📦 **{to_smallcaps('file size')}** : `{fsize}`\n"
+        f"• 🧠 **{to_smallcaps('language')}** : `{lang}`\n\n"
+        f"💡 **{to_smallcaps('select a fast code operation below:')}**"
+        f"{format_watermark()}"
+    )
+    buttons = [
+        [
+            InlineKeyboardButton(f"✅ {to_smallcaps('syntax & ast check')}", callback_data=f"codepro_check_{msg_id}"),
+            InlineKeyboardButton(f"⚡ {to_smallcaps('minify & optimize')}", callback_data=f"codepro_opt_{msg_id}"),
+        ],
+        [
+            InlineKeyboardButton(f"🗜️ {to_smallcaps('compress to .zip')}", callback_data=f"codepro_zip_{msg_id}"),
+            InlineKeyboardButton(f"✏️ {to_smallcaps('fast rename')}", callback_data=f"rename_{msg_id}"),
+        ],
+        [
+            InlineKeyboardButton(f"🎬 {to_smallcaps('web stream / preview')}", callback_data=f"stream_{msg_id}"),
+            InlineKeyboardButton(f"🔙 {to_smallcaps('back to studio')}", callback_data=f"back_to_media_{msg_id}"),
+        ],
+        [
+            InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home"),
+            InlineKeyboardButton(f"❌ {to_smallcaps('close')}", callback_data="close_data"),
+        ],
+    ]
+    if is_callback:
+        await safe_edit_text(target_msg, text, reply_markup=InlineKeyboardMarkup(buttons))
+    else:
+        await safe_reply_text(target_msg, text, reply_markup=InlineKeyboardMarkup(buttons), quote=True)
+
+
+async def _execute_code_pro_action(client: Client, media_msg: Message, target_msg: Message, action: str, is_callback: bool = True):
+    msg_id = media_msg.id
+    doc = media_msg.document
+    raw_name = sanitize_filename(getattr(doc, "file_name", None) or f"code_{msg_id}.py")
+    base_n, ext = os.path.splitext(raw_name)
+    work_dir = os.path.join(Config.DOWNLOAD_DIR, f"codepro_{msg_id}_{secrets.token_hex(3)}")
+    os.makedirs(work_dir, exist_ok=True)
+    in_path = os.path.join(work_dir, raw_name)
+
+    status = await (safe_edit_text if is_callback else safe_reply_text)(
+        target_msg, f"⚡ **{to_smallcaps(f'processing {raw_name} in code pro engine...')}**"
+    )
+    try:
+        await download_media_with_auth_recovery(client, media_msg, file_name=in_path)
+        cinfo = await analyze_code_file(in_path, raw_name)
+        orig_sz = os.path.getsize(in_path) if os.path.exists(in_path) else 0
+
+        if action == "check":
+            clean_temp_files(work_dir)
+            badge = "✅ ᴠᴀʟɪᴅ sʏɴᴛᴀx & sᴛʀᴜᴄᴛᴜʀᴇ" if cinfo.get("syntax_ok") else "❌ sʏɴᴛᴀx / sᴛʀᴜᴄᴛᴜʀᴇ ᴇʀʀᴏʀ"
+            txt = (
+                f"✦ **{to_smallcaps('code syntax & structure report')}** ✦ 💻\n\n"
+                f"• 📁 **{to_smallcaps('file')}** : `{raw_name}` (`{humanbytes(orig_sz)}`)\n"
+                f"• 🧠 **{to_smallcaps('language')}** : `{cinfo.get('language', 'code').upper()}`\n"
+                f"• 📏 **{to_smallcaps('total lines')}** : `{cinfo.get('lines', 0)}` (`{cinfo.get('active_lines', 0)}` active)\n"
+                f"• ⚙️ **{to_smallcaps('functions / scripts')}** : `{cinfo.get('functions', 0)}`\n"
+                f"• 📦 **{to_smallcaps('classes / rules')}** : `{cinfo.get('classes', 0)}`\n"
+                f"• 🔗 **{to_smallcaps('imports / links')}** : `{cinfo.get('imports', 0)}`\n"
+                f"• 🛡️ **{to_smallcaps('status')}** : `{badge}`\n"
+                f"• 📋 **{to_smallcaps('diagnostic')}** : `{cinfo.get('syntax_detail', 'OK')}`"
+                f"{format_watermark()}"
+            )
+            btn = [
+                [
+                    InlineKeyboardButton(f"⚡ {to_smallcaps('minify / optimize')}", callback_data=f"codepro_opt_{msg_id}"),
+                    InlineKeyboardButton(f"🗜️ {to_smallcaps('compress .zip')}", callback_data=f"codepro_zip_{msg_id}"),
+                ],
+                [
+                    InlineKeyboardButton(f"🔙 {to_smallcaps('back to code studio')}", callback_data=f"codepro_menu_{msg_id}"),
+                    InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home"),
+                ],
+            ]
+            return await safe_edit_text(status, txt, reply_markup=InlineKeyboardMarkup(btn))
+
+        if action == "opt":
+            out_name = sanitize_filename(f"fast_{base_n}{ext}")
+            out_path = os.path.join(work_dir, out_name)
+            ok = await optimize_code_file(in_path, out_path, raw_name)
+            label = f"{cinfo.get('language', 'code').upper()} Optimized & Minified"
+        else:
+            out_name = sanitize_filename(f"{raw_name}.zip")
+            out_path = os.path.join(work_dir, out_name)
+            ok = await compress_file_to_zip(in_path, out_path, raw_name)
+            label = "High-Speed Deflate .ZIP Archive"
+
+        if not ok or not os.path.exists(out_path):
+            clean_temp_files(work_dir)
+            return await safe_edit_text(status, f"❌ **{to_smallcaps('code processing failed!')}**")
+
+        new_sz = os.path.getsize(out_path)
+        saved_pct = round(max(0.0, (1.0 - (new_sz / max(1, orig_sz))) * 100.0), 1)
+        cap = (
+            f"✅ **{to_smallcaps(label)}** ⚡\n\n"
+            f"• 📁 **{to_smallcaps('file')}** : `{out_name}`\n"
+            f"• 📦 **{to_smallcaps('size')}** : `{humanbytes(orig_sz)}` ➔ `{humanbytes(new_sz)}` (`-{saved_pct}%`)\n"
+            f"• 🛡️ **{to_smallcaps('validation')}** : `{cinfo.get('syntax_detail', 'Verified')}`"
+            f"{format_watermark()}"
+        )
+        sent = await execute_with_floodwait(
+            client.send_document,
+            chat_id=target_msg.chat.id,
+            document=out_path,
+            file_name=out_name,
+            caption=cap,
+            force_document=True,
+        )
+        if sent:
+            try:
+                await sent.edit_reply_markup(
+                    reply_markup=InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton(f"🎬 {to_smallcaps('stream / preview')}", callback_data=f"stream_{sent.id}"),
+                            InlineKeyboardButton(f"✏️ {to_smallcaps('rename')}", callback_data=f"rename_{sent.id}"),
+                        ]
+                    ])
+                )
+            except Exception:
+                pass
+        clean_temp_files(work_dir)
+        if status:
+            try:
+                await status.delete()
+            except Exception:
+                pass
+    except Exception as e:
+        clean_temp_files(work_dir)
+        await safe_edit_text(status, f"❌ **{to_smallcaps('code pro error')}** : `{e}`")
+    finally:
+        cache.auto_clear_after_response_sync(preserve_workflows=True)

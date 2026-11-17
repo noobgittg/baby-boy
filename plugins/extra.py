@@ -362,9 +362,12 @@ async def user_vault_callback_handler(client: Client, query: CallbackQuery):
         return await query.answer("⚠️ ᴏʀɪɢɪɴᴀʟ ᴍᴇᴅɪᴀ ᴜɴᴀᴠᴀɪʟᴀʙʟᴇ ɪɴ sᴛᴏʀᴀɢᴇ.", show_alert=True)
 
     if act.startswith("del_"):
-        parts = act.split("_")
-        fid = parts[1] if len(parts) > 1 else ""
-        pg = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+        rem = act[4:]
+        if "_" in rem:
+            fid, pg_str = rem.rsplit("_", 1)
+            pg = int(pg_str) if pg_str.isdigit() else 0
+        else:
+            fid, pg = rem, 0
         await file_repo.revoke_file(fid)
         await query.answer("🗑️ ғɪʟᴇ ʀᴇᴍᴏᴠᴇᴅ ғʀᴏᴍ ᴠᴀᴜʟᴛ!")
         return await render_user_vault_view(client, query.message, uid, page=pg, is_edit=True)
@@ -426,7 +429,7 @@ async def render_user_dashboard_view(target_msg: Message, user_id: int, first_na
     suffix = u.get("suffix") or "None"
     auto_ren = "🟢 ON" if u.get("auto_rename") else "⚪ OFF"
     auto_comp = "🟢 ON" if u.get("auto_compress") else "⚪ OFF"
-    auto_str = "🟢 ON" if u.get("auto_stream", True) else "⚪ OFF"
+    auto_str = "🟢 ON" if u.get("auto_stream", False) else "⚪ ON-DEMAND"
 
     text = (
         f"✦ **{to_smallcaps('personal media, preset & task studio')}** ✦ 🎛️\n\n"

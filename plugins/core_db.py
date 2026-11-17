@@ -29,7 +29,7 @@ def new_user_dict(user_id: int, first_name: str, username: Optional[str] = None)
         "rename_format": None,
         "auto_rename": False,
         "auto_compress": False,
-        "auto_stream": True,
+        "auto_stream": False,
         "auto_caption": True,
         "upload_mode": "video",
         "auto_delete_time": int(Config.DEFAULT_AUTO_DELETE),

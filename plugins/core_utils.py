@@ -468,6 +468,8 @@ _TRANSIENT_KEY_PREFIXES = (
     "fn_",
     "probe_",
     "ffstatus_",
+    "code_",
+    "render_",
 )
 
 
@@ -493,16 +495,17 @@ class FastMemoryCache:
 
     @asynccontextmanager
     async def response_scope(self, scope_name: str = "handler"):
-        """Context manager that opens an isolated L0 cache for a command/callback/function and auto-clears on exit."""
         ctx_dict: Dict[str, Any] = {}
         token = _RESPONSE_CTX_CACHE.set(ctx_dict)
         try:
             yield ctx_dict
         finally:
+            skip_sweep = bool(ctx_dict.get("__skip_sweep__", False))
             ctx_dict.clear()
             _RESPONSE_CTX_CACHE.reset(token)
-            self._response_scopes_cleared += 1
-            self.auto_clear_after_response_sync()
+            if not skip_sweep:
+                self._response_scopes_cleared += 1
+                self.auto_clear_after_response_sync()
 
     def get_sync(self, key: str) -> Optional[Any]:
         ctx = _RESPONSE_CTX_CACHE.get()
@@ -1409,3 +1412,22 @@ def bounded_media_job(func):
         finally:
             cache.auto_clear_after_response_sync()
     return wrapped
+
+
+def auto_clear_cache_after(func: Callable):
+    if asyncio.iscoroutinefunction(func):
+        @functools.wraps(func)
+        async def _async_wrapped(*args, **kwargs):
+            try:
+                return await func(*args, **kwargs)
+            finally:
+                cache.auto_clear_after_response_sync(preserve_workflows=True)
+        return _async_wrapped
+    else:
+        @functools.wraps(func)
+        def _sync_wrapped(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            finally:
+                cache.auto_clear_after_response_sync(preserve_workflows=True)
+        return _sync_wrapped

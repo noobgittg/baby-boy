@@ -3,7 +3,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from config import Config
 from plugins.core_db import user_repo
-from plugins.core_utils import to_smallcaps, format_watermark
+from plugins.core_utils import to_smallcaps, format_watermark, safe_edit_text, safe_reply_text
 
 
 @Client.on_message(filters.private & filters.command(["autocaption", "auto_caption"], prefixes=COMMAND_PREFIXES))
@@ -12,7 +12,7 @@ async def toggle_autocaption_cmd(client: Client, message: Message):
     enabled = not bool(user.get("auto_caption", True))
     await user_repo.update_user(message.from_user.id, {"auto_caption": enabled})
     state = "🟢 ᴇɴᴀʙʟᴇᴅ" if enabled else "⚪ ᴅɪsᴀʙʟᴇᴅ"
-    await message.reply_text(
+    await safe_reply_text(message, 
         f"✦ **{to_smallcaps('auto-caption mode')}** ✦\n\n"
         f"• 📝 **{to_smallcaps('status')}** : `{state}`\n\n"
         f"💡 {to_smallcaps('use /setcaption to define a template, or /autocaption to toggle metadata captions.')}"
@@ -42,19 +42,19 @@ async def set_caption_handler(client: Client, message: Message):
             f"`📁 {to_smallcaps('file')}: {{filename}}\\n📦 {to_smallcaps('size')}: {{filesize}}\\n⏱️ {to_smallcaps('time')}: {{duration}}`"
             f"{format_watermark()}"
         )
-        return await message.reply_text(help_text)
+        return await safe_reply_text(message, help_text)
 
     caption = message.text.split(None, 1)[1].strip()
     if not caption:
-        return await message.reply_text(
+        return await safe_reply_text(message, 
             f"⚠️ **{to_smallcaps('caption template cannot be empty.')}**{format_watermark()}"
         )
     if len(caption) > 900:
-        return await message.reply_text(
+        return await safe_reply_text(message, 
             f"⚠️ **{to_smallcaps('caption template is too long (maximum 900 characters).')}**{format_watermark()}"
         )
     await user_repo.update_user(message.from_user.id, {"custom_caption": caption, "auto_caption": True})
-    await message.reply_text(
+    await safe_reply_text(message, 
         f"✦ **{to_smallcaps('custom caption saved')}** ✦\n\n"
         f"✅ **{to_smallcaps('your template has been saved successfully!')}**\n\n"
         f"• 📝 **{to_smallcaps('preview')}** :\n`{caption}`\n\n"
@@ -69,7 +69,7 @@ async def set_caption_handler(client: Client, message: Message):
 @Client.on_message(filters.private & filters.command(["addcaption", "add_caption"], prefixes=COMMAND_PREFIXES))
 async def add_caption_to_list(client: Client, message: Message):
     if len(message.command) < 2:
-        return await message.reply_text(
+        return await safe_reply_text(message, 
             f"✦ **{to_smallcaps('add to cap[] queue')}** ✦\n\n"
             f"• 📝 **{to_smallcaps('usage')}** : `/addcaption [template]`\n\n"
             f"💡 {to_smallcaps('adds a new template to your dynamic captions list.')}"
@@ -77,7 +77,7 @@ async def add_caption_to_list(client: Client, message: Message):
         )
     caption = message.text.split(None, 1)[1]
     await user_repo.add_caption(message.from_user.id, caption)
-    await message.reply_text(
+    await safe_reply_text(message, 
         f"✦ **{to_smallcaps('caption added')}** ✦\n\n"
         f"✅ **{to_smallcaps('added to your dynamic captions list (cap[])!')}**\n\n"
         f"• 📝 **{to_smallcaps('template')}** :\n`{caption}`"
@@ -114,12 +114,12 @@ async def view_caption_handler(client: Client, message: Message):
             InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home")
         ]
     ]
-    await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+    await safe_reply_text(message, text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
 
 @Client.on_message(filters.private & filters.command(["delcaption", "del_caption"], prefixes=COMMAND_PREFIXES))
 async def del_caption_handler(client: Client, message: Message):
     await user_repo.update_user(message.from_user.id, {"custom_caption": None, "captions_list": []})
-    await message.reply_text(
+    await safe_reply_text(message, 
         f"✦ **{to_smallcaps('captions reset')}** ✦\n\n"
         f"🗑️ **{to_smallcaps('all custom captions have been reset to default!')}**"
         f"{format_watermark()}",
@@ -133,7 +133,7 @@ async def del_caption_handler(client: Client, message: Message):
 async def caption_reset_callback(client: Client, query: CallbackQuery):
     await user_repo.update_user(query.from_user.id, {"custom_caption": None, "captions_list": []})
     await query.answer(to_smallcaps("captions reset!"), show_alert=True)
-    await query.message.edit_text(
+    await safe_edit_text(query.message, 
         f"✦ **{to_smallcaps('captions reset')}** ✦\n\n"
         f"🗑️ **{to_smallcaps('all your custom captions have been reset to default.')}**"
         f"{format_watermark()}",

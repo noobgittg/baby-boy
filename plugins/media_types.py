@@ -1,4 +1,4 @@
-"""Media MIME capability helpers shared by Telegram and web workflows."""
+import os
 
 AUDIO_MIME_TYPES = {
     "audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg", "audio/wav", "audio/webm",
@@ -38,6 +38,47 @@ VIDEO_MIME_TYPES = {
     "application/vnd.apple.mpegurl", "application/x-mpegurl", "application/dash+xml",
 }
 
+CODE_EXTENSIONS = {
+    ".py": ("python", "text/x-python"),
+    ".pyw": ("python", "text/x-python"),
+    ".html": ("html", "text/html"),
+    ".htm": ("html", "text/html"),
+    ".css": ("css", "text/css"),
+    ".php": ("php", "application/x-httpd-php"),
+    ".phtml": ("php", "application/x-httpd-php"),
+    ".js": ("javascript", "application/javascript"),
+    ".mjs": ("javascript", "application/javascript"),
+    ".ts": ("typescript", "application/typescript"),
+    ".json": ("json", "application/json"),
+    ".xml": ("xml", "application/xml"),
+    ".sql": ("sql", "application/sql"),
+    ".sh": ("shell", "application/x-sh"),
+    ".yaml": ("yaml", "application/x-yaml"),
+    ".yml": ("yaml", "application/x-yaml"),
+    ".md": ("markdown", "text/markdown"),
+}
+
+CODE_MIME_TYPES = {
+    "text/x-python",
+    "application/x-python-code",
+    "text/x-script.phyton",
+    "text/html",
+    "application/xhtml+xml",
+    "text/css",
+    "application/x-httpd-php",
+    "application/php",
+    "text/x-php",
+    "text/php",
+    "application/javascript",
+    "text/javascript",
+    "application/json",
+    "application/xml",
+    "text/xml",
+    "application/sql",
+    "application/x-sh",
+    "text/x-shellscript",
+}
+
 
 def normalize_mime(value: str | None) -> str:
     return (value or "application/octet-stream").split(";", 1)[0].strip().lower()
@@ -53,7 +94,37 @@ def is_video_mime(value: str | None) -> bool:
     return mime.startswith("video/") or mime in VIDEO_MIME_TYPES
 
 
-def media_kind(value: str | None) -> str:
+def is_code_file(file_name: str | None = None, mime_type: str | None = None) -> bool:
+    ext = os.path.splitext(str(file_name or "").strip().lower())[1]
+    if ext == ".ts" and is_video_mime(mime_type):
+        return False
+    if ext in CODE_EXTENSIONS:
+        return True
+    mime = normalize_mime(mime_type)
+    return mime in CODE_MIME_TYPES
+
+
+def detect_code_language(file_name: str | None = None, mime_type: str | None = None) -> str:
+    ext = os.path.splitext(str(file_name or "").strip().lower())[1]
+    if ext in CODE_EXTENSIONS and not (ext == ".ts" and is_video_mime(mime_type)):
+        return CODE_EXTENSIONS[ext][0]
+    mime = normalize_mime(mime_type)
+    if "python" in mime:
+        return "python"
+    if "html" in mime:
+        return "html"
+    if "css" in mime:
+        return "css"
+    if "php" in mime:
+        return "php"
+    if "javascript" in mime:
+        return "javascript"
+    if "json" in mime:
+        return "json"
+    return "text"
+
+
+def media_kind(value: str | None, file_name: str | None = None) -> str:
     mime = normalize_mime(value)
     if is_video_mime(mime):
         return "video"
@@ -61,11 +132,15 @@ def media_kind(value: str | None) -> str:
         return "audio"
     if mime.startswith("image/"):
         return "image"
+    if is_code_file(file_name, mime):
+        return "code"
     return "document"
 
 
-def browser_media_supported(value: str | None) -> bool:
+def browser_media_supported(value: str | None, file_name: str | None = None) -> bool:
     mime = normalize_mime(value)
+    if is_code_file(file_name, mime):
+        return True
     return mime.startswith(("audio/", "video/")) or mime in {
-        "application/ogg", "application/vnd.apple.mpegurl", "application/dash+xml"
+        "application/ogg", "application/vnd.apple.mpegurl", "application/dash+xml", "text/html", "text/css"
     }

@@ -3,7 +3,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, PhoneCodeExpired, PasswordHashInvalid
 from config import Config
-from plugins.core_utils import cache, to_smallcaps, format_watermark, logger
+from plugins.core_utils import cache, to_smallcaps, format_watermark, logger, safe_edit_text, safe_reply_text
 
 ACTIVE_SESS_CLIENTS = {}
 
@@ -35,13 +35,14 @@ async def session_generator_command(client: Client, message: Message):
 @Client.on_callback_query(filters.regex(r"^sess_(pyro|tele)"))
 async def session_lib_choice(client: Client, query: CallbackQuery):
     lib = query.matches[0].group(1)
+    await query.answer("🔐 sᴇssɪᴏɴ ɢᴇɴᴇʀᴀᴛᴏʀ")
     user_id = query.from_user.id
     lib_name = "Pyrogram / Pyrofork" if lib == "pyro" else "Telethon"
 
     await cache.set(f"sess_step_{user_id}", {"lib": lib, "step": "phone"}, ttl=600)
 
     buttons = [[InlineKeyboardButton(f"❌ {to_smallcaps('cancel')}", callback_data="cancel_op")]]
-    await query.message.edit_text(
+    await safe_edit_text(query.message, 
         f"✦ **{to_smallcaps(f'{lib_name} session generator')}** ✦\n\n"
         f"📱 **{to_smallcaps('step 1: send your phone number')}**\n\n"
         f"• {to_smallcaps('send your phone number in international format (including country code).')}\n"

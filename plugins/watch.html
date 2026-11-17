@@ -77,6 +77,7 @@
             }
         })();
     </script>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="smallcap-ui bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 min-h-screen flex flex-col transition-colors duration-200">
 
@@ -121,6 +122,33 @@
                 <source src="{{ stream_url }}" type="{{ mime_type | default('video/mp4') }}">
                 {% for track in metadata.subtitle_tracks %}{% if track.url %}<track kind="subtitles" src="{{ track.url }}" srclang="{{ track.lang_code | default('und') }}" label="{{ track.language | default('Subtitle ' ~ loop.index) }}">{% endif %}{% endfor %}
             </video>
+            {% elif metadata.media_kind == 'code' %}
+            <div class="h-full min-h-56 flex flex-col items-center justify-center gap-3 p-8 text-center text-white">
+                <i class="fa-solid fa-code text-4xl text-brand-400"></i>
+                <p class="font-semibold">⚡ ᴄᴏᴅᴇ ғɪʟᴇ ʀᴇᴀᴅʏ ғᴏʀ ʟɪᴠᴇ ɪɴsᴘᴇᴄᴛɪᴏɴ & ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ ({{ file_name }})</p>
+                <div class="flex flex-wrap justify-center gap-3">
+                    <a href="/code/{{ file_id }}" class="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-bold">💻 ᴏᴘᴇɴ ʟɪᴠᴇ ᴄᴏᴅᴇ ᴠɪᴇᴡᴇʀ</a>
+                    <a href="{{ download_url }}" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold border border-sky-500/30">⬇️ ғᴀsᴛ ᴅᴏᴡɴʟᴏᴀᴅ</a>
+                </div>
+            </div>
+            {% elif metadata.media_kind == 'code' %}
+            <div class="h-full min-h-56 flex flex-col items-center justify-center gap-3 p-8 text-center text-white">
+                <i class="fa-solid fa-code text-4xl text-brand-400"></i>
+                <p class="font-semibold">⚡ ᴄᴏᴅᴇ ғɪʟᴇ ʀᴇᴀᴅʏ ғᴏʀ ʟɪᴠᴇ ɪɴsᴘᴇᴄᴛɪᴏɴ & ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ ({{ file_name }})</p>
+                <div class="flex flex-wrap justify-center gap-3">
+                    <a href="/code/{{ file_id }}" class="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-bold">💻 ᴏᴘᴇɴ ʟɪᴠᴇ ᴄᴏᴅᴇ ᴠɪᴇᴡᴇʀ</a>
+                    <a href="{{ download_url }}" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold border border-sky-500/30">⬇️ ғᴀsᴛ ᴅᴏᴡɴʟᴏᴀᴅ</a>
+                </div>
+            </div>
+            {% elif metadata.media_kind == 'code' %}
+            <div class="h-full min-h-56 flex flex-col items-center justify-center gap-3 p-8 text-center text-white">
+                <i class="fa-solid fa-code text-4xl text-brand-400"></i>
+                <p class="font-semibold">⚡ ᴄᴏᴅᴇ ғɪʟᴇ ʀᴇᴀᴅʏ ғᴏʀ ʟɪᴠᴇ ɪɴsᴘᴇᴄᴛɪᴏɴ & ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ ({{ file_name }})</p>
+                <div class="flex flex-wrap justify-center gap-3">
+                    <a href="/code/{{ file_id }}" class="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-bold">💻 ᴏᴘᴇɴ ʟɪᴠᴇ ᴄᴏᴅᴇ ᴠɪᴇᴡᴇʀ</a>
+                    <a href="{{ download_url }}" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold border border-sky-500/30">⬇️ ғᴀsᴛ ᴅᴏᴡɴʟᴏᴀᴅ</a>
+                </div>
+            </div>
             {% else %}
             <div class="h-full min-h-56 flex flex-col items-center justify-center gap-3 p-8 text-center text-white">
                 <i class="fa-solid fa-file-circle-question text-4xl text-brand-400"></i>

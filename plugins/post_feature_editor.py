@@ -730,12 +730,34 @@ async def gfeat_callback_router(client: Client, query: CallbackQuery):
             text, kb = await build_group_feature_editor_view(cid, query.message.chat.title or "")
             return await safe_edit_message(query.message, text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
         all_chats = await db.get_all_chats()
-        if is_admin_sync(uid) and all_chats:
-            cid = int(all_chats[0]["id"])
-            await query.answer("🛡️ ɢʀᴏᴜᴘ ғᴇᴀᴛᴜʀᴇ ᴇᴅɪᴛᴏʀ")
-            text, kb = await build_group_feature_editor_view(cid, all_chats[0].get("title", "Group"))
-            return await safe_edit_message(query.message, text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
-        return await query.answer("💡 ʀᴜɴ /gsettings ɪɴsɪᴅᴇ ʏᴏᴜʀ ɢʀᴏᴜᴘ ᴏʀ /gsettings <chat_id>!", show_alert=True)
+        if all_chats:
+            for gdoc in all_chats:
+                cand_cid = int(gdoc.get("id", 0) or 0)
+                if cand_cid and (is_admin_sync(uid) or await is_chat_or_global_admin(client, cand_cid, user_id=uid)):
+                    await query.answer("🛡️ ɢʀᴏᴜᴘ ғᴇᴀᴛᴜʀᴇ ᴇᴅɪᴛᴏʀ")
+                    text, kb = await build_group_feature_editor_view(cand_cid, gdoc.get("title", "Group"))
+                    return await safe_edit_message(query.message, text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
+        await query.answer("🛡️ ɢʀᴏᴜᴘ ғᴇᴀᴛᴜʀᴇ ᴇᴅɪᴛᴏʀ")
+        guide_txt = (
+            f"✦ <b>{to_smallcaps('interactive group feature & limits editor')}</b> ✦ 🛡️\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"• 💡 <b>{to_smallcaps('how to open your group editor')}:</b>\n"
+            f"  1. {to_smallcaps('add the bot as admin to your group.')}\n"
+            f"  2. {to_smallcaps('send')} <code>/gsettings</code> {to_smallcaps('or')} <code>/helpdesk</code> {to_smallcaps('inside your group.')}\n"
+            f"  3. {to_smallcaps('or manage remotely from private chat with')} <code>/gsettings -100xxxxxxxxxx</code>!"
+            f"{format_watermark_html()}"
+        )
+        guide_kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(f"🛡️ {to_smallcaps('group helpdesk guide')}", callback_data="hdesk|home"),
+                InlineKeyboardButton(f"⚡ {to_smallcaps('auto-set wizard')}", callback_data="autoset|home"),
+            ],
+            [
+                InlineKeyboardButton(f"🏠 {to_smallcaps('back to home')}", callback_data="nav_home"),
+                InlineKeyboardButton(f"❌ {to_smallcaps('close')}", callback_data="close_data"),
+            ],
+        ])
+        return await safe_edit_message(query.message, guide_txt, reply_markup=guide_kb, parse_mode=enums.ParseMode.HTML)
 
     if len(parts) < 3 or not parts[2].lstrip("-").isdigit():
         return await query.answer("⚠️ ɪɴᴠᴀʟɪᴅ ɢʀᴏᴜᴘ!", show_alert=True)
@@ -1061,7 +1083,10 @@ async def cfeat_callback_router(client: Client, query: CallbackQuery):
             if all_ch:
                 conn_id = int(all_ch[0].get("chat_id", 0))
         if not conn_id:
-            return await query.answer("📢 ᴄᴏɴɴᴇᴄᴛ ᴀ ᴄʜᴀɴɴᴇʟ ғɪʀsᴛ ᴡɪᴛʜ /connect <channel_id>!", show_alert=True)
+            await query.answer("📢 ᴄʜᴀɴɴᴇʟ ғᴇᴀᴛᴜʀᴇ ᴇᴅɪᴛᴏʀ")
+            from plugins.channel_manager import build_channel_help_view
+            text, kb = await build_channel_help_view(client, uid, "home")
+            return await safe_edit_message(query.message, text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
         if not await is_chat_or_global_admin(client, conn_id, user_id=uid):
             return await query.answer("⛔ ᴄʜᴀɴɴᴇʟ ᴀᴅᴍɪɴ/ᴏᴡɴᴇʀ ᴏʀ ʙᴏᴛ ᴀᴅᴍɪɴs ᴏɴʟʏ!", show_alert=True)
         await query.answer("📢 ᴄʜᴀɴɴᴇʟ ғᴇᴀᴛᴜʀᴇ ᴇᴅɪᴛᴏʀ")

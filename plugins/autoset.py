@@ -71,7 +71,7 @@ async def build_autoset_view(
     u = await user_repo.get_or_create(user_id, "User")
     auto_cap = "🟢 ᴏɴ" if u.get("auto_caption", True) else "⚪ ᴏғғ"
     auto_ren = "🟢 ᴏɴ" if u.get("auto_rename", False) else "⚪ ᴏғғ"
-    auto_str = "🟢 ᴏɴ" if u.get("auto_stream", True) else "⚪ ᴏғғ"
+    auto_str = "🟢 ᴏɴ" if u.get("auto_stream", False) else "⚪ ᴏғғ"
     auto_cmp = "🟢 ᴏɴ" if u.get("auto_compress", False) else "⚪ ᴏғғ"
 
     chnl_line = f"<code>{conn_cid}</code>" if conn_cid else f"<i>{to_smallcaps('none')} (<code>/connect &lt;id&gt;</code>)</i>"
@@ -249,7 +249,7 @@ async def autoset_callback_router(client: Client, query: CallbackQuery):
         await user_repo.update_user(uid, updates)
         await query.answer("✏️ ᴀᴜᴛᴏ ʀᴇɴᴀᴍᴇ ᴛᴏɢɢʟᴇᴅ!")
     elif action == "t_str":
-        await user_repo.update_user(uid, {"auto_stream": not bool(u.get("auto_stream", True))})
+        await user_repo.update_user(uid, {"auto_stream": not bool(u.get("auto_stream", False))})
         await query.answer("⚡ ᴀᴜᴛᴏ sᴛʀᴇᴀᴍ ᴛᴏɢɢʟᴇᴅ!")
     elif action == "t_cmp":
         await user_repo.update_user(uid, {"auto_compress": not bool(u.get("auto_compress", False))})
@@ -260,7 +260,7 @@ async def autoset_callback_router(client: Client, query: CallbackQuery):
             {
                 "auto_caption": True,
                 "auto_rename": False,
-                "auto_stream": True,
+                "auto_stream": False,
                 "auto_compress": False,
                 "prefix": "",
                 "suffix": "",

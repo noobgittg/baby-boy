@@ -44,7 +44,13 @@ from plugins.core_services import (
     schedule_deletion,
     download_media_with_auth_recovery
 )
-from plugins.media_types import is_audio_mime, is_video_mime, normalize_mime
+from plugins.media_types import (
+    is_audio_mime,
+    is_video_mime,
+    is_code_file,
+    detect_code_language,
+    normalize_mime,
+)
 
 MAX_BOT_FILE_SIZE = int(getattr(Config, "LARGE_FILE_THRESHOLD_BYTES", 2 * 1024 * 1024 * 1024))
 _USER_MEDIA_LOCKS: dict[int, asyncio.Lock] = {}
@@ -52,12 +58,6 @@ _USER_LAST_MEDIA_TS: dict[int, float] = {}
 
 
 async def resolve_target_media_message(client: Client, message: Message, user_id: int = 0) -> Optional[Message]:
-    """
-    Intelligently resolve the target media message whether the user:
-    1. Replied directly to the video/document/audio message,
-    2. Replied to the bot's Smart Media Studio card or ForceReply prompt, or
-    3. Sent `/rename` or `/compress` right after sending a media file without swipe-replying.
-    """
     uid = user_id or (message.from_user.id if getattr(message, "from_user", None) else 0)
     chat_id = message.chat.id if getattr(message, "chat", None) else uid
 
@@ -74,7 +74,7 @@ async def resolve_target_media_message(client: Client, message: Message, user_id
             for r in rows:
                 for b in r:
                     cb = getattr(b, "callback_data", "") or ""
-                    m = re.search(r"(?:rename|stream|compress_menu|pro_menu|custcomp_open|back_to_media)_(\d+)", cb)
+                    m = re.search(r"(?:rename|rename_restricted|stream|compress_menu|pro_menu|codepro_menu|custcomp_open|back_to_media)_(\d+)", cb)
                     if m and client and chat_id:
                         try:
                             fetched = await client.get_messages(chat_id, int(m.group(1)))
@@ -104,7 +104,6 @@ async def render_media_studio_card(
     target_msg: Message = None,
     is_edit: bool = False,
 ):
-    """Render or edit in-place the Smart Media Studio card (or >2GB Auto Compress & File Stream prompt)."""
     if user_id and getattr(media_msg, "id", None):
         await cache.set(f"last_media_{user_id}", int(media_msg.id), ttl=3600)
 
@@ -112,80 +111,92 @@ async def render_media_studio_card(
     media = media_msg.document or media_msg.video or media_msg.audio
     raw_file_name = getattr(media, "file_name", None) or "Unknown_File.mp4"
     file_name = raw_file_name.replace("`", "'")
-    file_size_bytes = getattr(media, "file_size", 0)
+    file_size_bytes = int(getattr(media, "file_size", 0) or 0)
     file_size = humanbytes(file_size_bytes)
-    mime_type = getattr(media, "mime_type", "video/mp4")
-    dur_val = getattr(media, "duration", 0)
+    mime_type = getattr(media, "mime_type", "application/octet-stream") or "application/octet-stream"
+    dur_val = int(getattr(media, "duration", 0) or 0)
     duration = time_formatter(seconds=dur_val) if dur_val > 0 else "N/A"
 
     normalized_mime = normalize_mime(mime_type)
-    is_video = bool(media_msg.video or is_video_mime(normalized_mime))
-    is_compressible = is_video or is_audio_mime(normalized_mime)
-    media_metadata = telegram_media_metadata(media, media_msg)
+    is_code = is_code_file(raw_file_name, normalized_mime)
+    code_lang = detect_code_language(raw_file_name, normalized_mime).upper() if is_code else ""
 
-    cached_fid = await cache.get(f"media_fid_{media_msg.chat.id}_{media_msg.id}")
-    if not cached_fid:
-        cached_fid = secrets.token_urlsafe(10)
-        await file_repo.save_file(
-            file_id=cached_fid,
-            chat_id=media_msg.chat.id,
-            message_id=media_msg.id,
-            file_name=file_name,
-            file_size=file_size_bytes,
-            mime_type=mime_type,
-            user_id=user_id,
-            metadata=media_metadata,
-            tg_file_id=getattr(media, "file_id", None)
-        )
-        await cache.set(f"media_fid_{media_msg.chat.id}_{media_msg.id}", cached_fid, ttl=3600)
-        bin_chan = Config.BIN_CHANNEL if Config.BIN_CHANNEL != 0 else media_msg.chat.id
-        if bin_chan != media_msg.chat.id:
-            async def _bg_archive_to_bin(fid: str, m_obj: Message, b_ch: int):
-                try:
-                    await asyncio.sleep(1.2)
-                    fwd = await safe_forward_message(m_obj, b_ch)
-                    if fwd and getattr(fwd, "chat", None) and getattr(fwd, "id", None):
-                        await file_repo.update_file(fid, {"chat_id": fwd.chat.id, "message_id": fwd.id})
-                except Exception as exc:
-                    logger.debug("⚠️ ʙɢ ʙɪɴ_ᴄʜᴀɴɴᴇʟ ғᴏʀᴡᴀʀᴅ sᴋɪᴘᴘᴇᴅ › %s", exc)
-            asyncio.create_task(_bg_archive_to_bin(cached_fid, media_msg, bin_chan))
+    from utils import temp as _t
+    auto_stream_active = bool(_t.BOT_CONFIG.get("auto_stream_global", True) and u.get("auto_stream", False))
+    watch_url = ""
+    download_url = ""
 
-    watch_url = f"{Config.BASE_URL}/watch/{cached_fid}"
-    download_url = f"{Config.BASE_URL}/download/{cached_fid}"
+    if auto_stream_active:
+        media_metadata = telegram_media_metadata(media, media_msg)
+        cached_fid = await cache.get(f"media_fid_{media_msg.chat.id}_{media_msg.id}")
+        if not cached_fid:
+            cached_fid = secrets.token_urlsafe(10)
+            await file_repo.save_file(
+                file_id=cached_fid,
+                chat_id=media_msg.chat.id,
+                message_id=media_msg.id,
+                file_name=file_name,
+                file_size=file_size_bytes,
+                mime_type=mime_type,
+                user_id=user_id,
+                metadata=media_metadata,
+                tg_file_id=getattr(media, "file_id", None)
+            )
+            await cache.set(f"media_fid_{media_msg.chat.id}_{media_msg.id}", cached_fid, ttl=3600)
+            bin_chan = Config.BIN_CHANNEL if Config.BIN_CHANNEL != 0 else media_msg.chat.id
+            if bin_chan != media_msg.chat.id:
+                async def _bg_archive_to_bin(fid: str, m_obj: Message, b_ch: int):
+                    try:
+                        await asyncio.sleep(1.0)
+                        fwd = await safe_forward_message(m_obj, b_ch)
+                        if fwd and getattr(fwd, "chat", None) and getattr(fwd, "id", None):
+                            await file_repo.update_file(fid, {"chat_id": fwd.chat.id, "message_id": fwd.id})
+                    except Exception as exc:
+                        logger.debug("⚠️ ʙɢ ʙɪɴ_ᴄʜᴀɴɴᴇʟ ғᴏʀᴡᴀʀᴅ sᴋɪᴘᴘᴇᴅ › %s", exc)
+                asyncio.create_task(_bg_archive_to_bin(cached_fid, media_msg, bin_chan))
+        watch_url = f"{Config.BASE_URL}/watch/{cached_fid}"
+        download_url = f"{Config.BASE_URL}/download/{cached_fid}"
 
     if file_size_bytes > MAX_BOT_FILE_SIZE:
+        stream_line = f"\n🔗 **{to_smallcaps('instant 4-player stream link')}** :\n{watch_url}\n" if watch_url else ""
         text = (
-            f"✦ **{to_smallcaps('large media (> 2gb) — compress or file stream')}** ✦ ⚡\n\n"
+            f"✦ **{to_smallcaps('large file (> 2gb) — compress or file stream')}** ✦ ⚡\n\n"
             f"• 📁 **{to_smallcaps('file name')}** : `{file_name}`\n"
             f"• 📦 **{to_smallcaps('file size')}** : `{file_size}` (`> 2 GB`)\n"
             f"• ⏱️ **{to_smallcaps('duration')}** : `{duration}`\n"
             f"• 🏷️ **{to_smallcaps('mime type')}** : `{mime_type}`\n"
-            f"• 🎬 **{to_smallcaps('players')}** : `PLAYit • MX Player • VLC • S Player`\n\n"
-            f"🔗 **{to_smallcaps('instant 4-player stream link')}** :\n{watch_url}\n\n"
-            f"💡 **{to_smallcaps('this file is above 2 gb. choose an option below to compress it with ffmpeg (< 2gb) or stream/download directly:')}**"
+            f"• 🚫 **{to_smallcaps('file rename')}** : `{to_smallcaps('restricted for files above 2 gb')}`\n"
+            f"• 🗜️ **{to_smallcaps('file compressor')}** : `{to_smallcaps('supported (any file size)')}`\n"
+            f"• 🎬 **{to_smallcaps('file stream')}** : `{to_smallcaps('supported (any file size • 4 players)')}`"
+            f"{stream_line}\n"
+            f"💡 **{to_smallcaps('rename is restricted above 2 gb. tap below to compress or generate a stream link:')}**"
             f"{format_watermark()}"
         )
         buttons = [
             [
-                InlineKeyboardButton(f"🎛️ {to_smallcaps('custom compress (5-10m)')}", callback_data=f"custcomp_open_{media_msg.id}"),
+                InlineKeyboardButton(f"🗜️ {to_smallcaps('fast compress (any size)')}", callback_data=f"compress_menu_{media_msg.id}"),
+                InlineKeyboardButton(f"🎛️ {to_smallcaps('custom compress')}", callback_data=f"custcomp_open_{media_msg.id}"),
             ],
             [
-                InlineKeyboardButton(f"🗜️ {to_smallcaps('compress < 2gb (ffmpeg)')}", callback_data=f"do_comptarget_{media_msg.id}_1850"),
-                InlineKeyboardButton(f"🎚️ {to_smallcaps('ffmpeg presets')}", callback_data=f"compress_menu_{media_msg.id}")
+                InlineKeyboardButton(f"🎯 {to_smallcaps('auto-fit < 2gb (1.85 gb)')}", callback_data=f"do_comptarget_{media_msg.id}_1850"),
             ],
             [
-                InlineKeyboardButton(f"⚡ {to_smallcaps('file stream card')}", callback_data=f"stream_{media_msg.id}"),
+                InlineKeyboardButton(f"🎬 {to_smallcaps('generate file stream')}", callback_data=f"stream_{media_msg.id}"),
                 InlineKeyboardButton(f"📊 {to_smallcaps('mediainfo')}", callback_data=f"pro_mediainfo_{media_msg.id}")
             ],
             [
+                InlineKeyboardButton(f"🚫 {to_smallcaps('rename restricted (> 2gb)')}", callback_data=f"rename_restricted_{media_msg.id}"),
+            ],
+        ]
+        if watch_url and download_url:
+            buttons.append([
                 InlineKeyboardButton(f"🎬 {to_smallcaps('watch (4 players)')}", url=watch_url),
                 InlineKeyboardButton(f"⬇️ {to_smallcaps('fast range download')}", url=download_url)
-            ],
-            [
-                InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home"),
-                InlineKeyboardButton(f"❌ {to_smallcaps('close')}", callback_data="close_data")
-            ]
-        ]
+            ])
+        buttons.append([
+            InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home"),
+            InlineKeyboardButton(f"❌ {to_smallcaps('close')}", callback_data="close_data")
+        ])
         if is_edit and target_msg:
             return await safe_edit_text(target_msg, text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
         return await safe_reply_text(media_msg, text, reply_markup=InlineKeyboardMarkup(buttons), quote=True, disable_web_page_preview=True)
@@ -194,36 +205,47 @@ async def render_media_studio_card(
     has_caption = "✅" if u and (u.get("custom_caption") or u.get("captions_list")) else "📄 ᴀᴜᴛᴏ"
     auto_ren_status = "🟢 ᴏɴ" if u.get("auto_rename") else "⚪ ᴏғғ"
     auto_comp_status = "🟢 ᴏɴ" if u.get("auto_compress") else "⚪ ᴏғғ"
+    auto_str_status = "🟢 ᴏɴ" if u.get("auto_stream") else "⚪ ᴏɴ-ᴅᴇᴍᴀɴᴅ"
+    code_badge = f"\n• 💻 **{to_smallcaps('code engine')}** : `{code_lang} Fast Mode Active`" if is_code else ""
+    stream_line = f"\n🔗 **{to_smallcaps('instant 4-player watch link')}** :\n{watch_url}\n" if watch_url else ""
 
     text = (
-        f"✦ **{to_smallcaps('smart media studio & adaptive range stream')}** ✦\n\n"
+        f"✦ **{to_smallcaps('smart media & file studio (pro max)')}** ✦ ⚡\n\n"
         f"• 📁 **{to_smallcaps('file name')}** : `{file_name}`\n"
-        f"• 📦 **{to_smallcaps('file size')}** : `{file_size}`\n"
-        f"• ⚡ **{to_smallcaps('stream mode')}** : `adaptive HTTP byte-range (PLAYit • MX • VLC • S Player)`\n"
+        f"• 📦 **{to_smallcaps('file size')}** : `{file_size}` (`<= 2 GB` ✅)\n"
         f"• 🏷️ **{to_smallcaps('mime type')}** : `{mime_type}`\n"
-        f"• ⏱️ **{to_smallcaps('duration')}** : `{duration}`\n"
+        f"• ⏱️ **{to_smallcaps('duration')}** : `{duration}`{code_badge}\n"
         f"• 🖼️ **{to_smallcaps('thumbnail')}** : `{has_thumb}` | 📝 **{to_smallcaps('caption')}** : `{has_caption}`\n"
-        f"• 🤖 **{to_smallcaps('auto rename')}** : `{auto_ren_status}` | 🗜️ **{to_smallcaps('auto compress')}** : `{auto_comp_status}`\n\n"
-        f"🔗 **{to_smallcaps('instant 4-player watch link')}** :\n{watch_url}\n\n"
-        f"💡 **{to_smallcaps('select an action below to proceed:')}**"
+        f"• 🤖 **{to_smallcaps('auto modes')}** : `Rename: {auto_ren_status} • Compress: {auto_comp_status} • Stream: {auto_str_status}`"
+        f"{stream_line}\n"
+        f"💡 **{to_smallcaps('choose your action below (rename, compress, or stream on request):')}**"
         f"{format_watermark()}"
     )
 
     buttons = [
         [
-            InlineKeyboardButton(f"✏️ {to_smallcaps('rename file')}", callback_data=f"rename_{media_msg.id}"),
-            InlineKeyboardButton(f"⚡ {to_smallcaps('stream details')}", callback_data=f"stream_{media_msg.id}")
+            InlineKeyboardButton(f"✏️ {to_smallcaps('fast rename')}", callback_data=f"rename_{media_msg.id}"),
+            InlineKeyboardButton(f"⚡ {to_smallcaps('1-tap auto rename')}", callback_data=f"renameto_auto_{media_msg.id}"),
         ],
         [
+            InlineKeyboardButton(f"🗜️ {to_smallcaps('fast compress')}", callback_data=f"compress_menu_{media_msg.id}"),
+            InlineKeyboardButton(f"🎬 {to_smallcaps('file stream')}", callback_data=f"stream_{media_msg.id}")
+        ],
+        [
+            InlineKeyboardButton(f"🎛️ {to_smallcaps('custom compress')}", callback_data=f"custcomp_open_{media_msg.id}"),
+            InlineKeyboardButton(f"📊 {to_smallcaps('mediainfo')}", callback_data=f"pro_mediainfo_{media_msg.id}"),
+        ],
+    ]
+    if watch_url and download_url:
+        buttons.append([
             InlineKeyboardButton(f"🎬 {to_smallcaps('watch (4 players)')}", url=watch_url),
             InlineKeyboardButton(f"⬇️ {to_smallcaps('adaptive range download')}", url=download_url)
-        ]
-    ]
-    row3 = []
-    if is_compressible:
-        row3.append(InlineKeyboardButton(f"🗜️ {to_smallcaps('compress (ffmpeg)')}", callback_data=f"compress_menu_{media_msg.id}"))
-    row3.append(InlineKeyboardButton(f"📊 {to_smallcaps('mediainfo')}", callback_data=f"pro_mediainfo_{media_msg.id}"))
-    buttons.append(row3)
+        ])
+    if is_code:
+        buttons.append([
+            InlineKeyboardButton(f"💻 {to_smallcaps(f'code pro studio ({code_lang})')}", callback_data=f"codepro_menu_{media_msg.id}"),
+            InlineKeyboardButton(f"⚡ {to_smallcaps('minify / optimize')}", callback_data=f"codepro_opt_{media_msg.id}"),
+        ])
     buttons.append([
         InlineKeyboardButton(f"🎛️ {to_smallcaps('file pro advance features')}", callback_data=f"pro_menu_{media_msg.id}")
     ])
@@ -235,6 +257,14 @@ async def render_media_studio_card(
     if is_edit and target_msg:
         return await safe_edit_text(target_msg, text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
     return await safe_reply_text(media_msg, text, reply_markup=InlineKeyboardMarkup(buttons), quote=True, disable_web_page_preview=True)
+
+
+@Client.on_callback_query(filters.regex(r"^rename_restricted_(\d+)$"))
+async def rename_restricted_alert_cb(client: Client, query: CallbackQuery):
+    await query.answer(
+        "🚫 ʀᴇɴᴀᴍᴇ ɪs ʀᴇsᴛʀɪᴄᴛᴇᴅ ғᴏʀ ғɪʟᴇs ᴀʙᴏᴠᴇ 2 ɢʙ! ᴜsᴇ 🗜️ ғᴀsᴛ ᴄᴏᴍᴘʀᴇss ᴏʀ 🎬 ғɪʟᴇ sᴛʀᴇᴀᴍ (sᴜᴘᴘᴏʀᴛs ᴀɴʏ sɪᴢᴇ).",
+        show_alert=True,
+    )
 
 
 @Client.on_message(filters.private & (filters.document | filters.video | filters.audio))
@@ -250,7 +280,7 @@ async def incoming_file_entry(client: Client, message: Message):
     lock = _USER_MEDIA_LOCKS.setdefault(uid, asyncio.Lock())
     async with lock:
         now_m = time.monotonic()
-        gap = 0.25 - (now_m - _USER_LAST_MEDIA_TS.get(uid, 0.0))
+        gap = 0.15 - (now_m - _USER_LAST_MEDIA_TS.get(uid, 0.0))
         if gap > 0:
             await asyncio.sleep(gap)
         _USER_LAST_MEDIA_TS[uid] = time.monotonic()
@@ -259,7 +289,13 @@ async def incoming_file_entry(client: Client, message: Message):
 
 async def _process_incoming_file(client: Client, message: Message, user):
     uid = user.id if user else 0
-    if uid and (await cache.get(f"waiting_addaudio_{uid}") or await cache.get(f"waiting_addsub_{uid}")):
+    chat_id = message.chat.id if message.chat else uid
+    if (
+        await cache.get(f"waiting_addaudio_{uid}")
+        or await cache.get(f"waiting_addsub_{uid}")
+        or await cache.get(f"waiting_addaudio_{chat_id}")
+        or await cache.get(f"waiting_addsub_{chat_id}")
+    ):
         return
     if message.reply_to_message and message.reply_to_message.reply_markup:
         if isinstance(message.reply_to_message.reply_markup, ForceReply):
@@ -271,11 +307,12 @@ async def _process_incoming_file(client: Client, message: Message, user):
     u = await user_repo.get_or_create(user.id, user.first_name, user.username) if user else {}
     media = message.document or message.video or message.audio
     raw_file_name = getattr(media, "file_name", None) or "Unknown_File.mp4"
-    file_size_bytes = getattr(media, "file_size", 0)
-    mime_type = getattr(media, "mime_type", "video/mp4")
+    file_size_bytes = int(getattr(media, "file_size", 0) or 0)
+    mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
     normalized_mime = normalize_mime(mime_type)
     is_video = bool(message.video or is_video_mime(normalized_mime))
-    is_compressible = is_video or is_audio_mime(normalized_mime)
+    is_audio = bool(message.audio or is_audio_mime(normalized_mime))
+    is_compressible = is_video or is_audio or is_code_file(raw_file_name, normalized_mime)
 
     logger.info(
         "📥 ɪɴᴄᴏᴍɪɴɢ ᴍᴇᴅɪᴀ › ᴜsᴇʀ=%s ᴍsɢ=%s ɴᴀᴍᴇ='%s' sɪᴢᴇ=%s (%s) ᴍɪᴍᴇ=%s",
@@ -286,20 +323,26 @@ async def _process_incoming_file(client: Client, message: Message, user):
         file_size_bytes,
         mime_type,
     )
-    if file_size_bytes > MAX_BOT_FILE_SIZE:
-        logger.info("📦 >2ɢʙ ᴍᴇᴅɪᴀ ᴅᴇᴛᴇᴄᴛᴇᴅ (%s ʙʏᴛᴇs) › ᴀᴜᴛᴏ-ᴘʀᴏᴍᴘᴛɪɴɢ ᴄᴏᴍᴘʀᴇss / ғɪʟᴇ sᴛʀᴇᴀᴍ", file_size_bytes)
-        return await render_media_studio_card(client, message, uid, is_edit=False)
 
     if u.get("auto_compress") and is_compressible:
         from plugins.compressor import run_auto_compress_workflow
-        return await run_auto_compress_workflow(client, message, user.id)
+        return await run_auto_compress_workflow(client, message, uid)
+
+    if file_size_bytes > MAX_BOT_FILE_SIZE:
+        logger.info("📦 >2ɢʙ ᴍᴇᴅɪᴀ ᴅᴇᴛᴇᴄᴛᴇᴅ (%s ʙʏᴛᴇs) › ʀᴇɴᴀᴍᴇ ʀᴇsᴛʀɪᴄᴛᴇᴅ; ᴘʀᴏᴍᴘᴛɪɴɢ ᴄᴏᴍᴘʀᴇss / ғɪʟᴇ sᴛʀᴇᴀᴍ", file_size_bytes)
+        return await render_media_studio_card(client, message, uid, is_edit=False)
 
     if u.get("auto_rename"):
         name_parts = os.path.splitext(raw_file_name)
         auto_target = sanitize_filename(f"{name_parts[0]}{name_parts[1] or '.mp4'}")
-        await cache.set(f"rename_name_{user.id}_{message.id}", auto_target, ttl=1800)
-        upload_mode = "vid" if (is_video and u.get("upload_mode", "video") == "video") else "doc"
-        return await run_rename_workflow(client, message, message, user.id, message.id, auto_target, upload_mode)
+        await cache.set(f"rename_name_{uid}_{message.id}", auto_target, ttl=1800)
+        if is_video and u.get("upload_mode", "video") == "video":
+            upload_mode = "vid"
+        elif is_audio and u.get("upload_mode", "video") == "video":
+            upload_mode = "aud"
+        else:
+            upload_mode = "doc"
+        return await run_rename_workflow(client, message, message, uid, message.id, auto_target, upload_mode)
 
     await render_media_studio_card(client, message, uid, is_edit=False)
 
@@ -316,11 +359,12 @@ async def toggle_autorename_cmd(client: Client, message: Message):
     state_txt = "🟢 ᴇɴᴀʙʟᴇᴅ" if new_state else "⚪ ᴅɪsᴀʙʟᴇᴅ"
     await safe_reply_text(
         message,
-        f"✦ **{to_smallcaps('auto-rename mode')}** ✦\n\n"
+        f"✦ **{to_smallcaps('auto-rename mode')}** ✦ ✏️\n\n"
         f"• 🤖 **{to_smallcaps('status')}** : `{state_txt}`\n"
+        f"• 📏 **{to_smallcaps('size limit')}** : `<= 2 GB (Restricted above 2 GB)`\n"
         f"• 🏷️ **{to_smallcaps('prefix')}** : `{u.get('prefix') or 'None'}`\n"
         f"• 🏷️ **{to_smallcaps('suffix')}** : `{u.get('suffix') or 'None'}`\n\n"
-        f"💡 {to_smallcaps('when enabled, incoming files <= 2gb are automatically renamed with your prefix/suffix, custom thumbnail, caption & 4-player stream buttons!')}"
+        f"💡 {to_smallcaps('when enabled, incoming files <= 2gb are automatically renamed with your prefix/suffix, custom thumbnail & caption!')}"
         f"{format_watermark()}",
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton(f"⚙️ {to_smallcaps('settings')}", callback_data="nav_settings"),
@@ -334,11 +378,11 @@ def apply_rename_template(
     user_doc: dict,
     media_obj: object = None,
 ) -> str:
-    """Apply customizable filename template, cleanup, prefix, and suffix while preserving valid extension."""
     name_parts = os.path.splitext(raw_name or "file.mp4")
     base_name = name_parts[0]
     ext = name_parts[1] or ".mp4"
-    clean_base = re.sub(r"[._]+", " ", base_name).strip() or base_name
+    is_code = is_code_file(raw_name)
+    clean_base = base_name if is_code else (re.sub(r"[._]+", " ", base_name).strip() or base_name)
     tpl = (user_doc.get("rename_format") if user_doc else None) or ""
     if tpl:
         width = getattr(media_obj, "width", 0) or 0
@@ -446,22 +490,33 @@ async def del_prefix_suffix(client: Client, message: Message):
         await safe_reply_text(message, f"🗑️ **{to_smallcaps('file suffix removed successfully!')}**{format_watermark()}")
 
 
-@Client.on_message(filters.private & filters.command("rename", prefixes=COMMAND_PREFIXES))
+@Client.on_message(filters.private & filters.command(["rename", "fastrename", "ren"], prefixes=COMMAND_PREFIXES))
 async def rename_cmd_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
     target = await resolve_target_media_message(client, message, user_id=user_id)
     if not target or not (target.document or target.video or target.audio):
         return await safe_reply_text(
             message,
-            f"⚠️ **{to_smallcaps('please reply to a file or video to rename.')}**\n\n"
-            f"• **{to_smallcaps('usage')}** : `/rename [new_name.ext]`"
+            f"⚠️ **{to_smallcaps('please reply to a file, video, audio, or code file to rename.')}**\n\n"
+            f"• **{to_smallcaps('usage 1')}** : `/rename [new_name.ext]`\n"
+            f"• **{to_smallcaps('usage 2')}** : `/fastrename [new_name.ext]` _(instant 1-step rename)_\n"
+            f"• 📏 **{to_smallcaps('limit')}** : `<= 2 GB (Restricted above 2 GB)`"
             f"{format_watermark()}"
         )
 
     media = target.document or target.video or target.audio
-    if getattr(media, "file_size", 0) > MAX_BOT_FILE_SIZE:
+    file_size_bytes = int(getattr(media, "file_size", 0) or 0)
+    if file_size_bytes > MAX_BOT_FILE_SIZE:
+        await safe_reply_text(
+            message,
+            f"🚫 **{to_smallcaps('file rename is restricted for files above 2 gb!')}**\n\n"
+            f"• 📦 **{to_smallcaps('your file size')}** : `{humanbytes(file_size_bytes)}` (`> 2 GB`)\n"
+            f"• 💡 **{to_smallcaps('solution')}** : {to_smallcaps('use')} `/compress` {to_smallcaps('or')} `/stream` {to_smallcaps('(supports any file size)!')}"
+            f"{format_watermark()}"
+        )
         return await render_media_studio_card(client, target, user_id, is_edit=False)
 
+    cmd_name = (message.command[0] if message.command else "rename").lower()
     if len(message.command) < 2:
         old_name = getattr(media, "file_name", None) or "file.mp4"
         await cache.set(f"waiting_rename_{user_id}", target.id, ttl=900)
@@ -470,8 +525,9 @@ async def rename_cmd_handler(client: Client, message: Message):
             chat_id=message.chat.id,
             text=(
                 f"✏️ **{to_smallcaps('enter new file name')}** ✦\n\n"
-                f"• 📁 **{to_smallcaps('current')}** : `{old_name}`\n\n"
-                f"💬 {to_smallcaps('reply to this message or send your new filename.')}\n"
+                f"• 📁 **{to_smallcaps('current')}** : `{old_name}`\n"
+                f"• 📦 **{to_smallcaps('size')}** : `{humanbytes(file_size_bytes)}`\n\n"
+                f"💬 {to_smallcaps('reply to this message or send your new filename directly.')}\n"
                 f"💡 {to_smallcaps('send')} `/cancel` {to_smallcaps('to abort.')}"
                 f"{format_watermark()}"
             ),
@@ -488,10 +544,19 @@ async def rename_cmd_handler(client: Client, message: Message):
         new_name = f"{new_name}{orig_ext}"
 
     await cache.set(f"rename_name_{user_id}_{target.id}", new_name, ttl=1800)
+
+    mime_t = normalize_mime(getattr(media, "mime_type", ""))
+    is_vid = bool(target.video or is_video_mime(mime_t))
+    is_aud = bool(target.audio or is_audio_mime(mime_t))
+    if cmd_name == "fastrename" or is_code_file(new_name, mime_t) or (not is_vid and not is_aud):
+        u = await user_repo.get_user(user_id)
+        up_mode = "vid" if (is_vid and (not u or u.get("upload_mode", "video") == "video")) else ("aud" if is_aud else "doc")
+        return await run_rename_workflow(client, target, message, user_id, target.id, new_name, up_mode, is_edit=False)
+
     await show_rename_options(message, target.id, new_name)
 
 
-@Client.on_callback_query(filters.regex(r"^rename_(\d+)"))
+@Client.on_callback_query(filters.regex(r"^rename_(\d+)$"))
 async def rename_callback_ask(client: Client, query: CallbackQuery):
     msg_id = int(query.matches[0].group(1))
     user_id = query.from_user.id if query.from_user else query.message.chat.id
@@ -500,8 +565,8 @@ async def rename_callback_ask(client: Client, query: CallbackQuery):
         return await query.answer(to_smallcaps("media not found!"), show_alert=True)
 
     media = original.document or original.video or original.audio
-    if getattr(media, "file_size", 0) > MAX_BOT_FILE_SIZE:
-        await query.answer("⚠️ >2ɢʙ: ᴄʜᴏᴏsᴇ ᴄᴏᴍᴘʀᴇss ᴏʀ ғɪʟᴇ sᴛʀᴇᴀᴍ!")
+    if int(getattr(media, "file_size", 0) or 0) > MAX_BOT_FILE_SIZE:
+        await query.answer("🚫 ʀᴇɴᴀᴍᴇ ʀᴇsᴛʀɪᴄᴛᴇᴅ ғᴏʀ ғɪʟᴇs > 2ɢʙ! ᴜsᴇ ᴄᴏᴍᴘʀᴇss ᴏʀ sᴛʀᴇᴀᴍ.", show_alert=True)
         return await render_media_studio_card(
             client,
             original,
@@ -542,42 +607,60 @@ async def reply_force_rename_collector(client: Client, message: Message):
         message.continue_propagation()
 
     user_id = message.from_user.id
+    chat_id = message.chat.id
 
-    wait_comp = await cache.get(f"waiting_custom_comp_{user_id}")
+    wait_comp = await cache.get(f"waiting_custom_comp_{user_id}") or await cache.get(f"waiting_custom_comp_{chat_id}")
     if wait_comp:
         from plugins.compressor import handle_custom_compress_text_input
         await cache.delete(f"waiting_custom_comp_{user_id}")
+        await cache.delete(f"waiting_custom_comp_{chat_id}")
         return await handle_custom_compress_text_input(client, message, wait_comp)
 
-    wait_trim = await cache.get(f"waiting_trim_{user_id}")
+    wait_trim = await cache.get(f"waiting_trim_{user_id}") or await cache.get(f"waiting_trim_{chat_id}")
     if wait_trim:
         from plugins.file_pro import execute_trim_video
         await cache.delete(f"waiting_trim_{user_id}")
+        await cache.delete(f"waiting_trim_{chat_id}")
         return await execute_trim_video(client, message, wait_trim, txt)
 
     if await cache.get(f"sess_step_{user_id}"):
         from plugins.session import handle_session_text_step
         return await handle_session_text_step(client, message)
 
-    msg_id = await cache.get(f"waiting_rename_{user_id}")
+    msg_id = await cache.get(f"waiting_rename_{user_id}") or await cache.get(f"waiting_rename_{chat_id}")
     if not msg_id:
         message.continue_propagation()
 
     await cache.delete(f"waiting_rename_{user_id}")
+    await cache.delete(f"waiting_rename_{chat_id}")
     new_name = sanitize_filename(txt)
 
+    orig_msg = None
+    is_vid = False
+    is_aud = False
     try:
         orig_msg = await client.get_messages(message.chat.id, int(msg_id))
         if orig_msg and orig_msg.media:
             orig_media = orig_msg.document or orig_msg.video or orig_msg.audio
+            if int(getattr(orig_media, "file_size", 0) or 0) > MAX_BOT_FILE_SIZE:
+                return await safe_reply_text(
+                    message,
+                    f"🚫 **{to_smallcaps('file rename is restricted for files above 2 gb!')}**"
+                    f"{format_watermark()}"
+                )
             orig_file_name = getattr(orig_media, "file_name", "") or ""
             orig_ext = os.path.splitext(orig_file_name)[1]
             if not os.path.splitext(new_name)[1] and orig_ext:
                 new_name = f"{new_name}{orig_ext}"
+            mime_t = normalize_mime(getattr(orig_media, "mime_type", ""))
+            is_vid = bool(orig_msg.video or is_video_mime(mime_t))
+            is_aud = bool(orig_msg.audio or is_audio_mime(mime_t))
     except Exception:
         pass
 
     await cache.set(f"rename_name_{user_id}_{msg_id}", new_name, ttl=1800)
+    if orig_msg and not is_vid and not is_aud:
+        return await run_rename_workflow(client, orig_msg, message, user_id, int(msg_id), new_name, "doc", is_edit=False)
     await show_rename_options(message, int(msg_id), new_name)
 
 
@@ -591,48 +674,64 @@ async def show_rename_options(message: Message, target_id: int, new_name: str):
             InlineKeyboardButton(f"🎬 {to_smallcaps('upload as video')}", callback_data=f"renameto_vid_{target_id}")
         ],
         [
+            InlineKeyboardButton(f"🎵 {to_smallcaps('upload as audio')}", callback_data=f"renameto_aud_{target_id}"),
             InlineKeyboardButton(f"🔙 {to_smallcaps('back to media')}", callback_data=f"back_to_media_{target_id}"),
+        ],
+        [
             InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home"),
             InlineKeyboardButton(f"❌ {to_smallcaps('cancel')}", callback_data="cancel_op")
         ]
     ]
     await safe_reply_text(
         message,
-        f"✦ **{to_smallcaps('select upload type')}** ✦\n\n"
+        f"✦ **{to_smallcaps('select upload type')}** ✦ ✏️\n\n"
         f"• ✏️ **{to_smallcaps('new file name')}** : `{new_name}`\n\n"
-        f"💡 {to_smallcaps('tap fast rename (auto) or choose whether to send the file as a streamable video or a raw document.')}"
+        f"💡 {to_smallcaps('tap fast rename (auto) or choose video, audio, or document upload mode:')}"
         f"{format_watermark()}",
         reply_markup=InlineKeyboardMarkup(btn)
     )
 
 
-@Client.on_callback_query(filters.regex(r"^renameto_(doc|vid|auto)_(\d+)"))
+@Client.on_callback_query(filters.regex(r"^renameto_(doc|vid|aud|auto)_(\d+)$"))
 async def execute_rename_operation(client: Client, query: CallbackQuery):
     upload_type = query.matches[0].group(1)
     target_id = int(query.matches[0].group(2))
     user_id = query.from_user.id if query.from_user else query.message.chat.id
-
-    new_name = await cache.get(f"rename_name_{user_id}_{target_id}")
-    if not new_name and query.message and getattr(query.message, "text", None):
-        m = re.search(r":\s*`?([^`\n]+)`?", query.message.text)
-        if m:
-            new_name = sanitize_filename(m.group(1).strip())
-            await cache.set(f"rename_name_{user_id}_{target_id}", new_name, ttl=1800)
-
-    if not new_name:
-        return await query.answer(to_smallcaps("session expired! please try again."), show_alert=True)
 
     original_msg = await client.get_messages(query.message.chat.id, target_id)
     if not original_msg or not original_msg.media:
         await query.answer(to_smallcaps("original media not found!"), show_alert=True)
         return await safe_edit_text(query.message, f"❌ **{to_smallcaps('original media no longer exists!')}**")
 
+    media = original_msg.document or original_msg.video or original_msg.audio
+    if int(getattr(media, "file_size", 0) or 0) > MAX_BOT_FILE_SIZE:
+        await query.answer("🚫 ʀᴇɴᴀᴍᴇ ɪs ʀᴇsᴛʀɪᴄᴛᴇᴅ ғᴏʀ ғɪʟᴇs ᴀʙᴏᴠᴇ 2 ɢʙ!", show_alert=True)
+        return await render_media_studio_card(client, original_msg, user_id, target_msg=query.message, is_edit=True)
+
+    new_name = await cache.get(f"rename_name_{user_id}_{target_id}")
+    if not new_name and query.message and getattr(query.message, "text", None):
+        m = re.search(r"new file name.*?:\s*`?([^`\n]+)`?", query.message.text, re.I)
+        if m:
+            new_name = sanitize_filename(m.group(1).strip())
+            await cache.set(f"rename_name_{user_id}_{target_id}", new_name, ttl=1800)
+
+    if not new_name:
+        raw_orig = getattr(media, "file_name", None) or f"file_{target_id}.mp4"
+        u_doc = await user_repo.get_user(user_id) or {}
+        new_name = apply_rename_template(raw_orig, u_doc, media)
+        await cache.set(f"rename_name_{user_id}_{target_id}", new_name, ttl=1800)
+
     if upload_type == "auto":
         u = await user_repo.get_user(user_id)
-        media = original_msg.document or original_msg.video or original_msg.audio
         mime_t = normalize_mime(getattr(media, "mime_type", ""))
         is_vid = bool(original_msg.video or is_video_mime(mime_t))
-        upload_type = "vid" if (is_vid and (not u or u.get("upload_mode", "video") == "video")) else "doc"
+        is_aud = bool(original_msg.audio or is_audio_mime(mime_t))
+        if is_vid and (not u or u.get("upload_mode", "video") == "video"):
+            upload_type = "vid"
+        elif is_aud and (not u or u.get("upload_mode", "video") == "video"):
+            upload_type = "aud"
+        else:
+            upload_type = "doc"
 
     await query.answer("⚡ sᴛᴀʀᴛɪɴɢ ғᴀsᴛ ʀᴇɴᴀᴍᴇ...")
     await run_rename_workflow(client, original_msg, query.message, user_id, target_id, new_name, upload_type, is_edit=True)
@@ -654,7 +753,7 @@ async def run_rename_workflow(
     is_recovery: bool = False,
 ) -> Optional[Dict[str, Any]]:
     source_media = original_msg.document or original_msg.video or original_msg.audio
-    if getattr(source_media, "file_size", 0) > MAX_BOT_FILE_SIZE:
+    if int(getattr(source_media, "file_size", 0) or 0) > MAX_BOT_FILE_SIZE:
         return await render_media_studio_card(client, original_msg, user_id, target_msg=reply_msg if is_edit else None, is_edit=is_edit)
 
     chat_id = original_msg.chat.id if getattr(original_msg, "chat", None) else user_id
@@ -685,7 +784,7 @@ async def run_rename_workflow(
     )
 
     init_text = (
-        f"📥 **{to_smallcaps('fast downloading file')}**...\n\n"
+        f"📥 **{to_smallcaps('fast downloading file for rename')}**...\n\n"
         f"[▱▱▱▱▱▱▱▱▱▱] `0%`\n"
         f"📦 **{to_smallcaps('target')}** : `{final_name}`"
         f"{format_watermark()}"
@@ -733,7 +832,9 @@ async def run_rename_workflow(
 
     start_time = time.time()
     source_mime = normalize_mime(getattr(source_media, "mime_type", ""))
-    is_video_media = bool(getattr(original_msg, "video", None)) or is_video_mime(source_mime)
+    is_code = is_code_file(final_name, source_mime)
+    is_video_media = (not is_code) and (bool(getattr(original_msg, "video", None)) or is_video_mime(source_mime))
+    is_audio_media = (not is_code) and (bool(getattr(original_msg, "audio", None)) or is_audio_mime(source_mime))
     tg_dur = int(getattr(source_media, "duration", 0) or 0)
     tg_w = int(getattr(source_media, "width", 0) or 1280)
     tg_h = int(getattr(source_media, "height", 0) or 720)
@@ -748,7 +849,7 @@ async def run_rename_workflow(
             duration=tg_dur,
             fallback_tg_thumb_id=tg_thumb_fid
         )
-    ) if is_video_media else None
+    ) if (is_video_media or is_audio_media or (u and u.get("thumb_id"))) else None
 
     try:
         already_dl = os.path.exists(download_path) and os.path.getsize(download_path) > 0 and (
@@ -785,8 +886,8 @@ async def run_rename_workflow(
         await task_repo.update_task(task_id, {"status": "running", "stage": "downloaded", "progress_pct": 50.0})
         task_manager.update_stage(task_id, "downloaded", "running")
 
+        thumb_path = await early_thumb_task if early_thumb_task else None
         if is_video_media:
-            thumb_path = await early_thumb_task if early_thumb_task else None
             if not isinstance(thumb_path, str) or not os.path.exists(thumb_path):
                 thumb_path = await resolve_thumbnail(
                     client=client,
@@ -813,7 +914,8 @@ async def run_rename_workflow(
             probe_info = {"duration": tg_dur, "video_streams": [], "audio_streams": []}
             attrs = {"width": 0, "height": 0, "duration": tg_dur}
             dur = tg_dur
-            thumb_path = None
+            if not isinstance(thumb_path, str) or not os.path.exists(thumb_path):
+                thumb_path = None
 
         orig_caption = getattr(original_msg, "caption", None) or ""
         final_caption = await extract_and_format_caption(
@@ -830,13 +932,12 @@ async def run_rename_workflow(
         upload_start = time.time()
         await safe_edit_text(status_msg, f"📤 **{to_smallcaps('uploading renamed file...')}**")
 
-        is_audio_media = bool(getattr(original_msg, "audio", None)) or is_audio_mime(source_mime)
         target_chat_id = reply_msg.chat.id if (reply_msg and getattr(reply_msg, "chat", None)) else chat_id
         sent_msg = None
         max_retries = int(Config.TASK_MAX_RETRIES)
 
         from utils import temp as _t
-        attach_stream = bool(_t.BOT_CONFIG.get("auto_stream_global", True) and (not u or u.get("auto_stream", True)))
+        attach_stream = bool(_t.BOT_CONFIG.get("auto_stream_global", True) and u and u.get("auto_stream", False))
         new_fid = secrets.token_urlsafe(10) if attach_stream else ""
         w_url = f"{Config.BASE_URL}/watch/{new_fid}" if new_fid else ""
         d_url = f"{Config.BASE_URL}/download/{new_fid}" if new_fid else ""
@@ -878,7 +979,7 @@ async def run_rename_workflow(
                             progress=progress_for_pyrogram,
                             progress_args=("📤 uploading document", status_msg, upload_start)
                         )
-                elif upload_type == "vid" and is_audio_media:
+                elif upload_type in ("vid", "aud") and is_audio_media:
                     sent_msg = await execute_with_floodwait(
                         client.send_audio,
                         chat_id=target_chat_id,
@@ -930,40 +1031,50 @@ async def run_rename_workflow(
             time.time() - start_time,
         )
 
-        if sent_msg and attach_stream and new_fid:
+        if sent_msg:
             try:
-                out_media = sent_msg.video or sent_msg.document or sent_msg.audio
-                await file_repo.save_file(
-                    file_id=new_fid,
-                    chat_id=sent_msg.chat.id,
-                    message_id=sent_msg.id,
-                    file_name=final_name,
-                    file_size=getattr(out_media, "file_size", expected_size),
-                    mime_type=getattr(out_media, "mime_type", "video/mp4"),
-                    user_id=user_id,
-                    metadata=telegram_media_metadata(out_media, sent_msg),
-                    tg_file_id=getattr(out_media, "file_id", None)
-                )
-                stream_kb = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton(f"🎬 {to_smallcaps('watch (4 players)')}", url=w_url),
-                        InlineKeyboardButton(f"⬇️ {to_smallcaps('fast download')}", url=d_url),
-                    ],
-                    [
-                        InlineKeyboardButton(f"⚡ {to_smallcaps('stream card')}", callback_data=f"stream_{sent_msg.id}"),
-                    ]
-                ])
-                await sent_msg.edit_reply_markup(reply_markup=stream_kb)
-                bin_chan = Config.BIN_CHANNEL if Config.BIN_CHANNEL != 0 else sent_msg.chat.id
-                if bin_chan != sent_msg.chat.id:
-                    async def _bg_fwd_ren(fid_val: str, s_msg: Message, b_ch: int):
-                        try:
-                            fwd = await safe_forward_message(s_msg, b_ch)
-                            if fwd and getattr(fwd, "chat", None) and getattr(fwd, "id", None):
-                                await file_repo.update_file(fid_val, {"chat_id": fwd.chat.id, "message_id": fwd.id})
-                        except Exception:
-                            pass
-                    asyncio.create_task(_bg_fwd_ren(new_fid, sent_msg, bin_chan))
+                if attach_stream and new_fid:
+                    out_media = sent_msg.video or sent_msg.document or sent_msg.audio
+                    await file_repo.save_file(
+                        file_id=new_fid,
+                        chat_id=sent_msg.chat.id,
+                        message_id=sent_msg.id,
+                        file_name=final_name,
+                        file_size=getattr(out_media, "file_size", expected_size),
+                        mime_type=getattr(out_media, "mime_type", "video/mp4"),
+                        user_id=user_id,
+                        metadata=telegram_media_metadata(out_media, sent_msg),
+                        tg_file_id=getattr(out_media, "file_id", None)
+                    )
+                    stream_kb = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton(f"🎬 {to_smallcaps('watch (4 players)')}", url=w_url),
+                            InlineKeyboardButton(f"⬇️ {to_smallcaps('fast download')}", url=d_url),
+                        ],
+                        [
+                            InlineKeyboardButton(f"⚡ {to_smallcaps('stream card')}", callback_data=f"stream_{sent_msg.id}"),
+                            InlineKeyboardButton(f"🗜️ {to_smallcaps('compress')}", callback_data=f"compress_menu_{sent_msg.id}"),
+                        ]
+                    ])
+                    await sent_msg.edit_reply_markup(reply_markup=stream_kb)
+                    bin_chan = Config.BIN_CHANNEL if Config.BIN_CHANNEL != 0 else sent_msg.chat.id
+                    if bin_chan != sent_msg.chat.id:
+                        async def _bg_fwd_ren(fid_val: str, s_msg: Message, b_ch: int):
+                            try:
+                                fwd = await safe_forward_message(s_msg, b_ch)
+                                if fwd and getattr(fwd, "chat", None) and getattr(fwd, "id", None):
+                                    await file_repo.update_file(fid_val, {"chat_id": fwd.chat.id, "message_id": fwd.id})
+                            except Exception:
+                                pass
+                        asyncio.create_task(_bg_fwd_ren(new_fid, sent_msg, bin_chan))
+                else:
+                    on_demand_kb = InlineKeyboardMarkup([
+                        [
+                            InlineKeyboardButton(f"🎬 {to_smallcaps('generate file stream')}", callback_data=f"stream_{sent_msg.id}"),
+                            InlineKeyboardButton(f"🗜️ {to_smallcaps('compress')}", callback_data=f"compress_menu_{sent_msg.id}"),
+                        ]
+                    ])
+                    await sent_msg.edit_reply_markup(reply_markup=on_demand_kb)
             except Exception:
                 pass
 
@@ -1006,3 +1117,4 @@ async def run_rename_workflow(
         t_obj = task_manager.get_task(task_id)
         preserve_ws = bool(t_obj and not t_obj.is_cancelled and t_obj.status != "completed")
         await task_manager.cleanup_task(task_id, preserve_workspace=preserve_ws)
+        cache.auto_clear_after_response_sync(preserve_workflows=True)

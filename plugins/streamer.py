@@ -9,7 +9,8 @@ from pyrogram.types import (
 from config import Config
 from info import COMMAND_PREFIXES
 from plugins.core_db import file_repo, user_repo
-from plugins.core_utils import to_smallcaps, format_watermark, humanbytes, time_formatter, logger, safe_forward_message, safe_edit_text, execute_with_floodwait
+from plugins.core_utils import cache, to_smallcaps, format_watermark, humanbytes, time_formatter, logger, safe_forward_message, safe_edit_text, execute_with_floodwait
+from plugins.media_types import is_code_file, detect_code_language
 from plugins.core_web import build_4_external_player_links
 from plugins.core_services import telegram_media_metadata
 
@@ -20,7 +21,7 @@ async def toggle_autostream_cmd(client: Client, message: Message):
     if not message.from_user:
         return
     u = await user_repo.get_or_create(message.from_user.id, message.from_user.first_name, message.from_user.username)
-    new_state = not bool(u.get("auto_stream", True))
+    new_state = not bool(u.get("auto_stream", False))
     if len(message.command) > 1:
         arg = message.command[1].strip().lower()
         new_state = arg in ("on", "true", "1", "yes", "enable")
@@ -107,12 +108,13 @@ async def generate_stream_response(client: Client, media_msg: Message, target_re
     watch_url = f"{Config.BASE_URL}/watch/{file_id}"
     stream_url = f"{Config.BASE_URL}/stream/{file_id}"
     download_url = f"{Config.BASE_URL}/download/{file_id}"
-    logger.info("✅ sᴛʀᴇᴀᴍ ʟɪɴᴋ ɢᴇɴᴇʀᴀᴛᴇᴅ › ғɪʟᴇ_ɪᴅ=%s ɴᴀᴍᴇ=%s sɪᴢᴇ=%s", file_id, file_name, file_size)
+    code_url = f"{Config.BASE_URL}/code/{file_id}" if is_code_file(file_name, mime_type) else ""
+    logger.info("✅ sᴛʀᴇᴀᴍ ʟɪɴᴋ ɢᴇɴᴇʀᴀᴛᴇᴅ (ᴀɴʏ sɪᴢᴇ) › ғɪʟᴇ_ɪᴅ=%s ɴᴀᴍᴇ=%s sɪᴢᴇ=%s", file_id, file_name, file_size)
 
     text = (
         f"✦ **{to_smallcaps('adaptive range file stream link')}** ✦\n\n"
         f"• 📁 **{to_smallcaps('file name')}** : `{file_name}`\n"
-        f"• 📦 **{to_smallcaps('file size')}** : `{humanbytes(file_size)}`\n"
+        f"• 📦 **{to_smallcaps('file size')}** : `{humanbytes(file_size)}` (`Any Size Supported` ✅)\n"
         f"• ⚡ **{to_smallcaps('stream mode')}** : `adaptive HTTP 206 byte-range`\n"
         f"• 🏷️ **{to_smallcaps('mime type')}** : `{mime_type}`\n"
         f"• ⏱️ **{to_smallcaps('duration')}** : `{duration}`\n"
@@ -144,7 +146,10 @@ async def generate_stream_response(client: Client, media_msg: Message, target_re
         ]
     ]
 
+    if code_url:
+        buttons.insert(1, [InlineKeyboardButton(f"💻 {to_smallcaps('live code viewer')}", url=code_url)])
     await safe_edit_text(status, text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
+    cache.auto_clear_after_response_sync(preserve_workflows=True)
 
 
 @Client.on_message(filters.private & filters.command(["getfile", "file"], prefixes=COMMAND_PREFIXES))

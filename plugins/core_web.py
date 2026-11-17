@@ -23,7 +23,7 @@ except ImportError:
 from config import Config
 from plugins.core_utils import logger, cache, humanbytes, time_formatter
 from plugins.core_db import user_repo, chat_repo, file_repo, FileRepository
-from plugins.media_types import media_kind, normalize_mime, browser_media_supported
+from plugins.media_types import media_kind, normalize_mime, browser_media_supported, is_code_file, detect_code_language
 
 
 CHUNK_SIZE = 1024 * 1024
@@ -113,9 +113,9 @@ def media_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize stored metadata for templates and JSON clients."""
     raw = dict(file_doc.get("metadata") or {})
     return {
-        "media_kind": raw.get("media_kind") or media_kind(file_doc.get("mime_type") or raw.get("mime_type")),
+        "media_kind": raw.get("media_kind") or media_kind(file_doc.get("mime_type") or raw.get("mime_type"), file_doc.get("file_name")),
         "mime_type": normalize_mime(file_doc.get("mime_type") or raw.get("mime_type")),
-        "browser_supported": browser_media_supported(file_doc.get("mime_type") or raw.get("mime_type")),
+        "browser_supported": browser_media_supported(file_doc.get("mime_type") or raw.get("mime_type"), file_doc.get("file_name")),
         "duration": _safe_metadata_int(raw.get("duration")),
         "width": _safe_metadata_int(raw.get("width")),
         "height": _safe_metadata_int(raw.get("height")),
@@ -352,6 +352,71 @@ async def index(request: Request):
         "watermark": Config.WATERMARK,
         "watermark_url": Config.WATERMARK_URL,
     })
+
+
+
+
+@pages_router.get("/static/style.css")
+async def serve_static_css():
+    css_path = os.path.join(_CURRENT_DIR, "style.css")
+    if os.path.exists(css_path):
+        with open(css_path, "r", encoding="utf-8") as f:
+            css_body = f.read()
+    else:
+        css_body = ":root { --bg: #040711; --accent: #38bdf8; }"
+    return Response(
+        content=css_body,
+        media_type="text/css; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@pages_router.get("/code/{file_id}")
+async def code_preview_page(request: Request, file_id: str):
+    import html as _html
+    file_doc = await FileRepository.get_file_by_id(file_id)
+    if not file_doc:
+        raise HTTPException(status_code=404, detail="Code file not found or link expired.")
+    file_name = file_doc.get("file_name") or "code.py"
+    file_size = _safe_metadata_int(file_doc.get("file_size", 0))
+    lang = detect_code_language(file_name, file_doc.get("mime_type"))
+    base_url = str(request.base_url).rstrip("/")
+    stream_url = f"{base_url}/stream/{file_id}"
+    download_url = f"{base_url}/download/{file_id}"
+    watch_url = f"{base_url}/watch/{file_id}"
+    html_page = f"""<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{_html.escape(file_name)} — MMW Code Pro Studio</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="code-studio-body">
+<div class="code-container">
+  <div class="code-header">
+    <div>
+      <span class="lang-badge">⚡ {_html.escape(lang.upper())} CODE ENGINE</span>
+      <h1>{_html.escape(file_name)}</h1>
+      <p>Size: {_html.escape(humanbytes(file_size))} • Instant HTTP 206 Byte-Range Stream</p>
+    </div>
+    <div class="code-actions">
+      <a href="{download_url}" class="btn-primary">⬇️ Fast Download</a>
+      <a href="{stream_url}" class="btn-secondary" target="_blank">📄 Raw Stream</a>
+      <a href="{watch_url}" class="btn-secondary">🎬 Watch Studio</a>
+    </div>
+  </div>
+  <pre id="code-box" class="code-pre">Loading code stream...</pre>
+</div>
+<script>
+fetch({stream_url!r}, {{ headers: {{ "Range": "bytes=0-262143" }} }})
+  .then(r => r.text())
+  .then(t => {{ document.getElementById("code-box").textContent = t; }})
+  .catch(e => {{ document.getElementById("code-box").textContent = "Preview error: " + e; }});
+</script>
+</body>
+</html>"""
+    return Response(content=html_page, media_type="text/html; charset=utf-8")
 
 
 @pages_router.get("/watch/{file_id}")
@@ -754,21 +819,22 @@ def create_app(bot_instance=None) -> FastAPI:
 
     @fastapi_app.middleware("http")
     async def public_page_cache(request: Request, call_next):
-        response = await call_next(request)
-        path = request.url.path
-        if path in {"/", "/stats"}:
-            response.headers.setdefault("Cache-Control", "public, max-age=60, stale-while-revalidate=600")
-        elif path.startswith("/watch/") or path.startswith("/dl/"):
-            response.headers.setdefault("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
-        elif path.startswith("/api/info/"):
-            response.headers.setdefault("Cache-Control", "private, max-age=15")
-        elif path.startswith("/api/search"):
-            response.headers.setdefault("Cache-Control", "private, max-age=10")
-        elif path == "/api/status":
-            response.headers.setdefault("Cache-Control", "private, max-age=5, stale-while-revalidate=15")
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        return response
+        async with cache.response_scope(f"http:{request.url.path}"):
+            response = await call_next(request)
+            path = request.url.path
+            if path in {"/", "/stats"}:
+                response.headers.setdefault("Cache-Control", "public, max-age=60, stale-while-revalidate=600")
+            elif path.startswith("/watch/") or path.startswith("/dl/"):
+                response.headers.setdefault("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
+            elif path.startswith("/api/info/"):
+                response.headers.setdefault("Cache-Control", "private, max-age=15")
+            elif path.startswith("/api/search"):
+                response.headers.setdefault("Cache-Control", "private, max-age=10")
+            elif path == "/api/status":
+                response.headers.setdefault("Cache-Control", "private, max-age=5, stale-while-revalidate=15")
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+            return response
 
     fastapi_app.include_router(pages_router)
     fastapi_app.include_router(stream_router)

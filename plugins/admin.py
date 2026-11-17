@@ -1482,8 +1482,10 @@ async def legacy_admin_callbacks(client: Client, query: CallbackQuery):
 
     action = query.matches[0].group(1)
     if action == "panel_back":
+        await query.answer("👑 ᴀᴅᴍɪɴ ᴘᴀɴᴇʟ")
         await safe_edit_message(query.message, build_admin_help_text(), reply_markup=build_admin_dashboard_buttons(), parse_mode=enums.ParseMode.HTML)
     elif action == "stats":
+        await query.answer("📊 ʀᴇғʀᴇsʜɪɴɢ sᴛᴀᴛs...")
         await safe_edit_message(query.message, await build_stats_formatted_text(), reply_markup=build_admin_dashboard_buttons(), parse_mode=enums.ParseMode.HTML)
     elif action in ("clear_cache", "clean"):
         await cache.clear()
@@ -1491,16 +1493,21 @@ async def legacy_admin_callbacks(client: Client, query: CallbackQuery):
         await query.answer(to_smallcaps("in-memory cache cleared!"), show_alert=True)
         await safe_edit_message(query.message, build_admin_help_text(), reply_markup=build_admin_dashboard_buttons(), parse_mode=enums.ParseMode.HTML)
     elif action == "cache_info":
+        await query.answer("⚡ ᴄᴀᴄʜᴇ ᴛᴇʟᴇᴍᴇᴛʀʏ")
         await render_cache_card(query.message, is_edit=True)
     elif action == "dbstats":
+        await query.answer("🗄️ ᴅʙ sᴛᴀᴛᴜs")
         await safe_edit_message(query.message, await build_dbstatus_text(), reply_markup=build_admin_dashboard_buttons(), parse_mode=enums.ParseMode.HTML)
     elif action == "logs":
+        await query.answer("📋 ʟᴏɢs ᴘʀᴇᴠɪᴇᴡ")
         preview = html.escape(get_recent_logs_preview(lines_count=28, max_chars=3200))
         await safe_edit_message(query.message, f"📋 <b>ʀᴇᴄᴇɴᴛ ʟᴏɢs:</b>\n<pre>{preview}</pre>", reply_markup=build_admin_dashboard_buttons(), parse_mode=enums.ParseMode.HTML)
     elif action in ("settings", "broadcast_info"):
+        await query.answer("⚙️ ɢʟᴏʙᴀʟ sᴇᴛᴛɪɴɢs")
         text, buttons = await build_global_config_view()
         await safe_edit_message(query.message, text, reply_markup=buttons, parse_mode=enums.ParseMode.HTML)
     elif action == "close":
+        await query.answer("🗑️ ᴄʟᴏsᴇᴅ")
         try:
             await query.message.delete()
         except Exception:
@@ -1520,6 +1527,7 @@ async def admin_users_pagination_callback(client: Client, query: CallbackQuery):
     if not query.from_user or not is_admin_sync(query.from_user.id):
         return await query.answer(to_smallcaps("access denied!"), show_alert=True)
     page = int(query.matches[0].group(1))
+    await query.answer(f"👥 ᴜsᴇʀs ᴘᴀɢᴇ {page}")
     await render_users_page(query.message, page=page, is_edit=True)
 
 
@@ -1559,6 +1567,7 @@ async def dev_callbacks(client: Client, query: CallbackQuery):
         await query.answer(to_smallcaps(f"gc complete: {collected} objects freed!"), show_alert=True)
         await render_dev_console(query.message, is_edit=True)
     elif action == "close":
+        await query.answer("🗑️ ᴄʟᴏsᴇᴅ")
         try:
             await query.message.delete()
         except Exception:

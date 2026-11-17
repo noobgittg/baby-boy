@@ -8,7 +8,7 @@ import re
 import datetime
 import uuid
 import hashlib
-from plugins.media_types import is_audio_mime, is_video_mime, normalize_mime
+from plugins.media_types import is_audio_mime, is_video_mime, is_code_file, detect_code_language, normalize_mime
 import socket
 import urllib.request
 from urllib.parse import urlparse
@@ -2183,3 +2183,206 @@ async def schedule_24h_restart(bot, interval: int = 86400):
             os.execv(sys.executable, [sys.executable, *sys.argv])
         except Exception:
             await asyncio.sleep(3)
+
+
+import ast
+import zipfile
+import gzip
+
+def analyze_code_file_sync(file_path: str, file_name: str = "") -> Dict[str, Any]:
+    fname = file_name or os.path.basename(file_path)
+    lang = detect_code_language(fname)
+    size_bytes = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except Exception as e:
+        return {
+            "language": lang,
+            "file_name": fname,
+            "size_bytes": size_bytes,
+            "lines": 0,
+            "syntax_ok": False,
+            "syntax_detail": f"Read error: {e}",
+            "functions": 0,
+            "classes": 0,
+            "imports": 0,
+        }
+
+    lines = content.splitlines()
+    line_count = len(lines)
+    non_empty_lines = sum(1 for ln in lines if ln.strip())
+    syntax_ok = True
+    syntax_detail = "Valid Syntax"
+    functions_cnt = 0
+    classes_cnt = 0
+    imports_cnt = 0
+
+    if lang == "python":
+        try:
+            tree = ast.parse(content, filename=fname)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    functions_cnt += 1
+                elif isinstance(node, ast.ClassDef):
+                    classes_cnt += 1
+                elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                    imports_cnt += 1
+            syntax_detail = f"AST Verified ({functions_cnt} funcs, {classes_cnt} classes, {imports_cnt} imports)"
+        except SyntaxError as se:
+            syntax_ok = False
+            syntax_detail = f"Line {se.lineno}: {se.msg}"
+        except Exception as ex:
+            syntax_ok = False
+            syntax_detail = str(ex)
+    elif lang == "html":
+        tags = re.findall(r"<([a-zA-Z][a-zA-Z0-9_-]*)", content)
+        functions_cnt = len(re.findall(r"<script\b", content, re.I))
+        classes_cnt = len(re.findall(r"<style\b", content, re.I))
+        imports_cnt = len(re.findall(r"<link\b", content, re.I))
+        syntax_ok = ("<html" in content.lower() or "<!doctype" in content.lower() or len(tags) > 0)
+        syntax_detail = f"HTML5 Ready ({len(tags)} elements, {functions_cnt} scripts, {classes_cnt} styles)"
+    elif lang == "css":
+        rules = re.findall(r"\{[^{}]*\}", content)
+        classes_cnt = len(rules)
+        imports_cnt = len(re.findall(r"@import\b|@media\b|@keyframes\b", content, re.I))
+        open_b = content.count("{")
+        close_b = content.count("}")
+        syntax_ok = (open_b == close_b)
+        syntax_detail = f"CSS Stylesheet ({classes_cnt} rules, {imports_cnt} directives)" if syntax_ok else f"Unbalanced braces ({open_b} vs {close_b})"
+    elif lang == "php":
+        functions_cnt = len(re.findall(r"\bfunction\s+[a-zA-Z0-9_]+", content, re.I))
+        classes_cnt = len(re.findall(r"\bclass\s+[a-zA-Z0-9_]+", content, re.I))
+        imports_cnt = len(re.findall(r"\b(?:require|require_once|include|include_once|use)\b", content, re.I))
+        syntax_ok = ("<?php" in content.lower() or "<?=" in content.lower() or functions_cnt > 0)
+        syntax_detail = f"PHP Script ({functions_cnt} functions, {classes_cnt} classes)"
+    elif lang == "json":
+        try:
+            json.loads(content)
+            syntax_detail = "Valid JSON Document"
+        except Exception as je:
+            syntax_ok = False
+            syntax_detail = f"JSON Error: {je}"
+    else:
+        functions_cnt = len(re.findall(r"\bfunction\b|\bdef\b", content))
+        syntax_detail = f"{lang.upper()} Source ({non_empty_lines} active lines)"
+
+    return {
+        "language": lang,
+        "file_name": fname,
+        "size_bytes": size_bytes,
+        "lines": line_count,
+        "active_lines": non_empty_lines,
+        "syntax_ok": syntax_ok,
+        "syntax_detail": syntax_detail,
+        "functions": functions_cnt,
+        "classes": classes_cnt,
+        "imports": imports_cnt,
+    }
+
+
+async def analyze_code_file(file_path: str, file_name: str = "") -> Dict[str, Any]:
+    try:
+        return await asyncio.to_thread(analyze_code_file_sync, file_path, file_name)
+    finally:
+        cache.auto_clear_after_response_sync(preserve_workflows=True)
+
+
+def optimize_code_file_sync(input_path: str, output_path: str, file_name: str = "") -> bool:
+    if not os.path.exists(input_path):
+        return False
+    fname = file_name or os.path.basename(input_path)
+    lang = detect_code_language(fname)
+    try:
+        with open(input_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except Exception:
+        return False
+
+    optimized = content
+    if lang == "python":
+        out_lines = []
+        for idx, line in enumerate(content.splitlines()):
+            stripped = line.strip()
+            if idx == 0 and stripped.startswith("#!"):
+                out_lines.append(line.rstrip())
+                continue
+            if idx < 2 and "coding" in stripped and stripped.startswith("#"):
+                out_lines.append(line.rstrip())
+                continue
+            if stripped.startswith("#"):
+                continue
+            out_lines.append(line.rstrip())
+        cand = "\n".join(out_lines)
+        cand = re.sub(r"\n{3,}", "\n\n", cand).strip() + "\n"
+        try:
+            ast.parse(cand)
+            optimized = cand
+        except Exception:
+            optimized = content
+    elif lang == "css":
+        cand = re.sub(r"/\*.*?\*/", "", content, flags=re.S)
+        cand = re.sub(r"\s+", " ", cand)
+        cand = re.sub(r"\s*([{};:,>~+])\s*", r"\1", cand)
+        cand = cand.replace(";}", "}").strip()
+        if cand:
+            optimized = cand + "\n"
+    elif lang == "html":
+        cand = re.sub(r"<!--(?!\[if).*?-->", "", content, flags=re.S)
+        cand = re.sub(r">\s+<", "><", cand)
+        cand = re.sub(r"\n{2,}", "\n", cand).strip()
+        if cand:
+            optimized = cand + "\n"
+    elif lang == "php":
+        out_lines = []
+        for line in content.splitlines():
+            s = line.strip()
+            if s.startswith("//") or (s.startswith("#") and not s.startswith("#[")):
+                continue
+            out_lines.append(line.rstrip())
+        cand = "\n".join(out_lines)
+        cand = re.sub(r"/\*.*?\*/", "", cand, flags=re.S)
+        cand = re.sub(r"\n{3,}", "\n\n", cand).strip() + "\n"
+        if cand:
+            optimized = cand
+    elif lang == "json":
+        try:
+            parsed = json.loads(content)
+            optimized = json.dumps(parsed, separators=(",", ":"), ensure_ascii=False)
+        except Exception:
+            optimized = content
+    else:
+        out_lines = [ln.rstrip() for ln in content.splitlines() if ln.strip()]
+        optimized = "\n".join(out_lines) + "\n"
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(optimized)
+    return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+
+
+async def optimize_code_file(input_path: str, output_path: str, file_name: str = "") -> bool:
+    try:
+        return await asyncio.to_thread(optimize_code_file_sync, input_path, output_path, file_name)
+    finally:
+        cache.auto_clear_after_response_sync(preserve_workflows=True)
+
+
+def compress_file_to_zip_sync(input_path: str, output_zip_path: str, arcname: str = "") -> bool:
+    if not os.path.exists(input_path):
+        return False
+    os.makedirs(os.path.dirname(os.path.abspath(output_zip_path)), exist_ok=True)
+    arc = arcname or os.path.basename(input_path)
+    try:
+        with zipfile.ZipFile(output_zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+            zf.write(input_path, arcname=arc)
+        return os.path.exists(output_zip_path) and os.path.getsize(output_zip_path) > 0
+    except Exception:
+        return False
+
+
+async def compress_file_to_zip(input_path: str, output_zip_path: str, arcname: str = "") -> bool:
+    try:
+        return await asyncio.to_thread(compress_file_to_zip_sync, input_path, output_zip_path, arcname)
+    finally:
+        cache.auto_clear_after_response_sync(preserve_workflows=True)
