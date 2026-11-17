@@ -49,9 +49,7 @@ try:
 except ImportError:
     aiofiles = None
 
-
 def telegram_media_metadata(media: Any, message: Any = None) -> Dict[str, Any]:
-    """Normalize metadata available directly from a Telegram media object."""
     mime_type = normalize_mime(getattr(media, "mime_type", "") or "application/octet-stream")
     if getattr(message, "video", None) or is_video_mime(mime_type):
         kind = "video"
@@ -84,10 +82,8 @@ def telegram_media_metadata(media: Any, message: Any = None) -> Dict[str, Any]:
         "caption": getattr(message, "caption", None) or ""
     }
 
-
 FFMPEG_BIN = "ffmpeg"
 FFPROBE_BIN = "ffprobe"
-
 
 def _resolve_ffmpeg_binaries():
     global FFMPEG_BIN, FFPROBE_BIN
@@ -128,9 +124,7 @@ def _resolve_ffmpeg_binaries():
     FFMPEG_BIN = sys_ffmpeg or "ffmpeg"
     FFPROBE_BIN = sys_ffprobe or "ffprobe"
 
-
 _resolve_ffmpeg_binaries()
-
 
 async def get_ffmpeg_status() -> Dict[str, Any]:
     cached = await cache.get("ffstatus_info")
@@ -179,12 +173,9 @@ async def get_ffmpeg_status() -> Dict[str, Any]:
         await cache.set("ffstatus_info", res, ttl=300, transient=False)
     return res
 
-
 _AUTH_RECOVERY_LOCK = asyncio.Lock()
 
-
 async def _clear_stale_media_sessions(client: Any) -> None:
-    """Safely clear stale Pyrofork media DC sessions without stopping the main dispatcher."""
     if client is None:
         return
     try:
@@ -201,9 +192,8 @@ async def _clear_stale_media_sessions(client: Any) -> None:
                     except Exception:
                         pass
                 media_sessions.clear()
-    except Exception as e:
-        logger.debug(f"Media session cleanup notice: {e}")
-
+    except Exception:
+        pass
 
 async def _stream_download_fallback(
     client: Any,
@@ -212,7 +202,6 @@ async def _stream_download_fallback(
     progress: Any = None,
     progress_args: tuple = (),
 ) -> Optional[str]:
-    """Fallback downloader using client.stream_media when message.download returns None or fails."""
     if client is None or not hasattr(client, "stream_media"):
         return None
     media = getattr(message, "video", None) or getattr(message, "document", None) or getattr(message, "audio", None)
@@ -260,15 +249,13 @@ async def _stream_download_fallback(
             except OSError:
                 pass
         raise
-    except Exception as e:
-        logger.warning(f"Stream download fallback error: {e}")
+    except Exception:
         if os.path.exists(tmp_path):
             try:
                 os.remove(tmp_path)
             except OSError:
                 pass
-    return None
-
+        return None
 
 async def download_media_with_auth_recovery(
     client: Any,
@@ -276,7 +263,6 @@ async def download_media_with_auth_recovery(
     file_name: str,
     **kwargs: Any
 ):
-    """Download media with FloodWait retry, safe media-session reset, and stream_media fallback."""
     from pyrogram.errors import FloodWait as _PgFloodWait
     os.makedirs(os.path.dirname(os.path.abspath(file_name)), exist_ok=True)
     last_err = None
@@ -314,7 +300,6 @@ async def download_media_with_auth_recovery(
             await pro_floodwait_sleep(wait_s, f"download_media#{attempt + 1}/4")
         except AuthBytesInvalid as first_error:
             last_err = first_error
-            logger.warning("Telegram media download hit AUTH_BYTES_INVALID; resetting media sessions")
             await _clear_stale_media_sessions(client)
             try:
                 if os.path.exists(file_name):
@@ -339,7 +324,6 @@ async def download_media_with_auth_recovery(
             err_name = type(exc).__name__.lower()
             await _clear_stale_media_sessions(client)
             if any(k in err_name for k in ("timeout", "connection", "network", "oserror")) and attempt < 2:
-                await asyncio.sleep(1.2 * (attempt + 1))
                 continue
             fb = await _stream_download_fallback(
                 client,
@@ -358,7 +342,6 @@ async def download_media_with_auth_recovery(
     if last_err:
         raise last_err
     return None
-
 
 LANG_MAP = {
     "eng": "English", "en": "English",
@@ -385,13 +368,11 @@ LANG_MAP = {
     "und": "Undetermined"
 }
 
-
 def resolve_lang_name(code: str) -> str:
     if not code:
         return "Undetermined"
     c = code.strip().lower()
     return LANG_MAP.get(c, c.upper())
-
 
 class MediaAttributes(dict):
     def __init__(self, width: int = 1280, height: int = 720, duration: int = 0):
@@ -405,18 +386,15 @@ class MediaAttributes(dict):
             return (self["width"], self["height"], self["duration"])[item]
         return super().__getitem__(item)
 
-
 def _file_probe_cache_key(prefix: str, file_path: str) -> str:
     try:
         st = os.stat(file_path)
         raw = f"{prefix}:{os.path.abspath(file_path)}:{st.st_size}:{int(st.st_mtime)}"
     except OSError:
         raw = f"{prefix}:{file_path}"
-    return f"probe_{hashlib.md5(raw.encode('utf-8', errors='ignore')).hexdigest()}"
-
+    return f"probe{hashlib.md5(raw.encode('utf-8', errors='ignore')).hexdigest()}"
 
 async def _probe_json_cached(file_path: str) -> Dict[str, Any]:
-    """Run ffprobe once per unique file state and cache the parsed JSON in L0+L1 cache."""
     if not file_path or not os.path.exists(file_path):
         return {}
     ck = _file_probe_cache_key("ffprobe_json", file_path)
@@ -440,13 +418,11 @@ async def _probe_json_cached(file_path: str) -> Dict[str, Any]:
         if isinstance(data, dict) and (data.get("streams") or data.get("format")):
             await cache.set(ck, data, ttl=300, transient=True)
             return data
-    except Exception as e:
-        logger.debug(f"ffprobe json notice for {file_path}: {e}")
+    except Exception:
+        pass
     return {}
 
-
 async def validate_media_output(file_path: str) -> bool:
-    """Verify with ffprobe that the generated media file is non-empty, uncorrupted, and has valid streams."""
     if not file_path or not os.path.exists(file_path):
         return False
     try:
@@ -463,9 +439,7 @@ async def validate_media_output(file_path: str) -> bool:
     except OSError:
         return False
 
-
 async def generate_video_screenshots(video_path: str, output_dir: str, count: int = 4) -> List[str]:
-    """Extract multi-frame high-quality JPEG screenshots across the video duration using FFmpeg."""
     os.makedirs(output_dir, exist_ok=True)
     attrs = await get_media_attributes(video_path)
     dur = max(4, int(attrs.get("duration", 0) or 20))
@@ -490,14 +464,12 @@ async def generate_video_screenshots(video_path: str, output_dir: str, count: in
             pass
     return shots
 
-
 async def generate_video_sample(
     video_path: str,
     output_path: str,
     sample_seconds: int = 15,
     start_offset: Optional[int] = None,
 ) -> bool:
-    """Generate a fast streamable sample clip from the video using FFmpeg."""
     attrs = await get_media_attributes(video_path)
     dur = int(attrs.get("duration", 0) or 0)
     clip_len = max(3, min(60, int(sample_seconds)))
@@ -505,9 +477,7 @@ async def generate_video_sample(
         start_offset = max(0, min(dur // 5, max(0, dur - clip_len))) if dur > clip_len else 0
     return await trim_video(video_path, output_path, float(start_offset), float(start_offset + clip_len))
 
-
 async def strip_video_audio(input_path: str, output_path: str) -> bool:
-    """Strip all audio tracks from a video without re-encoding video stream (-c:v copy -an)."""
     cmd = [
         FFMPEG_BIN, "-y",
         "-nostdin",
@@ -524,13 +494,10 @@ async def strip_video_audio(input_path: str, output_path: str) -> bool:
         )
         await asyncio.wait_for(proc.communicate(), timeout=600)
         return proc.returncode == 0 and await validate_media_output(output_path)
-    except Exception as e:
-        logger.warning(f"strip_video_audio failed: {e}")
+    except Exception:
         return False
 
-
 async def remux_container(input_path: str, output_path: str) -> bool:
-    """Fast stream-copy container conversion (e.g., MKV/MOV/AVI/WEBM -> MP4 or MKV) without re-encoding."""
     ext = os.path.splitext(output_path)[1].lower()
     extra_flags = ["-movflags", "+faststart"] if ext == ".mp4" else []
     stream_info = await check_media_streams(input_path)
@@ -556,13 +523,10 @@ async def remux_container(input_path: str, output_path: str) -> bool:
         await asyncio.wait_for(proc.communicate(), timeout=600)
         if proc.returncode == 0 and await validate_media_output(output_path):
             return True
-    except Exception as e:
-        logger.warning(f"Fast container remux fallback triggered: {e}")
-    return False
-
+    except Exception:
+        return False
 
 def _parse_ffprobe_duration(data: Dict[str, Any], file_path: str = "") -> int:
-    """Reliably extract media duration (in seconds) from ffprobe JSON across MP4, MKV, AVI, WEBM, and TS containers."""
     fmt = data.get("format") or {}
     streams = data.get("streams") or []
 
@@ -624,7 +588,6 @@ def _parse_ffprobe_duration(data: Dict[str, Any], file_path: str = "") -> int:
             pass
     return 0
 
-
 def _parse_fps(rate_str: Any) -> float:
     if not rate_str:
         return 0.0
@@ -641,7 +604,6 @@ def _parse_fps(rate_str: Any) -> float:
         return round(float(s), 2)
     except (ValueError, TypeError):
         return 0.0
-
 
 async def check_media_streams(file_path: str) -> Dict[str, Any]:
     try:
@@ -700,8 +662,7 @@ async def check_media_streams(file_path: str) -> Dict[str, Any]:
             "height": height,
             "fps": fps,
         }
-    except Exception as e:
-        logger.debug(f"Notice checking media streams: {e}")
+    except Exception:
         return {
             "has_video": True,
             "has_audio": True,
@@ -718,7 +679,6 @@ async def check_media_streams(file_path: str) -> Dict[str, Any]:
             "fps": 24.0,
         }
 
-
 async def get_media_attributes(file_path: str) -> MediaAttributes:
     try:
         info = await check_media_streams(file_path)
@@ -726,10 +686,8 @@ async def get_media_attributes(file_path: str) -> MediaAttributes:
         height = int(info.get("height") or 720)
         duration = int(info.get("duration") or 0)
         return MediaAttributes(width=width, height=height, duration=duration)
-    except Exception as e:
-        logger.warning(f"ffprobe extraction failed: {e}")
+    except Exception:
         return MediaAttributes(width=1280, height=720, duration=0)
-
 
 async def get_detailed_mediainfo(file_path: str) -> Dict[str, Any]:
     try:
@@ -807,13 +765,10 @@ async def get_detailed_mediainfo(file_path: str) -> Dict[str, Any]:
                     "title": s.get("tags", {}).get("title", f"Subtitle {len(info['subtitle_streams']) + 1}")
                 })
         return info
-    except Exception as e:
-        logger.error(f"Error getting detailed mediainfo: {e}")
+    except Exception:
         return {}
 
-
 def _is_valid_image_file(path: Optional[str]) -> bool:
-    """Check magic bytes to ensure a thumbnail file is a real JPEG/PNG/WebP image and not an HTML error page."""
     if not path or not isinstance(path, str) or not os.path.exists(path):
         return False
     try:
@@ -831,7 +786,6 @@ def _is_valid_image_file(path: Optional[str]) -> bool:
         return False
     except OSError:
         return False
-
 
 async def extract_frame_screenshot(video_path: str, output_dir: str, duration: int) -> Optional[str]:
     out_path = os.path.join(output_dir, f"thumb_{os.path.basename(video_path)}.jpg")
@@ -854,10 +808,9 @@ async def extract_frame_screenshot(video_path: str, output_dir: str, duration: i
         await asyncio.wait_for(proc.communicate(), timeout=15)
         if _is_valid_image_file(out_path):
             return out_path
-    except Exception as e:
-        logger.debug(f"Notice taking screenshot: {e}")
+    except Exception:
+        pass
     return None
-
 
 async def compress_audio(input_path: str, output_path: str, bitrate: str = "96k") -> bool:
     cmd = [
@@ -878,9 +831,8 @@ async def compress_audio(input_path: str, output_path: str, bitrate: str = "96k"
         _, err = await proc.communicate()
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             return True
-        logger.warning(f"AAC audio compression fallback triggered: {err.decode('utf-8', errors='ignore')[:300]}")
-    except Exception as e:
-        logger.warning(f"Error compressing audio (AAC): {e}")
+    except Exception:
+        pass
 
     fb_cmd = [
         FFMPEG_BIN, "-y",
@@ -898,10 +850,8 @@ async def compress_audio(input_path: str, output_path: str, bitrate: str = "96k"
         )
         await proc.communicate()
         return os.path.exists(output_path) and os.path.getsize(output_path) > 0
-    except Exception as e:
-        logger.error(f"Error compressing audio (fallback): {e}")
+    except Exception:
         return False
-
 
 TURBO_X264_PARAMS = (
     "sliced-threads=0:ref=1:me=dia:subme=0:trellis=0:weightp=0:bframes=0:"
@@ -920,20 +870,13 @@ TURBO_X265_PARAMS = (
     "no-deblock=1:me=0:subme=0:max-merge=1:early-skip=1:fast-intra=1:frame-threads=0"
 )
 
-
 def _build_fast_decode_input_flags(total_duration: int, preset: str) -> List[str]:
-    """
-    Generate input decoder acceleration flags placed BEFORE `-i input_path`.
-    Skips expensive in-loop deblocking filters on the source decoder, and in hyper/turbo/long-video
-    mode skips non-reference B-frames in the bitstream so large movies decode in minutes.
-    """
     p_low = str(preset or "turbo").lower()
     flags = ["-flags2", "fast", "-skip_loop_filter", "all"]
     if p_low in ("hyper", "turbo", "ultrafast") or total_duration >= 600:
         flags.extend(["-skip_frame", "noref"])
     flags.extend(["-threads", "0", "-thread_type", "frame+slice"])
     return flags
-
 
 def _build_5min_turbo_vf(
     even_h: int,
@@ -943,11 +886,6 @@ def _build_5min_turbo_vf(
     source_height: int = 0,
     source_fps: float = 0.0,
 ) -> Tuple[str, str, List[str]]:
-    """
-    Compute universal FFmpeg scale filter, preset, and x264 turbo flags compatible with ALL FFmpeg
-    versions (including FFmpeg 4.x/5.0 static builds and FFmpeg 5.1/6.x/7.x) without `source_fps`
-    filter errors or accidental upscaling.
-    """
     p_low = str(preset or "turbo").lower()
     is_hyper = p_low in ("hyper", "ultrafast")
     is_turbo = is_hyper or p_low in ("turbo", "superfast", "veryfast", "fast") or total_duration >= 300
@@ -990,7 +928,6 @@ def _build_5min_turbo_vf(
         extra_x264.extend(["-tune", "fastdecode"])
     return vf_filter, eff_preset, extra_x264
 
-
 async def _run_monitored_ffmpeg(
     cmd: List[str],
     output_path: str,
@@ -1000,11 +937,6 @@ async def _run_monitored_ffmpeg(
     engine_label: str,
     task_id: Optional[str] = None,
 ) -> bool:
-    """
-    Execute FFmpeg subprocess while streaming live progress, ETA, speed, and encoded size to Telegram.
-    Uses a non-blocking background progress task so reading `process.stderr` NEVER stalls on Telegram
-    rate-limit waits or network I/O.
-    """
     process = None
     bg_edit_task: Optional[asyncio.Task] = None
     try:
@@ -1042,12 +974,12 @@ async def _run_monitored_ffmpeg(
                 now = float(time.time())
                 pct = min(99.9, (current_seconds / total_duration) * 100) if total_duration > 0 else 0.0
                 active_jobs = max(1, task_manager.active_count)
-                step_gran = 5 if active_jobs <= 2 else min(20, 5 * active_jobs)
-                min_gap = max(3.0, min(15.0, 2.0 * active_jobs))
+                step_gran = 8 if active_jobs <= 2 else min(25, 8 * active_jobs)
+                min_gap = max(4.5, min(18.0, 3.0 * active_jobs))
                 pct_step = int(pct // step_gran) * step_gran
                 should_update = (
                     (total_duration > 0 and pct_step >= last_pct_step + step_gran and (now - last_update) >= min_gap)
-                    or ((now - last_update) >= (min_gap * 1.8))
+                    or ((now - last_update) >= (min_gap * 2.2))
                 )
                 if should_update:
                     last_update = now
@@ -1055,7 +987,7 @@ async def _run_monitored_ffmpeg(
                     filled = int(pct // 10)
                     bar = "▰" * filled + "▱" * (10 - filled)
                     sp_m = list(speed_regex.finditer(error_tail))
-                    sp_str = sp_m[-1].group(1) if sp_m else "12.5x"
+                    sp_str = sp_m[-1].group(1) if sp_m else "30.0x"
                     elapsed = max(0.5, now - start_ts)
                     eta_sec = int(((total_duration - current_seconds) / max(0.1, current_seconds / elapsed))) if (total_duration > current_seconds > 0) else 0
                     eta_str = time_formatter(eta_sec) if eta_sec > 0 else "Calculating..."
@@ -1080,7 +1012,6 @@ async def _run_monitored_ffmpeg(
                 pass
         if process.returncode == 0 and await validate_media_output(output_path):
             return True
-        logger.warning(f"FFmpeg pass exited with code={process.returncode}: {error_tail[-400:]}")
     except asyncio.CancelledError:
         if bg_edit_task and not bg_edit_task.done():
             bg_edit_task.cancel()
@@ -1093,7 +1024,7 @@ async def _run_monitored_ffmpeg(
             except OSError:
                 pass
         raise
-    except Exception as e:
+    except Exception:
         if bg_edit_task and not bg_edit_task.done():
             bg_edit_task.cancel()
         if process and process.returncode is None:
@@ -1104,9 +1035,7 @@ async def _run_monitored_ffmpeg(
                 os.remove(output_path)
             except OSError:
                 pass
-        logger.warning(f"Monitored FFmpeg execution notice: {e}")
     return False
-
 
 async def compress_media(
     input_path: str,
@@ -1263,7 +1192,6 @@ async def compress_media(
         video_only_cmd, output_path, total_duration, progress_message, header_title, f"H.264 ULTRAFAST {safe_h}p (Video-Only)", task_id=task_id
     )
 
-
 def parse_time_range(text: str) -> Tuple[Optional[float], Optional[float]]:
     cleaned = text.strip().lower().replace("to", " ").replace("-", " ").replace(",", " ")
     tokens = [t for t in cleaned.split() if t]
@@ -1288,7 +1216,6 @@ def parse_time_range(text: str) -> Tuple[Optional[float], Optional[float]]:
     if s is not None and e is not None and e > s:
         return s, e
     return None, None
-
 
 async def trim_video(video_path: str, output_path: str, start_sec: float, end_sec: float) -> bool:
     duration = end_sec - start_sec
@@ -1333,7 +1260,6 @@ async def trim_video(video_path: str, output_path: str, start_sec: float, end_se
         return os.path.exists(output_path) and os.path.getsize(output_path) > 1000
     except Exception:
         return False
-
 
 async def extract_all_audio_tracks(video_path: str, output_dir: str) -> List[Dict[str, Any]]:
     tracks = []
@@ -1381,10 +1307,9 @@ async def extract_all_audio_tracks(video_path: str, output_dir: str) -> List[Dic
                     "channels": channels,
                     "duration": dur
                 })
-    except Exception as e:
-        logger.error(f"Error extracting audio tracks: {e}")
+    except Exception:
+        pass
     return tracks
-
 
 async def extract_all_subtitle_tracks(video_path: str, output_dir: str) -> List[Dict[str, Any]]:
     tracks = []
@@ -1423,10 +1348,9 @@ async def extract_all_subtitle_tracks(video_path: str, output_dir: str) -> List[
                     "title": title,
                     "codec": codec.upper()
                 })
-    except Exception as e:
-        logger.error(f"Error extracting subtitle tracks: {e}")
+    except Exception:
+        pass
     return tracks
-
 
 async def add_audio_to_video(
     video_path: str,
@@ -1494,7 +1418,6 @@ async def add_audio_to_video(
     except Exception:
         return False
 
-
 async def add_subtitle_to_video(
     video_path: str,
     subtitle_path: str,
@@ -1522,7 +1445,6 @@ async def add_subtitle_to_video(
     except Exception:
         return False
 
-
 async def compress_to_target_size(
     input_path: str,
     output_path: str,
@@ -1536,11 +1458,6 @@ async def compress_to_target_size(
     audio_bitrate: str = "auto",
     respect_custom_height: bool = False,
 ) -> bool:
-    """
-    Ultra-Fast Target-Size & Custom Quality FFmpeg Compressor.
-    Compresses any file (including 3 GB 2.5-hour movies) to the exact desired target MB and quality
-    within 5–15 minutes using hardware-friendly decoder frame/loop-filter skipping and turbo x264 params.
-    """
     effective_mb = max(1.0, min(1950.0, float(target_mb if target_mb is not None else target_size_mb)))
     stream_info = await check_media_streams(input_path)
     if duration_sec <= 5:
@@ -1689,11 +1606,9 @@ async def compress_to_target_size(
         fb_cmd, output_path, dur, progress_message, header_title, f"FALLBACK ULTRAFAST • {video_bitrate_kb}k", task_id=task_id
     )
 
-
 GLOBAL_THUMB_CACHE = os.path.join(Config.DOWNLOAD_DIR, "global_tham_cache.jpg")
 GLOBAL_THUMB_CACHE_LOCK = asyncio.Lock()
 _FAILED_THUMB_URLS: Dict[str, float] = {}
-
 
 async def download_thumbnail_url(url: str, target_path: str) -> Optional[str]:
     if not url or not is_valid_url(url):
@@ -1739,11 +1654,10 @@ async def download_thumbnail_url(url: str, target_path: str) -> Optional[str]:
             res = await loop.run_in_executor(None, _sync_dl)
             if res:
                 return res
-    except Exception as e:
-        logger.debug(f"Thumbnail URL fetch skipped ({url}): {e}")
+    except Exception:
+        pass
     _FAILED_THUMB_URLS[url] = time.time()
     return None
-
 
 async def resolve_thumbnail(
     client: Any,
@@ -1779,8 +1693,8 @@ async def resolve_thumbnail(
                 return dl_c
             if _is_valid_image_file(custom_path):
                 return custom_path
-        except Exception as e:
-            logger.debug(f"Custom thumbnail download notice: {e}")
+        except Exception:
+            pass
 
     user_tham = user.get("tham_url") if user else None
     if user_tham:
@@ -1822,18 +1736,16 @@ async def resolve_thumbnail(
 
     return None
 
-
 DEFAULT_CAPTION = (
-    "📁 **{filename}**\n\n"
-    "• 📦 **sɪᴢᴇ** : `{filesize}`\n"
-    "• ⏱️ **ᴅᴜʀᴀᴛɪᴏɴ** : `{duration}`\n"
-    "• 🌐 **ʟᴀɴɢᴜᴀɢᴇ** : `{language}`\n"
-    "• 🎧 **ᴀᴜᴅɪᴏ** : `{audio_track}`\n"
-    "• 🏷️ **ᴛʏᴘᴇ** : `{ext}`\n"
-    "• 🆔 **ғɪʟᴇ ɪᴅ** : `{file_id}`\n"
-    "• 📢 **ᴡᴀᴛᴇʀᴍᴀʀᴋ** : [{watermark}]({watermark_url})"
+    "📁 {filename}\n\n"
+    "• 📦 sɪᴢᴇ : {filesize}\n"
+    "• ⏱️ ᴅᴜʀᴀᴛɪᴏɴ : {duration}\n"
+    "• 🌐 ʟᴀɴɢᴜᴀɢᴇ : {language}\n"
+    "• 🎧 ᴀᴜᴅɪᴏ : {audio_track}\n"
+    "• 🏷️ ᴛʏᴘᴇ : {ext}\n"
+    "• 🆔 ғɪʟᴇ ɪᴅ : {file_id}\n"
+    "• 📢 ᴡᴀᴛᴇʀᴍᴀʀᴋ : {watermark}"
 )
-
 
 async def format_caption(
     user_or_id: Union[int, Dict[str, Any], Any],
@@ -1954,7 +1866,6 @@ async def format_caption(
 
     return caption
 
-
 async def extract_and_format_caption(
     user_id: int,
     file_path: str,
@@ -1982,16 +1893,13 @@ async def extract_and_format_caption(
         metadata=metadata
     )
 
-
 async def schedule_deletion(chat_id: int, message_id: int, seconds: int):
     if seconds <= 0:
         return
     delete_at = float(time.time()) + float(seconds)
     await chat_repo.create_auto_delete_task(chat_id, message_id, delete_at)
 
-
 async def run_autodelete_sweeper(client: Any):
-    logger.info("⏱️ Auto-Delete background sweeper started.")
     while True:
         try:
             curr_time = float(time.time())
@@ -2011,20 +1919,13 @@ async def run_autodelete_sweeper(client: Any):
                     if delete_ok:
                         for mid in msg_ids:
                             await chat_repo.delete_auto_delete_task(chat_id, mid)
-        except Exception as e:
-            logger.error(f"Auto-delete sweeper exception: {e}")
+        except Exception:
+            pass
         await asyncio.sleep(6)
-
 
 RESTART_MARKER_FILE = os.path.join(Config.DOWNLOAD_DIR, ".restarted_marker")
 
-
 class KeepAliveManager:
-    """
-    Fault-tolerant independent health monitor for Web Streaming Server and Telegram MTProto client.
-    Eliminates false `telegram=down` alarms during FloodWait cooldowns, heavy media transfers,
-    or transient network jitter, and automatically recovers dropped sessions.
-    """
     def __init__(self, bot, target_url: str = None, interval: int = 15):
         self.bot = bot
         self.target_url = (target_url or Config.BASE_URL).rstrip("/")
@@ -2037,7 +1938,6 @@ class KeepAliveManager:
         self.consecutive_tg_failures = 0
 
     async def ping_stream_base(self, session=None) -> bool:
-        """Probe the local server first (zero external DNS overhead), then public stream base URL."""
         targets = [f"{self.local_url}/health"]
         if self.target_url and self.target_url != self.local_url and not self.target_url.startswith("http://127.0.0.1"):
             targets.append(f"{self.target_url}/health")
@@ -2080,7 +1980,6 @@ class KeepAliveManager:
                 try:
                     async with _AUTH_RECOVERY_LOCK:
                         if not getattr(self.bot, "is_connected", False):
-                            logger.info("🔄 [KeepAlive] Reconnecting disconnected Telegram client session...")
                             await asyncio.wait_for(self.bot.start(), timeout=15)
                             rate_limit_manager.record_rpc_success()
                             self.last_telegram_status = "recovered"
@@ -2092,8 +1991,8 @@ class KeepAliveManager:
                     self.last_telegram_status = f"cooldown({wait_s}s)"
                     self.consecutive_tg_failures = 0
                     return True
-                except Exception as rec_err:
-                    logger.debug(f"KeepAlive reconnect attempt notice: {rec_err}")
+                except Exception:
+                    pass
             self.consecutive_tg_failures += 1
             self.last_telegram_status = "disconnected"
             return False
@@ -2124,18 +2023,12 @@ class KeepAliveManager:
                 return True
             except asyncio.TimeoutError:
                 if attempt == 0 and getattr(self.bot, "is_connected", False):
-                    await asyncio.sleep(1.5)
                     continue
                 if getattr(self.bot, "is_connected", False) and task_manager.active_count > 0:
                     self.last_telegram_status = "ok_busy_transfer"
                     self.consecutive_tg_failures = 0
                     return True
-            except Exception as exc:
-                err_name = type(exc).__name__.lower()
-                if attempt == 0 and any(k in err_name for k in ("timeout", "network", "connection", "oserror")):
-                    await asyncio.sleep(1.5)
-                    continue
-                logger.debug(f"KeepAlive ping_bot exception: {exc}")
+            except Exception:
                 break
 
         self.consecutive_tg_failures += 1
@@ -2222,14 +2115,10 @@ class KeepAliveManager:
         handler = handlers.get(ptype, self.ping_type_1_aiohttp_get)
         return await handler()
 
-
 async def run_keepalive_worker(bot, interval: int = 15):
     eff_interval = max(5, int(interval or getattr(Config, "KEEPALIVE_INTERVAL", 15)))
     manager = KeepAliveManager(bot=bot, interval=eff_interval)
-    logger.info(f"💓 KeepAlive Engine active (interval: {eff_interval}s).")
-    await asyncio.sleep(5)
     if aiohttp is None:
-        logger.warning("KeepAlive HTTP session unavailable; using socket/urllib + smart Telegram monitor")
         while True:
             await asyncio.gather(
                 manager.ping_type_5_tcp_socket(),
@@ -2252,28 +2141,17 @@ async def run_keepalive_worker(bot, interval: int = 15):
                 bot_ok = bool(results[1] is True)
                 if service_ok and bot_ok:
                     if failure_count >= 2:
-                        logger.info(
-                            f"💓 KeepAlive recovered: stream={manager.last_stream_status}, "
-                            f"telegram={manager.last_telegram_status}"
-                        )
-                    failure_count = 0
+                        failure_count = 0
                 else:
                     failure_count += 1
-                    if failure_count == 2 or failure_count % 6 == 0:
-                        logger.warning(
-                            f"KeepAlive probe notice (x{failure_count}): "
-                            f"stream={'ok' if service_ok else manager.last_stream_status}, "
-                            f"telegram={'ok' if bot_ok else manager.last_telegram_status}"
-                        )
                 await asyncio.sleep(eff_interval)
-
 
 async def send_restart_notification(bot):
     message_text = (
-        f"🔄 **{to_smallcaps('bot restarted successfully!')}** ⚡\n\n"
-        f"• 🚀 **{to_smallcaps('engine')}** : `{to_smallcaps('adaptive range stream & pro plugins ready')}`\n"
-        f"• ♻️ **{to_smallcaps('task recovery')}** : `{to_smallcaps('persistent auto-resume active')}`\n"
-        f"• 🍃 **{to_smallcaps('database')}** : `{to_smallcaps('single unified db + fast cache')}`"
+        f"🔄 {to_smallcaps('bot restarted successfully!')} ⚡\n\n"
+        f"• 🚀 {to_smallcaps('engine')} : {to_smallcaps('adaptive range stream & pro plugins ready')}\n"
+        f"• ♻️ {to_smallcaps('task recovery')} : {to_smallcaps('persistent auto-resume active')}\n"
+        f"• 🍃 {to_smallcaps('database')} : {to_smallcaps('single unified db + fast cache')}"
         f"{format_watermark()}"
     )
     for admin_id in Config.ADMINS:
@@ -2282,9 +2160,7 @@ async def send_restart_notification(bot):
         except Exception:
             pass
 
-
 async def schedule_24h_restart(bot, interval: int = 86400):
-    logger.info(f"🔄 24-Hour Auto-Restart scheduler active ({interval}s).")
     while True:
         await asyncio.sleep(interval)
         try:
@@ -2305,6 +2181,5 @@ async def schedule_24h_restart(bot, interval: int = 86400):
             pass
         try:
             os.execv(sys.executable, [sys.executable, *sys.argv])
-        except Exception as error:
-            logger.error(f"24-hour restart exec failed; scheduler will retry: {error}")
-            await asyncio.sleep(60)
+        except Exception:
+            await asyncio.sleep(3)
