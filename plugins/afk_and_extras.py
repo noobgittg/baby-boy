@@ -338,17 +338,31 @@ async def list_group_bots_cmd(client: Client, message: Message):
     )
 
 
+import html
+from pyrogram import Client, enums, filters
+from pyrogram.types import Message
+
 @Client.on_message(filters.command(["poll", "cpoll"], prefixes=COMMAND_PREFIXES))
 async def create_poll_cmd(client: Client, message: Message):
     """Create an interactive Telegram poll in the group or channel."""
+
+    if not isinstance(message, Message):
+        logger.error("create_poll_cmd received non-Message: %r", type(message))
+        return
+
+    if not message.text:
+        return
+
     ok, _, _, _ = await verify_group_and_permissions(
         client, message, require_bot_admin=False, allow_channel=True
     )
     if not ok:
         return
 
-    raw = message.text.split(None, 1)[1].strip() if message.text and len(message.text.split(None, 1)) > 1 else ""
+    split = message.text.split(None, 1)
+    raw = split[1].strip() if len(split) > 1 else ""
     parts = [p.strip() for p in raw.split("|") if p.strip()]
+
     if len(parts) < 3:
         return await message.reply_text(
             "⚠️ <b>ᴜsᴀɢᴇ:</b> <code>/poll Question | Option 1 | Option 2 | Option 3</code>\n"
@@ -359,13 +373,18 @@ async def create_poll_cmd(client: Client, message: Message):
 
     question = parts[0][:255]
     options = [o[:100] for o in parts[1:11]]
+
     try:
         await client.send_poll(
             message.chat.id,
             question=question,
             options=options,
-            is_anonymous=False if message.chat.type != enums.ChatType.CHANNEL else True,
+            is_anonymous=(message.chat.type == enums.ChatType.CHANNEL),
         )
-        logger.info("📊 /poll ᴄʀᴇᴀᴛᴇᴅ › ᴄʜᴀᴛ=%s ᴏᴘᴛɪᴏɴs=%s", message.chat.id, len(options))
+        logger.info("📊 /poll created › chat=%s options=%s", message.chat.id, len(options))
     except Exception as e:
-        await message.reply_text(f"❌ <b>ᴘᴏʟʟ ᴇʀʀᴏʀ:</b> <code>{html.escape(str(e))}</code>", quote=True, parse_mode=enums.ParseMode.HTML)
+        await message.reply_text(
+            f"❌ <b>ᴘᴏʟʟ ᴇʀʀᴏʀ:</b> <code>{html.escape(str(e))}</code>",
+            quote=True,
+            parse_mode=enums.ParseMode.HTML,
+        )
