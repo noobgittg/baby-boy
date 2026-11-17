@@ -338,53 +338,63 @@ async def list_group_bots_cmd(client: Client, message: Message):
     )
 
 
-import html
-from pyrogram import Client, enums, filters
-from pyrogram.types import Message
-
 @Client.on_message(filters.command(["poll", "cpoll"], prefixes=COMMAND_PREFIXES))
 async def create_poll_cmd(client: Client, message: Message):
-    """Create an interactive Telegram poll in the group or channel."""
-
     if not isinstance(message, Message):
-        logger.error("create_poll_cmd received non-Message: %r", type(message))
-        return
-
-    if not message.text:
-        return
-
-    ok, _, _, _ = await verify_group_and_permissions(
-        client, message, require_bot_admin=False, allow_channel=True
-    )
-    if not ok:
-        return
-
-    split = message.text.split(None, 1)
-    raw = split[1].strip() if len(split) > 1 else ""
-    parts = [p.strip() for p in raw.split("|") if p.strip()]
-
-    if len(parts) < 3:
-        return await message.reply_text(
-            "⚠️ <b>ᴜsᴀɢᴇ:</b> <code>/poll Question | Option 1 | Option 2 | Option 3</code>\n"
-            "<i>(ᴘʀᴏᴠɪᴅᴇ ᴀ ǫᴜᴇsᴛɪᴏɴ ᴀɴᴅ 2–10 ᴏᴘᴛɪᴏɴs sᴇᴘᴀʀᴀᴛᴇᴅ ʙʏ <code>|</code>)</i>",
-            quote=True,
-            parse_mode=enums.ParseMode.HTML,
+        logger.error(
+            "Poll handler received invalid object: %s",
+            type(message).__name__
         )
-
-    question = parts[0][:255]
-    options = [o[:100] for o in parts[1:11]]
+        return
 
     try:
+        ok, _, _, _ = await verify_group_and_permissions(
+            client,
+            message,
+            require_bot_admin=False,
+            allow_channel=True
+        )
+
+        if not ok:
+            return
+
+        text = message.text or message.caption or ""
+        args = text.split(maxsplit=1)
+        raw = args[1].strip() if len(args) > 1 else ""
+
+        parts = [p.strip() for p in raw.split("|") if p.strip()]
+
+        if len(parts) < 3 or len(parts) > 11:
+            return await message.reply_text(
+                "⚠️ <b>ᴜsᴀɢᴇ:</b>\n"
+                "<code>/poll Question | Option 1 | Option 2</code>\n\n"
+                "<i>ᴘʀᴏᴠɪᴅᴇ 1 ǫᴜᴇsᴛɪᴏɴ ᴀɴᴅ 2–10 ᴏᴘᴛɪᴏɴs.</i>",
+                quote=True,
+                parse_mode=enums.ParseMode.HTML
+            )
+
+        question = parts[0][:255]
+        options = [option[:100] for option in parts[1:]]
+
         await client.send_poll(
-            message.chat.id,
+            chat_id=message.chat.id,
             question=question,
             options=options,
-            is_anonymous=(message.chat.type == enums.ChatType.CHANNEL),
+            is_anonymous=message.chat.type == enums.ChatType.CHANNEL
         )
-        logger.info("📊 /poll created › chat=%s options=%s", message.chat.id, len(options))
+
+        logger.info(
+            "Poll created successfully: chat=%s options=%s",
+            message.chat.id,
+            len(options)
+        )
+
     except Exception as e:
+        logger.exception("Poll creation failed")
+
         await message.reply_text(
-            f"❌ <b>ᴘᴏʟʟ ᴇʀʀᴏʀ:</b> <code>{html.escape(str(e))}</code>",
+            f"❌ <b>ᴘᴏʟʟ ᴇʀʀᴏʀ:</b>\n"
+            f"<code>{html.escape(str(e))}</code>",
             quote=True,
-            parse_mode=enums.ParseMode.HTML,
+            parse_mode=enums.ParseMode.HTML
         )
