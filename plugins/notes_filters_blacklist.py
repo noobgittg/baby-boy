@@ -71,8 +71,6 @@ async def _send_saved_payload(
         logger.debug("⚠️ _sᴇɴᴅ_sᴀᴠᴇᴅ_ᴘᴀʏʟᴏᴀᴅ ᴇʀʀᴏʀ › %s", e)
 
 
-# ─── 1. Notes System (/save, /get, #note, /notes, /clear, /clearall) ──────────
-
 @Client.on_message(filters.command("save", prefixes=COMMAND_PREFIXES))
 async def save_note_cmd(client: Client, message: Message):
     """Save a text or media note in a group or channel."""
@@ -193,8 +191,6 @@ async def clear_all_notes_cmd(client: Client, message: Message):
         parse_mode=enums.ParseMode.HTML,
     )
 
-
-# ─── 2. Custom Auto-Filters (/filter, /filters, /stop, /stopall) ──────────────
 
 @Client.on_message(filters.command("filter", prefixes=COMMAND_PREFIXES))
 async def add_filter_cmd(client: Client, message: Message):
@@ -325,8 +321,6 @@ async def stop_all_filters_cmd(client: Client, message: Message):
     )
 
 
-# ─── 3. Word Blacklist System ─────────────────────────────────────────────────
-
 @Client.on_message(filters.command(["addblacklist", "rmblacklist", "unblacklist", "blacklist", "unblacklistall", "blacklistmode"], prefixes=COMMAND_PREFIXES))
 async def blacklist_cmds(client: Client, message: Message):
     """Manage blacklisted words and auto-censor penalty mode in the group."""
@@ -426,7 +420,6 @@ async def notes_filters_blacklist_watchdog(client: Client, message: Message):
     chat_id = message.chat.id
     user_id = message.from_user.id if message.from_user else 0
 
-    # 1. Check #notename trigger
     if raw_txt.startswith("#") and len(raw_txt) > 1 and " " not in raw_txt:
         note_name = raw_txt[1:].strip().lower()
         doc = await db.get_note(chat_id, note_name)
@@ -435,7 +428,6 @@ async def notes_filters_blacklist_watchdog(client: Client, message: Message):
             await _send_saved_payload(client, message, doc)
             return
 
-    # 2. Check Word Blacklist for non-admins in groups
     if message.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP) and user_id:
         bl_cfg = await db.get_blacklist_config(chat_id)
         bl_words = bl_cfg.get("words", [])
@@ -478,7 +470,6 @@ async def notes_filters_blacklist_watchdog(client: Client, message: Message):
                     await client.unban_chat_member(chat_id, user_id)
                 return
 
-    # 3. Check Custom Auto-Filters
     fltrs = await db.get_all_filters(chat_id)
     if fltrs:
         low_txt = raw_txt.lower()

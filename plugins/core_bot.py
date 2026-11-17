@@ -1,5 +1,6 @@
 import time
 import asyncio
+import functools
 from typing import Union
 from pyrogram import Client, utils as pyroutils
 from pyrogram.errors import FloodWait, MessageNotModified
@@ -8,6 +9,7 @@ from info import LOG_STR, LOG_CHANNEL
 from database.users_chats_db import db
 from utils import temp
 from plugins.core_utils import (
+    cache,
     logger,
     to_smallcaps,
     _flood_wait_seconds,
@@ -24,8 +26,20 @@ _PACED_RPC_NAMES = {
     "SendMedia",
     "SendMultiMedia",
     "ForwardMessages",
-    "EditMessage",
 }
+
+
+def _wrap_handler_with_auto_cache(callback):
+    if getattr(callback, "_mmw_auto_cache_wrapped", False):
+        return callback
+
+    @functools.wraps(callback)
+    async def _wrapped(client, update, *args, **kwargs):
+        async with cache.response_scope(getattr(callback, "__name__", "handler")):
+            return await callback(client, update, *args, **kwargs)
+
+    setattr(_wrapped, "_mmw_auto_cache_wrapped", True)
+    return _wrapped
 
 
 class MMWProBot(Client):
@@ -42,6 +56,11 @@ class MMWProBot(Client):
             plugins=dict(root="plugins")
         )
 
+    def add_handler(self, handler, group: int = 0):
+        if hasattr(handler, "callback") and callable(handler.callback):
+            handler.callback = _wrap_handler_with_auto_cache(handler.callback)
+        return super().add_handler(handler, group=group)
+
     async def invoke(self, query, retries: int = 4, timeout: float = 20, sleep_threshold: float = None):
         """Global Centralized Rate-Limit Manager & Pro FloodWait Solver using asyncio.sleep()."""
         rpc_name = type(query).__name__
@@ -50,7 +69,7 @@ class MMWProBot(Client):
             await rate_limit_manager.wait_for_write_slot(
                 rpc_name=rpc_name,
                 chat_id=0,
-                is_edit=(rpc_name == "EditMessage"),
+                is_edit=False,
                 is_optional_progress=False,
             )
 
@@ -71,6 +90,8 @@ class MMWProBot(Client):
             except FloodWait as fw:
                 wait_s = _flood_wait_seconds(fw)
                 await rate_limit_manager.notify_floodwait(rpc_name, wait_s)
+                if rpc_name == "EditMessage":
+                    raise
                 if attempt >= 4:
                     logger.error(
                         "❌ [ᴘʀᴏ ғʟᴏᴏᴅᴡᴀɪᴛ sᴏʟᴠᴇʀ] %s exhausted retries after %ss wait",

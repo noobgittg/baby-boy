@@ -168,8 +168,6 @@ async def _apply_in_place_edit(
         return False, f"<code>{html.escape(str(e))}</code>"
 
 
-# ─── 1. Interactive Post & Feature Editing Studio (/editstudio) ───────────────
-
 def build_editstudio_home_view() -> Tuple[str, InlineKeyboardMarkup]:
     text = (
         f"✦ <b>{to_smallcaps('pro post, media, button & feature editing studio')}</b> ✦ 🎨\n"
@@ -614,8 +612,6 @@ async def postedit_callback_router(client: Client, query: CallbackQuery):
         return await safe_edit_message(query.message, text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
 
 
-# ─── 2. Interactive Group Feature & Limits Editor (/gsettings) ────────────────
-
 async def build_group_feature_editor_view(chat_id: int, chat_title: str = "") -> Tuple[str, InlineKeyboardMarkup]:
     cfg = await db.get_helpdesk_config(chat_id)
     locks = cfg.get("locks", {})
@@ -808,8 +804,6 @@ async def gfeat_callback_router(client: Client, query: CallbackQuery):
     await safe_edit_message(query.message, text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
 
 
-# ─── Extra Group Admin Commands (No Duplicates) ───────────────────────────────
-
 @Client.on_message(
     filters.command(
         ["antilink", "antiforward", "antibot", "setantispam", "setantidup", "lockall", "unlockall", "mutechat", "unmutechat", "cleanservice", "silentpin", "loudpin", "stafftitle", "admintitle", "setwelcomebutton", "welcomebutton", "setrulesbutton", "rulesbutton", "gbackup", "grestore"],
@@ -985,8 +979,6 @@ async def extra_group_admin_skills_cmd(client: Client, message: Message):
         except Exception as e:
             return await message.reply_text(f"❌ <b>{to_smallcaps('restore failed')}:</b> <code>{html.escape(str(e))}</code>", quote=True, parse_mode=enums.ParseMode.HTML)
 
-
-# ─── 3. Interactive Channel Feature & Template Editor (/csettings) ────────────
 
 async def build_channel_feature_editor_view(channel_id: int, title: str = "") -> Tuple[str, InlineKeyboardMarkup]:
     cfg = await db.get_channel_config(channel_id, title=title or "Channel")

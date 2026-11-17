@@ -320,8 +320,6 @@ async def build_global_config_view() -> tuple[str, InlineKeyboardMarkup]:
     return text, buttons
 
 
-# ─── Admin Commands ───────────────────────────────────────────────────────────
-
 @Client.on_message(
     filters.command(["adminhelp", "admin", "adminpanel", "panel", "stats"], prefixes=COMMAND_PREFIXES)
     & filters.incoming
@@ -400,6 +398,7 @@ async def render_cache_card(target_msg: Message, is_edit: bool = False):
         f"• 🎯 <b>{to_smallcaps('cache hits')}:</b> <code>{stats['hits'] + u_stats['hits']}</code>\n"
         f"• ❌ <b>{to_smallcaps('cache misses')}:</b> <code>{stats['misses'] + u_stats['misses']}</code>\n"
         f"• 🚀 <b>{to_smallcaps('hit ratio')}:</b> <code>{stats['hit_ratio_percent']}%</code>\n"
+        f"• 🧹 <b>{to_smallcaps('auto-cleared responses')}:</b> <code>{stats.get('auto_clears', 0)} (scopes: {stats.get('response_scopes_cleared', 0)})</code>\n"
         f"• ⏱️ <b>{to_smallcaps('default ttl')}:</b> <code>{Config.CACHE_TTL}s</code>"
         f"{format_watermark_html()}"
     )
@@ -600,8 +599,6 @@ async def render_dev_console(target_msg: Message, is_edit: bool = False):
         await target_msg.reply_text(dev_text, reply_markup=InlineKeyboardMarkup(buttons), parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
 
 
-# ─── Server Lifecycle Commands ────────────────────────────────────────────────
-
 @Client.on_message(
     filters.command(["recheck", "resystem", "restart"], prefixes=COMMAND_PREFIXES) & filters.user(ADMINS)
 )
@@ -673,10 +670,6 @@ async def full_reboot_command(client: Client, message: Message):
     await safe_edit_message(msg, "<b>✅ ʀᴇʙᴏᴏᴛ sᴇǫᴜᴇɴᴄᴇ sᴛᴀʀᴛᴇᴅ</b>", parse_mode=enums.ParseMode.HTML)
     os.execl(sys.executable, sys.executable, *sys.argv)
 
-
-
-
-# ─── Extra Advanced Admin Commands (/gbanlist, /setvar, /getvar, /delvar, /tunestream, /tasks, /killtask) ───
 
 @Client.on_message(filters.command(["gbanlist", "setvar", "getvar", "delvar", "tunestream", "tasks", "killtask"], prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def extra_advanced_admin_cmds(client: Client, message: Message):
@@ -785,8 +778,6 @@ async def extra_advanced_admin_cmds(client: Client, message: Message):
                 cancelled += 1
         return await message.reply_text(f"🛑 <b>{to_smallcaps(f'stopped {cancelled} active media tasks!')}</b>", parse_mode=enums.ParseMode.HTML)
 
-
-# ─── Unified Admin Callbacks ──────────────────────────────────────────────────
 
 @Client.on_callback_query(filters.regex(r"^adm_panel#"))
 async def admin_panel_callback(client: Client, query: CallbackQuery):

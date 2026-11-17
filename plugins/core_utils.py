@@ -1,5 +1,6 @@
 import time
 import asyncio
+import contextvars
 import functools
 import hashlib
 import inspect
@@ -12,16 +13,15 @@ import math
 import shutil
 import uuid
 from collections import OrderedDict, defaultdict
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse
-from typing import Any, Optional, Dict, List, Tuple, Callable, Awaitable
+from typing import Any, Optional, Dict, List, Tuple, Callable, Awaitable, Set
 from config import Config
 try:
     from pyrogram.errors import FloodWait, MessageNotModified
 except ImportError:
     FloodWait = type("FloodWait", (Exception,), {})
     MessageNotModified = type("MessageNotModified", (Exception,), {})
-
-# ==================== 1. SMALLCAPS STYLISH FONT & EMOJIS ====================
 
 SMALLCAPS_MAP = {
     'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ',
@@ -37,13 +37,13 @@ SMALLCAPS_MAP = {
 }
 
 ALPHA_SMALLCAPS_MAP = {k: v for k, v in SMALLCAPS_MAP.items() if k.isalpha()}
+_SMALLCAPS_SPLIT_RE = re.compile(r'(<[^>]+>|https?://\S+|@\w+|/[a-zA-Z0-9_]+|\{[a-zA-Z0-9_:.]*\})')
 
-def to_smallcaps(text: str, convert_digits: bool = False) -> str:
-    """Converts text into clean smallcap stylish font while preserving URLs, HTML tags, @mentions, and /commands."""
-    if not text:
-        return ""
+
+@functools.lru_cache(maxsize=8192)
+def _cached_smallcaps(text: str, convert_digits: bool = False) -> str:
     cmap = SMALLCAPS_MAP if convert_digits else ALPHA_SMALLCAPS_MAP
-    tokens = re.split(r'(<[^>]+>|https?://\S+|@\w+|/[a-zA-Z0-9_]+|\{[a-zA-Z0-9_:.]*\})', str(text))
+    tokens = _SMALLCAPS_SPLIT_RE.split(text)
     out = []
     for idx, tok in enumerate(tokens):
         if idx % 2 == 1:
@@ -52,10 +52,30 @@ def to_smallcaps(text: str, convert_digits: bool = False) -> str:
             out.append("".join(cmap.get(c, c) for c in tok))
     return "".join(out)
 
+
+def to_smallcaps(text: str, convert_digits: bool = False) -> str:
+    """Converts text into clean smallcap stylish font while preserving URLs, HTML tags, @mentions, and /commands."""
+    if not text:
+        return ""
+    s = str(text)
+    if len(s) <= 512:
+        return _cached_smallcaps(s, bool(convert_digits))
+    cmap = SMALLCAPS_MAP if convert_digits else ALPHA_SMALLCAPS_MAP
+    tokens = _SMALLCAPS_SPLIT_RE.split(s)
+    out = []
+    for idx, tok in enumerate(tokens):
+        if idx % 2 == 1:
+            out.append(tok)
+        else:
+            out.append("".join(cmap.get(c, c) for c in tok))
+    return "".join(out)
+
+
 sc = to_smallcaps
 to_small_caps = to_smallcaps
 to_smallcap = to_smallcaps
 stylish = to_smallcaps
+
 
 def style_text(header: str, items: dict = None) -> str:
     out = f"✦ **{to_smallcaps(header)}** ✦\n\n"
@@ -66,14 +86,14 @@ def style_text(header: str, items: dict = None) -> str:
     out += f"⚡ **{to_smallcaps('powered by')}** : [{Config.WATERMARK}]({Config.WATERMARK_URL})"
     return out
 
+
 def format_watermark() -> str:
     return f"\n\n📢 **{to_smallcaps('join')}** : [{Config.WATERMARK}]({Config.WATERMARK_URL})"
+
 
 def format_watermark_html() -> str:
     return f"\n\n📢 <b>{to_smallcaps('join')}:</b> <a href='{Config.WATERMARK_URL}'>{Config.WATERMARK}</a>"
 
-
-# ==================== 2. DETAILED UNIFIED LOGGER ====================
 
 LOG_FILE_PATH = "TelegramBot.txt"
 MEMORY_LOGS: List[str] = []
@@ -83,6 +103,7 @@ _SECRET_PATTERNS = [
     re.compile(r"\b\d{8,12}:[A-Za-z0-9_-]{30,50}\b"),
     re.compile(r"(?i)(token|secret|password)\s*[=:]\s*[^\s,;\"']+"),
 ]
+
 
 def redact_secrets(text: str) -> str:
     if not text:
@@ -94,6 +115,7 @@ def redact_secrets(text: str) -> str:
     for pat in _SECRET_PATTERNS:
         cleaned = pat.sub("[REDACTED]", cleaned)
     return cleaned
+
 
 class RedactSecretsFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
@@ -107,6 +129,7 @@ class RedactSecretsFilter(logging.Filter):
             pass
         return True
 
+
 FLOODWAIT_STATS: Dict[str, Any] = {
     "total_events": 0,
     "total_slept_seconds": 0,
@@ -118,6 +141,7 @@ FLOODWAIT_STATS: Dict[str, Any] = {
     "scheduled_resumed_edits": 0,
 }
 
+
 class MemoryLogHandler(logging.Handler):
     def emit(self, record):
         try:
@@ -127,6 +151,7 @@ class MemoryLogHandler(logging.Handler):
                 del MEMORY_LOGS[: len(MEMORY_LOGS) - 2000]
         except Exception:
             pass
+
 
 def setup_logger(name: str = "MMW_PRO") -> logging.Logger:
     root_logger = logging.getLogger()
@@ -175,10 +200,9 @@ def setup_logger(name: str = "MMW_PRO") -> logging.Logger:
 
     return logging.getLogger(name)
 
+
 logger = setup_logger()
 
-
-# ==================== 2B. CENTRALIZED TELEGRAM API RATE-LIMIT MANAGER ====================
 
 def _flood_wait_seconds(error: Exception) -> int:
     """Extract exact server-provided wait duration from Pyrogram FloodWait exceptions."""
@@ -301,7 +325,6 @@ class TelegramRateLimitManager:
                 FLOODWAIT_STATS["coalesced_progress_edits"] += 1
                 return False
 
-        # Wait out any active client-wide or chat-specific FloodWait cooldown
         while True:
             rem = self.active_cooldown_seconds(chat_id)
             if rem <= 0:
@@ -311,31 +334,27 @@ class TelegramRateLimitManager:
                 return False
             await asyncio.sleep(min(rem + 0.1, 5.0))
 
-        # Per-chat pacing
         if chat_id:
             async with self._chat_locks[int(chat_id)]:
                 now_m = time.monotonic()
                 if is_edit:
-                    min_chat_gap = getattr(Config, "PER_CHAT_EDIT_INTERVAL_SEC", 1.2)
-                    # Only enforce strict gap for consecutive edits in the same chat
+                    min_chat_gap = getattr(Config, "PER_CHAT_EDIT_INTERVAL_SEC", 1.8)
                     elapsed = now_m - self._chat_last_edit_ts.get(int(chat_id), 0.0)
                     if elapsed < min_chat_gap:
                         if is_optional_progress:
                             FLOODWAIT_STATS["coalesced_progress_edits"] += 1
                             return False
+                    self._chat_last_edit_ts[int(chat_id)] = time.monotonic()
                 else:
-                    min_chat_gap = 1.0 / max(1.0, float(getattr(Config, "PER_CHAT_RPC_RATE_PER_SEC", 2.5)))
+                    min_chat_gap = 1.0 / max(1.0, float(getattr(Config, "PER_CHAT_RPC_RATE_PER_SEC", 4.0)))
                     elapsed = now_m - self._chat_last_write_ts.get(int(chat_id), 0.0)
                     if elapsed < min_chat_gap:
                         await asyncio.sleep(min_chat_gap - elapsed)
-                self._chat_last_write_ts[int(chat_id)] = time.monotonic()
-                if is_edit:
-                    self._chat_last_edit_ts[int(chat_id)] = time.monotonic()
+                    self._chat_last_write_ts[int(chat_id)] = time.monotonic()
 
-        # Global outbound pacer
         async with self._global_lock:
             now_m = time.monotonic()
-            global_gap = 1.0 / max(5.0, float(getattr(Config, "GLOBAL_RPC_RATE_PER_SEC", 24.0)))
+            global_gap = 1.0 / max(5.0, float(getattr(Config, "GLOBAL_RPC_RATE_PER_SEC", 28.0)))
             gap = global_gap - (now_m - self._last_global_write_ts)
             if gap > 0:
                 await asyncio.sleep(gap)
@@ -358,11 +377,18 @@ class TelegramRateLimitManager:
             key = (int(chat_id), int(msg_id))
             self._msg_last_sig[key] = sig
             self._msg_last_edit_ts[key] = time.monotonic()
-            # Keep signature cache bounded
             if len(self._msg_last_sig) > 4000:
                 oldest = next(iter(self._msg_last_sig))
                 self._msg_last_sig.pop(oldest, None)
                 self._msg_last_edit_ts.pop(oldest, None)
+
+    def clear_message_tracking(self, chat_id: int, msg_id: int) -> None:
+        if chat_id and msg_id:
+            key = (int(chat_id), int(msg_id))
+            self._msg_last_sig.pop(key, None)
+            self._msg_last_edit_ts.pop(key, None)
+            self._msg_pending_edit.pop(key, None)
+            self._msg_locks.pop(key, None)
 
     def get_stats(self) -> Dict[str, Any]:
         return {
@@ -411,6 +437,288 @@ async def pro_floodwait_sleep(wait_s: int, context_label: str = "TelegramRPC", c
         step = min(remaining, 10.0)
         await asyncio.sleep(step)
         remaining -= step
+
+
+_RESPONSE_CTX_CACHE: contextvars.ContextVar[Optional[Dict[str, Any]]] = contextvars.ContextVar(
+    "_RESPONSE_CTX_CACHE", default=None
+)
+_PERSISTENT_KEY_PREFIXES = (
+    "waiting_",
+    "rename_name_",
+    "custcomp_cfg_",
+    "comp_target_",
+    "sess_step_",
+    "last_media_",
+    "user_",
+    "chat_",
+    "file_",
+    "task_",
+    "media_fid_",
+    "banned_",
+    "tg_msg_",
+    "chunk_",
+    "stats_",
+    "web_home_stats",
+)
+_TRANSIENT_KEY_PREFIXES = (
+    "resp_",
+    "tmp_",
+    "cmd_",
+    "cb_",
+    "fn_",
+    "probe_",
+    "ffstatus_",
+)
+
+
+class FastMemoryCache:
+    """
+    High-performance multi-layer O(1) LRU + TTL + Per-Response Context Caching Engine.
+    - L0 Context Cache: Zero-lock per-command / per-callback / per-function memoization that
+      automatically clears immediately after each message/callback response completes.
+    - L1 LRU+TTL RAM Cache: High-hit-ratio shared cache for user settings, chat configs, stream tokens,
+      and active multi-step workflow states.
+    """
+    def __init__(self, default_ttl: Optional[int] = None, max_entries: Optional[int] = None):
+        self._cache: OrderedDict[str, Any] = OrderedDict()
+        self._expires: Dict[str, float] = {}
+        self._transient_keys: Set[str] = set()
+        self._default_ttl = default_ttl if default_ttl is not None else getattr(Config, "CACHE_TTL", 900)
+        self._max_entries = max_entries if max_entries is not None else getattr(Config, "CACHE_MAX_ENTRIES", 12000)
+        self._lock = asyncio.Lock()
+        self._hits = 0
+        self._misses = 0
+        self._auto_clears = 0
+        self._response_scopes_cleared = 0
+
+    @asynccontextmanager
+    async def response_scope(self, scope_name: str = "handler"):
+        """Context manager that opens an isolated L0 cache for a command/callback/function and auto-clears on exit."""
+        ctx_dict: Dict[str, Any] = {}
+        token = _RESPONSE_CTX_CACHE.set(ctx_dict)
+        try:
+            yield ctx_dict
+        finally:
+            ctx_dict.clear()
+            _RESPONSE_CTX_CACHE.reset(token)
+            self._response_scopes_cleared += 1
+            self.auto_clear_after_response_sync()
+
+    def get_sync(self, key: str) -> Optional[Any]:
+        ctx = _RESPONSE_CTX_CACHE.get()
+        if ctx is not None and key in ctx:
+            self._hits += 1
+            return ctx[key]
+        if key not in self._cache:
+            return None
+        curr_now = float(time.time())
+        if curr_now > self._expires.get(key, 0.0):
+            self._cache.pop(key, None)
+            self._expires.pop(key, None)
+            self._transient_keys.discard(key)
+            return None
+        self._hits += 1
+        return self._cache[key]
+
+    async def get(self, key: str) -> Optional[Any]:
+        ctx = _RESPONSE_CTX_CACHE.get()
+        if ctx is not None and key in ctx:
+            self._hits += 1
+            return ctx[key]
+        async with self._lock:
+            if key not in self._cache:
+                self._misses += 1
+                return None
+            curr_now = float(time.time())
+            if curr_now > self._expires.get(key, 0):
+                self._cache.pop(key, None)
+                self._expires.pop(key, None)
+                self._transient_keys.discard(key)
+                self._misses += 1
+                return None
+            self._cache.move_to_end(key)
+            self._hits += 1
+            val = self._cache[key]
+            if ctx is not None:
+                ctx[key] = val
+            return val
+
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None, transient: bool = False):
+        ctx = _RESPONSE_CTX_CACHE.get()
+        if ctx is not None:
+            ctx[key] = value
+        async with self._lock:
+            curr_now = float(time.time())
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            elif len(self._cache) >= self._max_entries:
+                expired_keys = [k for k, exp in list(self._expires.items()) if curr_now > exp]
+                for k in expired_keys:
+                    self._cache.pop(k, None)
+                    self._expires.pop(k, None)
+                    self._transient_keys.discard(k)
+                if len(self._cache) >= self._max_entries:
+                    oldest_key, _ = self._cache.popitem(last=False)
+                    self._expires.pop(oldest_key, None)
+                    self._transient_keys.discard(oldest_key)
+
+            self._cache[key] = value
+            effective_ttl = ttl if ttl is not None else self._default_ttl
+            self._expires[key] = curr_now + float(effective_ttl)
+            if transient or key.startswith(_TRANSIENT_KEY_PREFIXES):
+                self._transient_keys.add(key)
+
+    async def get_or_compute(
+        self,
+        key: str,
+        compute_fn: Callable[[], Any],
+        ttl: Optional[int] = 120,
+        transient: bool = True,
+    ) -> Any:
+        """Fetch from L0/L1 cache or compute once and store (supports both async and sync callables)."""
+        val = await self.get(key)
+        if val is not None:
+            return val
+        res = compute_fn()
+        if inspect.isawaitable(res):
+            res = await res
+        if res is not None:
+            await self.set(key, res, ttl=ttl, transient=transient)
+        return res
+
+    async def delete(self, key: str) -> bool:
+        ctx = _RESPONSE_CTX_CACHE.get()
+        if ctx is not None:
+            ctx.pop(key, None)
+        async with self._lock:
+            existed = key in self._cache
+            self._cache.pop(key, None)
+            self._expires.pop(key, None)
+            self._transient_keys.discard(key)
+            return existed
+
+    def auto_clear_after_response_sync(self, preserve_workflows: bool = True) -> int:
+        """
+        Fast non-blocking post-response cache sweep executed automatically after every command,
+        callback, or message response. Purges L0 context cache, transient keys, and expired entries
+        while preserving active workflow states.
+        """
+        ctx = _RESPONSE_CTX_CACHE.get()
+        removed = 0
+        if ctx is not None:
+            removed += len(ctx)
+            ctx.clear()
+
+        curr_now = float(time.time())
+        for k in list(self._transient_keys):
+            if preserve_workflows and k.startswith(_PERSISTENT_KEY_PREFIXES):
+                continue
+            self._transient_keys.discard(k)
+            if self._cache.pop(k, None) is not None:
+                removed += 1
+            self._expires.pop(k, None)
+
+        if len(self._expires) > 0:
+            for k, exp in list(self._expires.items()):
+                if curr_now > exp:
+                    self._cache.pop(k, None)
+                    self._expires.pop(k, None)
+                    self._transient_keys.discard(k)
+                    removed += 1
+
+        if len(_PROGRESS_THROTTLE) > 64:
+            for pk, ts in list(_PROGRESS_THROTTLE.items()):
+                if (curr_now - ts) > 120.0:
+                    _PROGRESS_THROTTLE.pop(pk, None)
+                    _PROGRESS_STEP.pop(pk, None)
+
+        self._auto_clears += 1
+        return removed
+
+    async def auto_clear_after_response(self, preserve_workflows: bool = True) -> int:
+        async with self._lock:
+            return self.auto_clear_after_response_sync(preserve_workflows=preserve_workflows)
+
+    def cached_function(self, ttl: int = 60, transient: bool = True):
+        """Decorator for caching async or sync functions with automatic post-response cleanup."""
+        def decorator(func: Callable):
+            if asyncio.iscoroutinefunction(func):
+                @functools.wraps(func)
+                async def async_wrapper(*args, **kwargs):
+                    try:
+                        key_raw = f"fn_{func.__module__}.{func.__qualname__}:{args}:{ sorted(kwargs.items()) }"
+                        key = f"fn_{hashlib.md5(key_raw.encode('utf-8', errors='ignore')).hexdigest()}"
+                    except Exception:
+                        return await func(*args, **kwargs)
+                    cached_val = await self.get(key)
+                    if cached_val is not None:
+                        return cached_val
+                    res = await func(*args, **kwargs)
+                    if res is not None:
+                        await self.set(key, res, ttl=ttl, transient=transient)
+                    return res
+                return async_wrapper
+            else:
+                @functools.wraps(func)
+                def sync_wrapper(*args, **kwargs):
+                    try:
+                        key_raw = f"fn_{func.__module__}.{func.__qualname__}:{args}:{ sorted(kwargs.items()) }"
+                        key = f"fn_{hashlib.md5(key_raw.encode('utf-8', errors='ignore')).hexdigest()}"
+                    except Exception:
+                        return func(*args, **kwargs)
+                    cached_val = self.get_sync(key)
+                    if cached_val is not None:
+                        return cached_val
+                    res = func(*args, **kwargs)
+                    ctx = _RESPONSE_CTX_CACHE.get()
+                    if ctx is not None and res is not None:
+                        ctx[key] = res
+                    return res
+                return sync_wrapper
+        return decorator
+
+    def cached_command(self, func: Callable):
+        """Wrap a Pyrogram command handler in an isolated L0 response cache scope that auto-clears after response."""
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            async with self.response_scope(f"cmd:{func.__name__}"):
+                return await func(*args, **kwargs)
+        return wrapper
+
+    def cached_callback(self, func: Callable):
+        """Wrap a Pyrogram callback handler in an isolated L0 response cache scope that auto-clears after response."""
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            async with self.response_scope(f"cb:{func.__name__}"):
+                return await func(*args, **kwargs)
+        return wrapper
+
+    async def clear(self):
+        ctx = _RESPONSE_CTX_CACHE.get()
+        if ctx is not None:
+            ctx.clear()
+        async with self._lock:
+            self._cache.clear()
+            self._expires.clear()
+            self._transient_keys.clear()
+
+    async def get_stats(self) -> Dict[str, Any]:
+        async with self._lock:
+            total_requests = self._hits + self._misses
+            hit_ratio = (self._hits / total_requests * 100) if total_requests > 0 else 100.0
+            return {
+                "cached_keys": len(self._cache),
+                "transient_keys": len(self._transient_keys),
+                "max_entries": self._max_entries,
+                "hits": self._hits,
+                "misses": self._misses,
+                "hit_ratio_percent": round(hit_ratio, 2),
+                "auto_clears": self._auto_clears,
+                "response_scopes_cleared": self._response_scopes_cleared,
+            }
+
+
+cache = FastMemoryCache()
 
 
 async def execute_with_floodwait(
@@ -472,7 +780,7 @@ async def safe_edit_text(message: Any, text: str, **kwargs: Any) -> Any:
     - Avoids editing unchanged messages (content + reply_markup signature check).
     - Prevents duplicate concurrent edits on the same message via per-message lock & coalescing.
     - Gracefully skips optional intermediate progress edits during FloodWait cooldowns or high load.
-    - Automatically resumes pending essential updates when Telegram cooldowns expire.
+    - Automatically clears transient per-response cache when a non-progress response completes.
     """
     global _TELEGRAM_WRITE_BLOCK_UNTIL, _PROGRESS_EDIT_BLOCK_UNTIL
     if message is None:
@@ -482,12 +790,11 @@ async def safe_edit_text(message: Any, text: str, **kwargs: Any) -> Any:
     reply_markup = kwargs.get("reply_markup")
     sig = _compute_edit_signature(text, reply_markup)
 
-    # 1. Fast deduplication: skip if message already has identical text and buttons
     if rate_limit_manager.check_and_record_signature(chat_id, msg_id, sig):
         return message
 
     now = time.time()
-    is_progress = ("▰" in str(text) or "▱" in str(text)) and reply_markup is None
+    is_progress = ("▰" in str(text) or "▱" in str(text))
     is_final_progress = is_progress and ("100.0%" in str(text) or "100%" in str(text))
     is_optional_progress = is_progress and not is_final_progress
 
@@ -495,12 +802,11 @@ async def safe_edit_text(message: Any, text: str, **kwargs: Any) -> Any:
         if now < _PROGRESS_EDIT_BLOCK_UNTIL or rate_limit_manager.is_in_cooldown(chat_id):
             FLOODWAIT_STATS["coalesced_progress_edits"] += 1
             return message
-        # Dynamic per-message progress throttle scaled by active concurrent tasks
         last_edit_m = rate_limit_manager._msg_last_edit_ts.get((chat_id, msg_id), 0.0)
         active_tasks = max(1, task_manager.active_count)
         min_edit_gap = max(
-            float(getattr(Config, "PROGRESS_EDIT_MIN_INTERVAL_SEC", 3.5)),
-            min(15.0, 2.0 * active_tasks),
+            float(getattr(Config, "PROGRESS_EDIT_MIN_INTERVAL_SEC", 3.0)),
+            min(12.0, 1.8 * active_tasks),
         )
         if (time.monotonic() - last_edit_m) < min_edit_gap:
             FLOODWAIT_STATS["coalesced_progress_edits"] += 1
@@ -509,16 +815,13 @@ async def safe_edit_text(message: Any, text: str, **kwargs: Any) -> Any:
     msg_key = (chat_id, msg_id)
     msg_lock = rate_limit_manager._msg_locks[msg_key]
 
-    # If another coroutine is already editing this exact message:
     if msg_lock.locked():
         if is_optional_progress:
             FLOODWAIT_STATS["coalesced_progress_edits"] += 1
             return message
-        # Coalesce essential update so the latest state wins without stacking N redundant edits
         rate_limit_manager._msg_pending_edit[msg_key] = {"text": text, "kwargs": dict(kwargs), "sig": sig}
 
     async with msg_lock:
-        # Check if a newer essential edit superseded us while waiting for msg_lock
         pending = rate_limit_manager._msg_pending_edit.pop(msg_key, None)
         if pending is not None:
             text = pending["text"]
@@ -553,10 +856,14 @@ async def safe_edit_text(message: Any, text: str, **kwargs: Any) -> Any:
                         if sent:
                             s_chat, s_id = _extract_msg_identity(sent)
                             rate_limit_manager.commit_signature(s_chat, s_id, sig)
+                        if not is_optional_progress:
+                            cache.auto_clear_after_response_sync()
                         return sent
                 edited = await message.edit_text(text=text, **kwargs)
                 rate_limit_manager.record_rpc_success()
                 rate_limit_manager.commit_signature(chat_id, msg_id, sig)
+                if not is_optional_progress:
+                    cache.auto_clear_after_response_sync()
                 return edited or message
             except FloodWait as error:
                 wait_for = _flood_wait_seconds(error)
@@ -564,7 +871,6 @@ async def safe_edit_text(message: Any, text: str, **kwargs: Any) -> Any:
                 await rate_limit_manager.notify_floodwait("safe_edit_text", wait_for, chat_id=chat_id)
                 if is_optional_progress:
                     record_floodwait_event("safe_edit_progress_skip", wait_for)
-                    logger.warning(f"🌊 ᴘʀᴏɢʀᴇss ᴇᴅɪᴛ ғʟᴏᴏᴅᴡᴀɪᴛ ({wait_for}s) › deferring intermediate bar edit")
                     return message
                 if attempt >= 3:
                     return message
@@ -582,7 +888,7 @@ async def safe_edit_text(message: Any, text: str, **kwargs: Any) -> Any:
 
 
 async def safe_reply_text(target: Any, text: str, **kwargs: Any) -> Any:
-    """Reliable reply creation with centralized rate-limit pacing, FloodWait retry, and send_message fallback."""
+    """Reliable reply creation with centralized rate-limit pacing, FloodWait retry, and auto post-response cache clear."""
     global _TELEGRAM_WRITE_BLOCK_UNTIL
     if target is None:
         return None
@@ -595,6 +901,7 @@ async def safe_reply_text(target: Any, text: str, **kwargs: Any) -> Any:
             if sent:
                 s_chat, s_id = _extract_msg_identity(sent)
                 rate_limit_manager.commit_signature(s_chat, s_id, _compute_edit_signature(text, kwargs.get("reply_markup")))
+            cache.auto_clear_after_response_sync()
             return sent
         except FloodWait as error:
             wait_for = _flood_wait_seconds(error)
@@ -620,7 +927,7 @@ async def safe_reply_text(target: Any, text: str, **kwargs: Any) -> Any:
 
 
 async def safe_send_message(client: Any, **kwargs: Any) -> Any:
-    """Reliable message send with centralized rate-limit pacing and FloodWait retry."""
+    """Reliable message send with centralized rate-limit pacing, FloodWait retry, and auto post-response cache clear."""
     global _TELEGRAM_WRITE_BLOCK_UNTIL
     chat_id = int(kwargs.get("chat_id", 0) or 0)
     for attempt in range(4):
@@ -628,6 +935,7 @@ async def safe_send_message(client: Any, **kwargs: Any) -> Any:
             await rate_limit_manager.wait_for_write_slot(rpc_name="SendMessage", chat_id=chat_id)
             sent = await client.send_message(**kwargs)
             rate_limit_manager.record_rpc_success()
+            cache.auto_clear_after_response_sync()
             return sent
         except FloodWait as error:
             wait_for = _flood_wait_seconds(error)
@@ -660,7 +968,7 @@ async def safe_forward_message(message: Any, chat_id: Any) -> Any:
             if wait_for <= 60 and attempt < 2:
                 await pro_floodwait_sleep(wait_for, "safe_forward_message", chat_id=target_cid)
                 continue
-            logger.warning(f"🌊 ᴛᴇʟᴇɢʀᴀᴍ ғᴏʀᴡᴀʀᴅ ᴄᴏᴏʟᴅᴏᴡɴ ᴀᴄᴛɪᴠᴇ ғᴏʀ {wait_for}s; ɪɴᴅᴇxɪɴɢ ᴏʀɪɢɪɴᴀʟ ᴍsɢ")
+            logger.warning(f"🌊 ᴛᴇʟᴇɢʀᴀᴍ ғᴏʀᴡᴀʀᴅ ᴄᴏᴏʟᴅᴏᴡᴡɴ ᴀᴄᴛɪᴠᴇ ғᴏʀ {wait_for}s; ɪɴᴅᴇxɪɴɢ ᴏʀɪɢɪɴᴀʟ ᴍsɢ")
             return message
         except asyncio.CancelledError:
             raise
@@ -695,96 +1003,22 @@ async def safe_delete_messages(client: Any, chat_id: Any, message_ids: Any) -> b
     return False
 
 
-# ==================== 3. ULTRA-FAST O(1) LRU TTL CACHE ====================
-
-class FastMemoryCache:
-    """
-    High-performance bounded O(1) LRU + TTL in-memory caching engine.
-    Eliminates duplicate DB roundtrips for user settings, chat configs, stream tokens, and file lookups.
-    """
-    def __init__(self, default_ttl: Optional[int] = None, max_entries: Optional[int] = None):
-        self._cache: OrderedDict[str, Any] = OrderedDict()
-        self._expires: Dict[str, float] = {}
-        self._default_ttl = default_ttl if default_ttl is not None else getattr(Config, "CACHE_TTL", 900)
-        self._max_entries = max_entries if max_entries is not None else getattr(Config, "CACHE_MAX_ENTRIES", 5000)
-        self._lock = asyncio.Lock()
-        self._hits = 0
-        self._misses = 0
-
-    async def get(self, key: str) -> Optional[Any]:
-        async with self._lock:
-            if key not in self._cache:
-                self._misses += 1
-                return None
-            curr_now = float(time.time())
-            if curr_now > self._expires.get(key, 0):
-                self._cache.pop(key, None)
-                self._expires.pop(key, None)
-                self._misses += 1
-                return None
-            self._cache.move_to_end(key)
-            self._hits += 1
-            return self._cache[key]
-
-    async def set(self, key: str, value: Any, ttl: Optional[int] = None):
-        async with self._lock:
-            curr_now = float(time.time())
-            if key in self._cache:
-                self._cache.move_to_end(key)
-            elif len(self._cache) >= self._max_entries:
-                expired_keys = [k for k, exp in list(self._expires.items()) if curr_now > exp]
-                for k in expired_keys:
-                    self._cache.pop(k, None)
-                    self._expires.pop(k, None)
-                if len(self._cache) >= self._max_entries:
-                    oldest_key, _ = self._cache.popitem(last=False)
-                    self._expires.pop(oldest_key, None)
-
-            self._cache[key] = value
-            effective_ttl = ttl if ttl is not None else self._default_ttl
-            self._expires[key] = curr_now + float(effective_ttl)
-
-    async def delete(self, key: str) -> bool:
-        async with self._lock:
-            existed = key in self._cache
-            self._cache.pop(key, None)
-            self._expires.pop(key, None)
-            return existed
-
-    async def clear(self):
-        async with self._lock:
-            self._cache.clear()
-            self._expires.clear()
-
-    async def get_stats(self) -> Dict[str, Any]:
-        async with self._lock:
-            total_requests = self._hits + self._misses
-            hit_ratio = (self._hits / total_requests * 100) if total_requests > 0 else 100.0
-            return {
-                "cached_keys": len(self._cache),
-                "max_entries": self._max_entries,
-                "hits": self._hits,
-                "misses": self._misses,
-                "hit_ratio_percent": round(hit_ratio, 2)
-            }
-
-cache = FastMemoryCache()
-
-
-# ==================== 4. HELPERS & AUTH ====================
-
 DEVIL_MODE_ACTIVE: bool = False
+
 
 def is_devil_mode_active() -> bool:
     return DEVIL_MODE_ACTIVE
+
 
 def set_devil_mode(state: bool) -> bool:
     global DEVIL_MODE_ACTIVE
     DEVIL_MODE_ACTIVE = bool(state)
     return DEVIL_MODE_ACTIVE
 
+
 def get_current_timestamp() -> float:
     return float(time.time())
+
 
 async def is_admin(*args, **kwargs) -> bool:
     user_id = kwargs.get("user_id")
@@ -796,6 +1030,7 @@ async def is_admin(*args, **kwargs) -> bool:
         return int(user_id) in Config.ADMINS
     except (ValueError, TypeError):
         return False
+
 
 async def check_admin(client: Any, message: Any) -> bool:
     user_id = message.from_user.id if message.from_user else 0
@@ -809,6 +1044,7 @@ async def check_admin(client: Any, message: Any) -> bool:
         return False
     return True
 
+
 def humanbytes(size: Optional[int]) -> str:
     if not size or size <= 0:
         return "0 B"
@@ -818,6 +1054,7 @@ def humanbytes(size: Optional[int]) -> str:
             break
         num_size /= 1024.0
     return f"{num_size:.2f} {unit}"
+
 
 def time_formatter(milliseconds: int = 0, seconds: Optional[int] = None) -> str:
     if seconds is not None:
@@ -843,6 +1080,7 @@ def time_formatter(milliseconds: int = 0, seconds: Optional[int] = None) -> str:
     res += f"{secs}s"
     return res.strip() or "0s"
 
+
 def is_valid_url(url: str) -> bool:
     try:
         result = urlparse(url)
@@ -850,13 +1088,15 @@ def is_valid_url(url: str) -> bool:
     except Exception:
         return False
 
+
 def sanitize_filename(name: str) -> str:
     if not name:
         return "file.mp4"
-    name = os.path.basename(name)
+    name = os.path.basename(str(name))
     cleaned = re.sub(r'[\\/*?:"<>|\x00-\x1f\x7f]', "_", str(name))
     cleaned = cleaned.strip(". ")
     return cleaned or "file.mp4"
+
 
 def clean_temp_files(*files):
     for f in files:
@@ -875,10 +1115,10 @@ def clean_temp_files(*files):
                 pass
 
 
-# ==================== 5. PYROGRAM PROGRESS (DYNAMIC MULTI-WORKER THROTTLING) ====================
-
 _PROGRESS_THROTTLE: Dict[Tuple[int, int, str], float] = {}
 _PROGRESS_STEP: Dict[Tuple[int, int, str], int] = {}
+_ACTIVE_PROGRESS_TASKS: Dict[Tuple[int, int], asyncio.Task] = {}
+
 
 async def progress_for_pyrogram(
     current: int,
@@ -891,6 +1131,11 @@ async def progress_for_pyrogram(
         return
     chat_id, msg_id = _extract_msg_identity(message)
     if rate_limit_manager.is_in_cooldown(chat_id):
+        return
+
+    msg_pair = (chat_id, msg_id)
+    prev_task = _ACTIVE_PROGRESS_TASKS.get(msg_pair)
+    if prev_task is not None and not prev_task.done():
         return
 
     now_ts = get_current_timestamp()
@@ -916,8 +1161,8 @@ async def progress_for_pyrogram(
     last_step = _PROGRESS_STEP.get(msg_key, -step_granularity)
 
     min_time_gap = max(
-        float(getattr(Config, "PROGRESS_EDIT_MIN_INTERVAL_SEC", 3.5)),
-        min(18.0, 2.2 * active_jobs),
+        float(getattr(Config, "PROGRESS_EDIT_MIN_INTERVAL_SEC", 3.0)),
+        min(15.0, 2.0 * active_jobs),
     )
 
     if not is_done:
@@ -954,13 +1199,18 @@ async def progress_for_pyrogram(
         f"⏳ **{to_smallcaps('eta')}** : `{time_formatter(milliseconds=time_to_completion)}`"
         f"{format_watermark()}"
     )
-    try:
-        await safe_edit_text(message, tmp)
-    except Exception:
-        pass
 
+    async def _do_edit():
+        try:
+            await safe_edit_text(message, tmp)
+        except Exception:
+            pass
+        finally:
+            if _ACTIVE_PROGRESS_TASKS.get(msg_pair) is asyncio.current_task():
+                _ACTIVE_PROGRESS_TASKS.pop(msg_pair, None)
 
-# ==================== 6. PERSISTENT FAULT-TOLERANT TASK MANAGER ====================
+    _ACTIVE_PROGRESS_TASKS[msg_pair] = asyncio.create_task(_do_edit())
+
 
 class MediaTask:
     def __init__(
@@ -1141,7 +1391,6 @@ class TaskManager:
 
 task_manager = TaskManager()
 
-# Unlimited concurrent task admission + high-throughput parallel FFmpeg worker pool
 _max_cfg = int(getattr(Config, "MAX_CONCURRENT_TASKS", 0) or 0)
 _ffmpeg_pool = int(getattr(Config, "FFMPEG_PARALLEL_JOBS", 32) or 32)
 MEDIA_JOB_SEMAPHORE = asyncio.Semaphore(_max_cfg if _max_cfg > 0 else max(64, _ffmpeg_pool))
@@ -1149,29 +1398,14 @@ MEDIA_JOB_SEMAPHORE = asyncio.Semaphore(_max_cfg if _max_cfg > 0 else max(64, _f
 
 def bounded_media_job(func):
     """
-    Supports unlimited concurrent queued/active tasks with automatic task registration,
-    while pacing heavy local FFmpeg/disk operations and preserving async cancellation.
+    Supports unlimited concurrent queued/active tasks while pacing heavy local FFmpeg/disk
+    operations and automatically clearing transient response cache upon completion.
     """
     @functools.wraps(func)
     async def wrapped(*args, **kwargs):
-        user_id = kwargs.get("user_id")
-        if user_id is None:
-            try:
-                user_id = inspect.signature(func).bind_partial(*args, **kwargs).arguments.get("user_id")
-            except (TypeError, ValueError):
-                user_id = None
-        task_id = kwargs.get("task_id")
-        registered_local = False
-        if user_id is not None and not task_id:
-            task_id = task_manager.generate_task_id(int(user_id), prefix=func.__name__[:8])
-            await task_manager.register_task(
-                task_id, int(user_id), func.__name__, "", asyncio.current_task()
-            )
-            registered_local = True
         try:
             async with MEDIA_JOB_SEMAPHORE:
                 return await func(*args, **kwargs)
         finally:
-            if registered_local and task_id:
-                await task_manager.cleanup_task(task_id, preserve_workspace=True)
+            cache.auto_clear_after_response_sync()
     return wrapped

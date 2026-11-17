@@ -461,7 +461,6 @@ async def handle_logs_cmds(client: Client, message: Message):
         message.stop_propagation()
         return
 
-    # Determine mode/lines/search from command & args
     mode = "all"
     lines_count = 65
     search_q = ""

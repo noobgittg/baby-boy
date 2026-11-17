@@ -18,8 +18,6 @@ logger = logging.getLogger("GokuAfkExtras")
 _ACTIVE_TAGALL_CHATS: Set[int] = set()
 
 
-# ─── 1. AFK Status System (/afk) ──────────────────────────────────────────────
-
 @Client.on_message(filters.command("afk", prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def set_afk_cmd(client: Client, message: Message):
     """Set user status as AFK (Away From Keyboard) with an optional reason."""
@@ -90,8 +88,6 @@ async def afk_watchdog(client: Client, message: Message):
                 except Exception:
                     pass
 
-
-# ─── 2. TagAll / MentionAll System (/tagall, /mentionall, /utag, /canceltag) ─
 
 @Client.on_message(filters.command(["tagall", "mentionall", "utag"], prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def tag_all_cmd(client: Client, message: Message):
@@ -176,8 +172,6 @@ async def cancel_tag_cmd(client: Client, message: Message):
     else:
         await message.reply_text("ℹ️ <b>ɴᴏ ᴀᴄᴛɪᴠᴇ ᴛᴀɢ-ᴀʟʟ sᴇssɪᴏɴ ɪɴ ᴛʜɪs ɢʀᴏᴜᴘ.</b>", quote=True, parse_mode=enums.ParseMode.HTML)
 
-
-# ─── 3. Zombie Cleaner, Bot Scanner & Poll Builder (/zombies, /bots, /poll) ──
 
 @Client.on_message(filters.command(["zombies", "clean_deleted", "autobannow"], prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def zombies_cleaner_cmd(client: Client, message: Message):

@@ -22,7 +22,6 @@ async def channel_media_listener(client: Client, message: Message):
     chat_doc = await chat_repo.get_or_create_chat(message.chat.id, message.chat.title or "Channel", "channel")
     ch_cfg = await db.get_channel_config(message.chat.id, title=message.chat.title or "Channel")
 
-    # 1. Auto-React on new channel media post if configured
     react_emoji = (ch_cfg.get("auto_react_emoji") or "").strip()
     if react_emoji:
         try:
@@ -38,7 +37,6 @@ async def channel_media_listener(client: Client, message: Message):
     _, ext = os.path.splitext(filename)
     ext = ext.replace(".", "")
 
-    # 2. Auto-Stream: Index channel media & attach Watch (4 Players) + Fast Download buttons if enabled
     stream_markup = None
     from utils import temp as _t
     if _t.BOT_CONFIG.get("auto_stream_global", True) and ch_cfg.get("auto_stream_enabled", False):
@@ -70,7 +68,6 @@ async def channel_media_listener(client: Client, message: Message):
         except Exception as e:
             logger.debug("⚠️ ᴄʜᴀɴɴᴇʟ ᴀᴜᴛᴏ-sᴛʀᴇᴀᴍ ᴡᴀʀɴ › %s", e)
 
-    # 3. Auto-Caption: Format caption using channel custom_caption or global format_caption
     from utils import temp as _t
     auto_cap_on = _t.BOT_CONFIG.get("auto_caption_global", True) and bool(chat_doc.get("auto_caption", True)) and bool(ch_cfg.get("auto_caption_enabled", True))
     curr_caption = message.caption or ""
@@ -109,7 +106,6 @@ async def channel_media_listener(client: Client, message: Message):
         except Exception:
             pass
 
-    # 4. Auto-Delete timer if configured on channel
     auto_del = int(ch_cfg.get("auto_delete_seconds", 0) or chat_doc.get("auto_delete_time", 0) or 0)
     if auto_del > 0:
         await schedule_deletion(message.chat.id, message.id, auto_del)

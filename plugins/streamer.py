@@ -141,8 +141,6 @@ async def generate_stream_response(client: Client, media_msg: Message, target_re
     await safe_edit_text(status, text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
 
 
-# ==================== GET FILE FEATURE ====================
-
 @Client.on_message(filters.private & filters.command(["getfile", "file"], prefixes=COMMAND_PREFIXES))
 async def get_file_command_handler(client: Client, message: Message):
     if len(message.command) < 2:
@@ -181,8 +179,6 @@ async def send_streamed_file_to_user(client: Client, chat_id: int, file_id: str,
         logger.error(f"Error copying media file for file_id {file_id}: {e}", exc_info=True)
         await reply_target.reply_text(f"❌ **{to_smallcaps('failed to send file')}** : `{e}`")
 
-
-# ==================== REVOKE / DELETE STREAM LINK FEATURE ====================
 
 async def revoke_stream_by_id(message: Message, file_id: str) -> bool:
     file_doc = await file_repo.get_file(file_id, include_revoked=True)

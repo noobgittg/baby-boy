@@ -255,8 +255,6 @@ async def search_command_handler(client: Client, message: Message):
     await safe_reply_text(message, text, reply_markup=InlineKeyboardMarkup(buttons), disable_web_page_preview=True)
 
 
-# ==================== PRIVATE USER CLOUD VAULT & PRESET/TASK DASHBOARD ====================
-
 async def render_user_vault_view(client: Client, target_msg: Message, user_id: int, page: int = 0, is_edit: bool = True):
     per_page = 5
     page = max(0, int(page))

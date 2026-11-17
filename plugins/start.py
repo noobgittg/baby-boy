@@ -101,7 +101,6 @@ async def command_start_family(client: Client, message: Message):
             parse_mode=enums.ParseMode.HTML,
         )
 
-    # Group registration & handling
     if message.chat.type in (enums.ChatType.GROUP, enums.ChatType.SUPERGROUP):
         if not await db.get_chat(message.chat.id):
             total = 0
@@ -152,7 +151,6 @@ async def command_start_family(client: Client, message: Message):
             disable_web_page_preview=True,
         )
 
-    # Register private user
     if user:
         is_new = not await db.is_user_exist(uid)
         await user_repo.get_or_create(uid, user.first_name, user.username)
@@ -193,7 +191,6 @@ async def command_start_family(client: Client, message: Message):
                 disable_web_page_preview=True,
             )
 
-    # Handle /start deep-link payloads
     if cmd == "start" and len(message.command) > 1:
         payload = message.command[1].strip()
         low_arg = payload.lower()

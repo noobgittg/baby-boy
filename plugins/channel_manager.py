@@ -339,8 +339,6 @@ async def build_channel_help_view(
     return text, nav_buttons
 
 
-# ─── Channel Commands ─────────────────────────────────────────────────────────
-
 @Client.on_message(filters.command(["channelhelp", "chhelp", "cpanel"], prefixes=COMMAND_PREFIXES))
 async def channel_help_cmd(client: Client, message: Message):
     """Open the interactive Pro Channel Manager & Helper panel."""
@@ -992,7 +990,6 @@ async def channel_auto_template_watchdog(client: Client, message: Message):
             if old_w in txt_or_cap:
                 txt_or_cap = txt_or_cap.replace(old_w, new_w)
 
-    # Auto-react for text posts (media posts react in channel.py)
     if not message.media:
         react_emoji = (cfg.get("auto_react_emoji") or "").strip()
         if react_emoji:

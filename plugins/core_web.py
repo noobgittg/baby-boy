@@ -25,14 +25,12 @@ from plugins.core_utils import logger, cache, humanbytes, time_formatter
 from plugins.core_db import user_repo, chat_repo, file_repo, FileRepository
 from plugins.media_types import media_kind, normalize_mime, browser_media_supported
 
-# ==================== 1. ULTRA-FAST ASYNC BYTESTREAMER ENGINE ====================
 
-CHUNK_SIZE = 1024 * 1024  # 1 MiB native Telegram MTProto chunk size
-FIRST_FRAME_SLICE = 256 * 1024  # 256 KiB micro-slices on first chunk for <150ms TTFB
+CHUNK_SIZE = 1024 * 1024
+FIRST_FRAME_SLICE = 256 * 1024
 PREFETCH_QUEUE_SIZE = max(16, int(getattr(Config, "STREAM_BUFFER_CHUNKS", 64)))
 LOCAL_READ_CHUNK = max(CHUNK_SIZE, int(getattr(Config, "STREAM_CHUNK_SIZE", 4 * 1024 * 1024)))
 
-# Per-file lock to prevent duplicate concurrent bot.get_messages calls when external players open 4-8 range sockets
 _MSG_RESOLVE_LOCKS: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
@@ -69,8 +67,6 @@ def compute_etag(file_id: str, file_size: int) -> str:
     return f"\"{digest}\""
 
 
-# External 4 Players configuration:
-# 1. PLAYit  2. MX Player  3. VLC  4. S Player
 FOUR_EXTERNAL_PLAYERS = [
     {"id": "playit", "name": "PLAYit", "badge": "Turbo Range"},
     {"id": "mxplayer", "name": "MX Player", "badge": "HW+ Decoder"},
@@ -188,7 +184,6 @@ async def iter_12mbps_file_stream(
     total_file_size = _safe_metadata_int(file_doc.get("file_size", 0))
     last_chunk_index = max(0, (total_file_size - 1) // CHUNK_SIZE) if total_file_size > 0 else -1
 
-    # Route A: Local disk file (zero-blocking async I/O)
     if file_path and os.path.exists(file_path):
         if aiofiles is not None:
             async with aiofiles.open(file_path, "rb") as f:
@@ -225,7 +220,6 @@ async def iter_12mbps_file_stream(
     last_part_cut = (end % CHUNK_SIZE) + 1
     part_count = math.ceil((end + 1) / CHUNK_SIZE) - offset_chunks
 
-    # Fast-path L1 RAM Cache Hit if single-chunk probe (e.g. external player probing MP4 header/footer moov atom)
     if part_count == 1 and offset_chunks in (0, last_chunk_index):
         cached_raw = await cache.get(f"chunk_{file_id}_{offset_chunks}")
         if cached_raw is not None:
@@ -234,7 +228,6 @@ async def iter_12mbps_file_stream(
                 yield sliced[idx : idx + FIRST_FRAME_SLICE]
             return
 
-    # Route B: Direct Telegram MTProto Streaming via Pyrofork stream_media with 64-chunk prefetch buffer
     msg = await resolve_telegram_message(bot, file_doc)
     if not msg:
         return
@@ -254,7 +247,6 @@ async def iter_12mbps_file_stream(
 
                 sliced = _slice_chunk(chunk, current_part, part_count, first_part_cut, last_part_cut)
                 if current_part == 1 and len(sliced) > FIRST_FRAME_SLICE:
-                    # Micro-flush first chunk in 256 KiB slices for instant video startup
                     for sub_i in range(0, len(sliced), FIRST_FRAME_SLICE):
                         await queue.put(sliced[sub_i : sub_i + FIRST_FRAME_SLICE])
                 else:
@@ -295,8 +287,6 @@ async def iter_12mbps_file_stream(
             pass
 
 
-# ==================== 2. FASTAPI ROUTERS ====================
-
 pages_router = APIRouter()
 stream_router = APIRouter()
 api_router = APIRouter(prefix="/api")
@@ -304,7 +294,6 @@ api_router = APIRouter(prefix="/api")
 _CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR = os.path.dirname(_CURRENT_DIR)
 
-# Resolve HTML templates directory cleanly (`plugins/` contains index.html, watch.html, dl.html)
 _CANDIDATE_TEMPLATE_DIRS = [
     _CURRENT_DIR,
     os.path.join(_CURRENT_DIR, "templates"),
@@ -318,8 +307,6 @@ for _cand in _CANDIDATE_TEMPLATE_DIRS:
 
 templates = Jinja2Templates(directory=_TEMPLATE_DIR)
 
-
-# --- HEALTH & ROOT ENDPOINTS ---
 
 @pages_router.get("/health")
 @pages_router.head("/health")
@@ -458,8 +445,6 @@ async def download_page(request: Request, file_id: str):
     return response
 
 
-# --- RANGE STREAM & DOWNLOAD ENDPOINTS ---
-
 @stream_router.get("/stream/{file_id}")
 @stream_router.head("/stream/{file_id}")
 async def stream_media_endpoint(request: Request, file_id: str, range: str = Header(None)):
@@ -576,8 +561,6 @@ async def download_media_endpoint(request: Request, file_id: str, range: str = H
         headers=headers,
     )
 
-
-# --- API ENDPOINTS ---
 
 @api_router.get("/status")
 async def api_status(request: Request):
@@ -706,8 +689,6 @@ async def api_tasks_report():
     return await generate_task_execution_report()
 
 
-
-
 @api_router.get("/ratelimit")
 async def api_ratelimit_status():
     """Return centralized TelegramRateLimitManager telemetry."""
@@ -737,8 +718,6 @@ async def api_search_files(q: str = ""):
         })
     return {"query": q, "count": len(results), "results": results}
 
-
-# ==================== 3. FASTAPI APP FACTORY & WEB SUPPORT ====================
 
 def create_app(bot_instance=None) -> FastAPI:
     fastapi_app = FastAPI(

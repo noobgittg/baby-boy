@@ -45,11 +45,12 @@ from plugins.core_services import (
     remux_container,
 )
 
-MAX_BOT_FILE_SIZE = 2000 * 1024 * 1024  # 2000 MiB limit
+MAX_BOT_FILE_SIZE = 2000 * 1024 * 1024
 
 @Client.on_message(filters.private & filters.command(["pro", "filepro", "advance", "tools"], prefixes=COMMAND_PREFIXES))
 async def file_pro_command_entry(client: Client, message: Message):
-    target = message.reply_to_message
+    from plugins.rename import resolve_target_media_message
+    target = await resolve_target_media_message(client, message)
     if not target or not (target.video or target.document or target.audio):
         return await message.reply_text(
             f"⚠️ **{to_smallcaps('please reply to a video, audio or document file!')}**\n\n"
@@ -135,7 +136,6 @@ async def back_to_media_handler(client: Client, query: CallbackQuery):
     else:
         await query.answer(to_smallcaps("media not found!"), show_alert=True)
 
-# ==================== 1. MEDIAINFO ====================
 
 @Client.on_callback_query(filters.regex(r"^pro_mediainfo_(\d+)"))
 async def pro_mediainfo_callback(client: Client, query: CallbackQuery):
@@ -156,8 +156,8 @@ async def pro_mediainfo_callback(client: Client, query: CallbackQuery):
     temp_path = os.path.join(download_dir, clean_name)
 
     try:
-        await original.download(
-            file_name=temp_path,
+        await download_media_with_auth_recovery(
+            client, original, file_name=temp_path,
             progress=progress_for_pyrogram,
             progress_args=("📥 downloading header", status, time.time())
         )
@@ -233,11 +233,11 @@ async def pro_mediainfo_callback(client: Client, query: CallbackQuery):
         clean_temp_files(doc_path)
         await status.delete()
 
-# ==================== 2. EXTRACT ALL AUDIO ====================
 
 @Client.on_message(filters.private & filters.command(["extractaudio", "extaudio"], prefixes=COMMAND_PREFIXES))
 async def extract_audio_cmd(client: Client, message: Message):
-    target = message.reply_to_message
+    from plugins.rename import resolve_target_media_message
+    target = await resolve_target_media_message(client, message)
     if not target or not (target.video or target.document):
         return await message.reply_text(
             f"⚠️ **{to_smallcaps('please reply to a video to extract audio!')}**\n\n"
@@ -271,8 +271,8 @@ async def run_extract_all_audio(client: Client, media_msg: Message, target_msg: 
 
     start_dl = time.time()
     try:
-        await media_msg.download(
-            file_name=video_path,
+        await download_media_with_auth_recovery(
+            client, media_msg, file_name=video_path,
             progress=progress_for_pyrogram,
             progress_args=("📥 downloading video", status, start_dl)
         )
@@ -329,11 +329,11 @@ async def run_extract_all_audio(client: Client, media_msg: Message, target_msg: 
         reply_markup=InlineKeyboardMarkup(btn)
     )
 
-# ==================== 3. EXTRACT ALL SUBTITLE ====================
 
 @Client.on_message(filters.private & filters.command(["extractsub", "extsub"], prefixes=COMMAND_PREFIXES))
 async def extract_sub_cmd(client: Client, message: Message):
-    target = message.reply_to_message
+    from plugins.rename import resolve_target_media_message
+    target = await resolve_target_media_message(client, message)
     if not target or not (target.video or target.document):
         return await message.reply_text(
             f"⚠️ **{to_smallcaps('please reply to a video to extract subtitles!')}**\n\n"
@@ -367,8 +367,8 @@ async def run_extract_all_sub(client: Client, media_msg: Message, target_msg: Me
 
     start_dl = time.time()
     try:
-        await media_msg.download(
-            file_name=video_path,
+        await download_media_with_auth_recovery(
+            client, media_msg, file_name=video_path,
             progress=progress_for_pyrogram,
             progress_args=("📥 downloading video", status, start_dl)
         )
@@ -422,11 +422,11 @@ async def run_extract_all_sub(client: Client, media_msg: Message, target_msg: Me
         reply_markup=InlineKeyboardMarkup(btn)
     )
 
-# ==================== 4. ADD AUDIO ====================
 
 @Client.on_message(filters.private & filters.command("addaudio", prefixes=COMMAND_PREFIXES))
 async def add_audio_cmd(client: Client, message: Message):
-    target = message.reply_to_message
+    from plugins.rename import resolve_target_media_message
+    target = await resolve_target_media_message(client, message)
     if not target or not (target.video or target.document):
         return await message.reply_text(
             f"⚠️ **{to_smallcaps('please reply to a video to add audio!')}**\n\n"
@@ -486,13 +486,13 @@ async def execute_add_audio(client: Client, query: CallbackQuery):
     out_path = os.path.join(download_dir, out_name)
 
     try:
-        await video_msg.download(
-            file_name=v_path,
+        await download_media_with_auth_recovery(
+            client, video_msg, file_name=v_path,
             progress=progress_for_pyrogram,
             progress_args=("📥 downloading video", status, time.time())
         )
-        await audio_msg.download(
-            file_name=a_path,
+        await download_media_with_auth_recovery(
+            client, audio_msg, file_name=a_path,
             progress=progress_for_pyrogram,
             progress_args=("📥 downloading audio", status, time.time())
         )
@@ -549,11 +549,11 @@ async def execute_add_audio(client: Client, query: CallbackQuery):
     except Exception:
         pass
 
-# ==================== 5. ADD SUBTITLE ====================
 
 @Client.on_message(filters.private & filters.command("addsub", prefixes=COMMAND_PREFIXES))
 async def add_sub_cmd(client: Client, message: Message):
-    target = message.reply_to_message
+    from plugins.rename import resolve_target_media_message
+    target = await resolve_target_media_message(client, message)
     if not target or not (target.video or target.document):
         return await message.reply_text(
             f"⚠️ **{to_smallcaps('please reply to a video to add subtitles!')}**\n\n"
@@ -605,13 +605,13 @@ async def execute_add_subtitle(client: Client, reply_msg: Message, video_id: int
     out_path = os.path.join(download_dir, out_name)
 
     try:
-        await video_msg.download(
-            file_name=v_path,
+        await download_media_with_auth_recovery(
+            client, video_msg, file_name=v_path,
             progress=progress_for_pyrogram,
             progress_args=("📥 downloading video", status, time.time())
         )
-        await sub_msg.download(
-            file_name=s_path,
+        await download_media_with_auth_recovery(
+            client, sub_msg, file_name=s_path,
             progress=progress_for_pyrogram,
             progress_args=("📥 downloading subtitle", status, time.time())
         )
@@ -668,11 +668,11 @@ async def execute_add_subtitle(client: Client, reply_msg: Message, video_id: int
     except Exception:
         pass
 
-# ==================== 6. TRIM VIDEO ====================
 
 @Client.on_message(filters.private & filters.command("trim", prefixes=COMMAND_PREFIXES))
 async def trim_video_cmd(client: Client, message: Message):
-    target = message.reply_to_message
+    from plugins.rename import resolve_target_media_message
+    target = await resolve_target_media_message(client, message)
     if not target or not (target.video or target.document):
         return await message.reply_text(
             f"⚠️ **{to_smallcaps('please reply to a video to trim!')}**\n\n"
@@ -734,8 +734,8 @@ async def execute_trim_video(client: Client, reply_msg: Message, video_id: int, 
     out_path = os.path.join(download_dir, out_name)
 
     try:
-        await video_msg.download(
-            file_name=v_path,
+        await download_media_with_auth_recovery(
+            client, video_msg, file_name=v_path,
             progress=progress_for_pyrogram,
             progress_args=("📥 downloading video", status, time.time())
         )
@@ -792,9 +792,8 @@ async def execute_trim_video(client: Client, reply_msg: Message, video_id: int, 
     except Exception:
         pass
 
-# ==================== FORCEREPLY MEDIA DISPATCHER ====================
 
-@Client.on_message(filters.private & filters.reply & (filters.audio | filters.voice | filters.document))
+@Client.on_message(filters.private & (filters.audio | filters.voice | filters.document), group=-1)
 async def file_pro_force_reply_media_listener(client: Client, message: Message):
     user_id = message.from_user.id
 
@@ -839,11 +838,10 @@ async def file_pro_force_reply_media_listener(client: Client, message: Message):
     message.continue_propagation()
 
 
-# ==================== 6. SCREENSHOTS, SAMPLE CLIP, MUTE AUDIO & REMUX ====================
-
 @Client.on_message(filters.private & filters.command(["screenshots", "ss"], prefixes=COMMAND_PREFIXES))
 async def screenshots_cmd_handler(client: Client, message: Message):
-    target = message.reply_to_message
+    from plugins.rename import resolve_target_media_message
+    target = await resolve_target_media_message(client, message)
     if not target or not (target.video or target.document):
         return await safe_reply_text(
             message,
@@ -902,7 +900,8 @@ async def _run_screenshots_job(client: Client, media_msg: Message, target_msg: M
 
 @Client.on_message(filters.private & filters.command(["sample", "clip"], prefixes=COMMAND_PREFIXES))
 async def sample_clip_cmd_handler(client: Client, message: Message):
-    target = message.reply_to_message
+    from plugins.rename import resolve_target_media_message
+    target = await resolve_target_media_message(client, message)
     if not target or not (target.video or target.document):
         return await safe_reply_text(
             message,
@@ -913,7 +912,8 @@ async def sample_clip_cmd_handler(client: Client, message: Message):
 
 @Client.on_message(filters.private & filters.command(["mutevideo", "strip_audio"], prefixes=COMMAND_PREFIXES))
 async def mute_video_cmd_handler(client: Client, message: Message):
-    target = message.reply_to_message
+    from plugins.rename import resolve_target_media_message
+    target = await resolve_target_media_message(client, message)
     if not target or not (target.video or target.document):
         return await safe_reply_text(
             message,
@@ -924,7 +924,8 @@ async def mute_video_cmd_handler(client: Client, message: Message):
 
 @Client.on_message(filters.private & filters.command(["remux", "convert"], prefixes=COMMAND_PREFIXES))
 async def remux_video_cmd_handler(client: Client, message: Message):
-    target = message.reply_to_message
+    from plugins.rename import resolve_target_media_message
+    target = await resolve_target_media_message(client, message)
     if not target or not (target.video or target.document):
         return await safe_reply_text(
             message,

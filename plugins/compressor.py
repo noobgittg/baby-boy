@@ -53,7 +53,7 @@ from plugins.core_services import (
     get_ffmpeg_status
 )
 
-MAX_BOT_FILE_SIZE = 2000 * 1024 * 1024  # 2000 MiB (2 GB Telegram Bot API upload limit)
+MAX_BOT_FILE_SIZE = 2000 * 1024 * 1024
 _RECOVERY_LOCK = asyncio.Lock()
 _IN_FLIGHT_IDEMPOTENCY: Dict[str, str] = {}
 
@@ -144,7 +144,8 @@ async def toggle_autocompress_cmd(client: Client, message: Message):
         new_state = arg in ("on", "true", "1", "yes", "enable")
     await user_repo.update_user(user_id, {"auto_compress": new_state})
     state_txt = "🟢 ᴇɴᴀʙʟᴇᴅ" if new_state else "⚪ ᴅɪsᴀʙʟᴇᴅ"
-    await safe_reply_text(message, 
+    await safe_reply_text(
+        message,
         f"✦ **{to_smallcaps('auto-compressor mode (ffmpeg)')}** ✦\n\n"
         f"• 🗜️ **{to_smallcaps('status')}** : `{state_txt}`\n"
         f"• ⚙️ **{to_smallcaps('default preset')}** : `720p HD (Superfast CRF 28)`\n"
@@ -203,7 +204,6 @@ def parse_custom_compress_input(text: str, orig_size_bytes: int = 0) -> Dict[str
     if not raw:
         return result
 
-    # 1. Extract resolution token (e.g., 360p, 480p, 540p, 720p, 1080p)
     res_match = re.search(r"\b(240|360|480|540|720|1080)p\b", raw)
     if res_match:
         result["scale_h"] = int(res_match.group(1))
@@ -213,26 +213,22 @@ def parse_custom_compress_input(text: str, orig_size_bytes: int = 0) -> Dict[str
         result["scale_h"] = 0
         result["has_custom_res"] = False
 
-    # 2. Extract CRF token if provided (e.g., crf26, crf 28)
     crf_match = re.search(r"\bcrf\s*(\d{2})\b", raw)
     if crf_match:
         result["crf"] = max(16, min(40, int(crf_match.group(1))))
         raw = raw[:crf_match.start()] + " " + raw[crf_match.end():]
 
-    # 3. Extract Audio bitrate token if provided (e.g., 64k, 96k, 128k, copy)
     aud_match = re.search(r"\b(48k|64k|96k|128k|160k|192k|copy)\b", raw)
     if aud_match:
         result["audio_br"] = aud_match.group(1)
         raw = raw[:aud_match.start()] + " " + raw[aud_match.end():]
 
-    # 4. Extract Speed mode token (hyper, turbo, fast, superfast, quality)
     spd_match = re.search(r"\b(hyper|turbo|ultrafast|superfast|veryfast|fast|quality|hevc)\b", raw)
     if spd_match:
         s_tok = spd_match.group(1)
         result["speed"] = "superfast" if s_tok == "quality" else ("hyper" if s_tok == "ultrafast" else s_tok)
         raw = raw[:spd_match.start()] + " " + raw[spd_match.end():]
 
-    # 5. Extract percentage target size (e.g., 40%, 50%)
     pct_match = re.search(r"\b(\d{1,2}(?:\.\d+)?)\s*%", raw)
     if pct_match and orig_size_bytes > 0:
         pct_val = max(5.0, min(95.0, float(pct_match.group(1))))
@@ -240,7 +236,6 @@ def parse_custom_compress_input(text: str, orig_size_bytes: int = 0) -> Dict[str
         result["target_mb"] = round(max(1.0, min(1900.0, orig_mb * (pct_val / 100.0))), 1)
         raw = raw[:pct_match.start()] + " " + raw[pct_match.end():]
 
-    # 6. Extract explicit GB / MB / numeric target size
     if result["target_mb"] is None:
         gb_match = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:gb|g)\b", raw)
         mb_match = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:mb|m)?\b", raw)
@@ -249,7 +244,6 @@ def parse_custom_compress_input(text: str, orig_size_bytes: int = 0) -> Dict[str
             result["target_mb"] = round(max(1.0, min(1900.0, val_mb)), 1)
         elif mb_match:
             val = float(mb_match.group(1))
-            # If user typed a small decimal like 1.5 without unit, treat <= 4.0 as GB
             if val <= 4.0 and "." in mb_match.group(1):
                 val = val * 1024.0
             if val >= 1.0:
@@ -278,7 +272,7 @@ async def _get_or_init_custom_comp_cfg(
     elif orig_mb > 400:
         default_mb = 250
     else:
-        default_mb = max(25, int(orig_mb * 0.45))
+        default_mb = max(1.0, round(orig_mb * 0.45, 1))
 
     cfg = {
         "target_mb": float(default_mb),
@@ -294,9 +288,12 @@ async def _get_or_init_custom_comp_cfg(
 
 @Client.on_message(filters.private & filters.command(["compress", "comp", "customcompress", "ccomp", "fastcompress"], prefixes=COMMAND_PREFIXES))
 async def compress_command_handler(client: Client, message: Message):
-    target = message.reply_to_message
+    from plugins.rename import resolve_target_media_message
+    user_id = message.from_user.id if message.from_user else message.chat.id
+    target = await resolve_target_media_message(client, message, user_id=user_id)
     if not target or not (target.video or target.document or target.audio):
-        return await safe_reply_text(message, 
+        return await safe_reply_text(
+            message,
             f"⚠️ **{to_smallcaps('please reply to a video or audio file to compress with ffmpeg.')}**\n\n"
             f"• **{to_smallcaps('usage 1')}** : {to_smallcaps('reply with')} `/compress` {to_smallcaps('or')} `/customcompress`\n"
             f"• **{to_smallcaps('usage 2')}** : {to_smallcaps('reply with')} `/compress 450MB 480p` {to_smallcaps('or')} `/compress 700MB`"
@@ -308,7 +305,6 @@ async def compress_command_handler(client: Client, message: Message):
     media = target.video or target.document or target.audio
     orig_size_bytes = int(getattr(media, "file_size", 0) or 0)
     dur_val = int(getattr(media, "duration", 0) or 0)
-    user_id = message.from_user.id if message.from_user else message.chat.id
 
     if cmd_name in ("customcompress", "ccomp", "fastcompress") or raw_args.lower() == "custom":
         if raw_args and raw_args.lower() != "custom":
@@ -351,7 +347,7 @@ async def compress_menu_callback(client: Client, query: CallbackQuery):
     original_msg = await client.get_messages(query.message.chat.id, msg_id)
     if not original_msg or not original_msg.media:
         return await query.answer(to_smallcaps("media not found!"), show_alert=True)
-    await query.answer("🗜️ ғғᴍᴘᴇɢ ᴄᴏᴍᴘʀᴇssᴏʀ")
+    await query.answer("🗜️ ғғᴍᴘᴇɢ ᴄᴏᴍᴘʀssᴏʀ")
     await show_compression_menu(original_msg, query.message, is_callback=True)
 
 
@@ -470,7 +466,7 @@ async def show_custom_compress_menu(
     audio_br = str(cfg.get("audio_br") or "auto")
 
     orig_mb = orig_size_bytes / (1024 * 1024) if orig_size_bytes > 0 else 1000.0
-    saved_pct = round(max(0.0, (1.0 - (target_mb / max(1.0, orig_mb))) * 100.0), 1) if orig_mb > target_mb else 0.0
+    saved_pct = round(max(0.0, (1.0 - (target_mb / max(0.1, orig_mb))) * 100.0), 1) if orig_mb > target_mb else 0.0
     total_kbps = int((target_mb * 8192.0 * 0.94) / max(1, est_dur))
     est_v_kbps = max(65, total_kbps - 64)
 
@@ -492,7 +488,7 @@ async def show_custom_compress_menu(
     btn = [
         [
             InlineKeyboardButton(
-                f"🚀 sᴛᴀʀᴛ ᴄᴜsᴛᴏᴍ ᴄᴏᴍᴘʀᴇss ({int(target_mb)}ᴍʙ • {res_label} • {speed_short})",
+                f"🚀 sᴛᴀʀᴛ ᴄᴜsᴛᴏᴍ ᴄᴏᴍᴘʀᴇss ({int(target_mb) if target_mb >= 5 else target_mb}ᴍʙ • {res_label} • {speed_short})",
                 callback_data=f"custcomp_run_{msg_id}",
             )
         ],
@@ -555,7 +551,7 @@ async def show_custom_compress_menu(
         f"✦ **{to_smallcaps('custom ultra-fast compressor studio (5–10 min)')}** ✦ 🎛️⚡\n\n"
         f"• 📁 **{to_smallcaps('file name')}** : `{file_name}`\n"
         f"• 📦 **{to_smallcaps('original size')}** : `{file_size_str}` | ⏱️ **{to_smallcaps('duration')}** : `{dur_str}`\n"
-        f"• 🎯 **{to_smallcaps('target size')}** : `{int(target_mb)} MB` (`-{saved_pct}%` {to_smallcaps('reduction')})\n"
+        f"• 🎯 **{to_smallcaps('target size')}** : `{int(target_mb) if target_mb >= 5 else target_mb} MB` (`-{saved_pct}%` {to_smallcaps('reduction')})\n"
         f"• 🎚️ **{to_smallcaps('quality / res')}** : `{res_label}` (`~{est_v_kbps} kbps` video)\n"
         f"• 🎵 **{to_smallcaps('audio mode')}** : `{audio_br.upper()}`\n"
         f"• 🚀 **{to_smallcaps('speed engine')}** : `{speed_labels.get(speed, speed_labels['hyper'])}`\n\n"
@@ -604,7 +600,7 @@ async def custom_compress_callback_handler(client: Client, query: CallbackQuery)
         orig_mb = (orig_size_bytes / (1024 * 1024)) if orig_size_bytes > 0 else 1000.0
         cfg["target_mb"] = round(max(1.0, min(1900.0, orig_mb * (pct / 100.0))), 1)
         await cache.set(f"custcomp_cfg_{user_id}_{msg_id}", cfg, ttl=1800)
-        await query.answer(f"📉 {int(pct)}% sɪᴢᴇ ➔ {int(cfg['target_mb'])} ᴍʙ")
+        await query.answer(f"📉 {int(pct)}% sɪᴢᴇ ➔ {cfg['target_mb']} ᴍʙ")
         return await show_custom_compress_menu(original_msg, query.message, user_id, is_callback=True)
 
     if action == "res" and arg1 is not None:
@@ -633,7 +629,7 @@ async def custom_compress_callback_handler(client: Client, query: CallbackQuery)
         await cache.set(
             f"waiting_custom_comp_{user_id}",
             {"msg_id": msg_id, "orig_size": orig_size_bytes, "menu_msg_id": query.message.id},
-            ttl=600,
+            ttl=900,
         )
         await safe_send_message(
             client,
@@ -661,7 +657,6 @@ async def custom_compress_callback_handler(client: Client, query: CallbackQuery)
         audio_br = str(cfg.get("audio_br") or "auto")
         respect_res = bool(scale_h > 0)
     else:
-        # action == "run"
         target_mb = max(1.0, min(1900.0, float(cfg.get("target_mb") or 500.0)))
         scale_h = int(cfg.get("scale_h") or 0)
         speed = str(cfg.get("speed") or "hyper")
@@ -673,7 +668,7 @@ async def custom_compress_callback_handler(client: Client, query: CallbackQuery)
     status = await safe_edit_text(
         query.message,
         f"⚡ **{to_smallcaps('initializing custom ultra-fast ffmpeg engine...')}**\n\n"
-        f"• 🎯 **{to_smallcaps('target size')}** : `{int(target_mb)} MB`\n"
+        f"• 🎯 **{to_smallcaps('target size')}** : `{target_mb} MB`\n"
         f"• 🎚️ **{to_smallcaps('quality / res')}** : `{f'{scale_h}p' if scale_h > 0 else 'Auto Smart'}`\n"
         f"• 🚀 **{to_smallcaps('speed mode')}** : `{speed.upper()}`",
         reply_markup=cancel_kb,
@@ -738,7 +733,7 @@ async def handle_custom_compress_text_input(client: Client, message: Message, wa
     status = await safe_reply_text(
         message,
         f"⚡ **{to_smallcaps('starting custom ultra-fast compression...')}**\n\n"
-        f"• 🎯 **{to_smallcaps('target size')}** : `{int(target_mb)} MB`\n"
+        f"• 🎯 **{to_smallcaps('target size')}** : `{target_mb} MB`\n"
         f"• 🎚️ **{to_smallcaps('quality / res')}** : `{f'{scale_h}p' if scale_h > 0 else 'Auto Smart'}`\n"
         f"• 🚀 **{to_smallcaps('speed engine')}** : `{speed.upper()}`",
         reply_markup=cancel_kb,
@@ -830,7 +825,6 @@ async def perform_compression_job(
         f"compress:{chat_id}:{msg_id}:{scale_h}:{crf}:{preset}:{int(target_mb or 0)}"
     )
 
-    # Duplicate-task prevention: check if identical task is already running or completed
     if not is_recovery and not task_id:
         in_flight_tid = _IN_FLIGHT_IDEMPOTENCY.get(idempotency_key)
         if in_flight_tid and task_manager.get_task(in_flight_tid):
@@ -964,7 +958,6 @@ async def perform_compression_job(
     start_dl = time.time()
 
     try:
-        # ─── STAGE 1: DOWNLOAD (OR RESUME FROM PERSISTED INPUT/OUTPUT) ────────────
         already_encoded = os.path.exists(output_path) and await validate_media_output(output_path)
         already_downloaded = (
             already_encoded
@@ -1017,7 +1010,7 @@ async def perform_compression_job(
                     await task_repo.record_task_error(task_id, f"Download attempt {dl_attempt+1} failed: {e}", stage="downloading")
                     await task_repo.update_task(task_id, {"retry_count": dl_attempt + 1, "status": "retrying"})
                     if dl_attempt < max_retries - 1:
-                        await asyncio.sleep(2.0 * (dl_attempt + 1))
+                        await asyncio.sleep(1.5 * (dl_attempt + 1))
 
             if not dl_ok or not os.path.exists(input_path):
                 await task_repo.update_task(task_id, {"status": "failed", "stage": "downloading"})
@@ -1057,7 +1050,6 @@ async def perform_compression_job(
         else:
             out_name = os.path.basename(output_path)
 
-        # ─── STAGE 2: FFMPEG ENCODING WITH AUTOMATIC RETRY & FALLBACK RECOVERY ───
         if not already_encoded:
             task_manager.update_stage(task_id, "encoding", "running")
             await task_repo.update_task(task_id, {"status": "running", "stage": "encoding", "progress_pct": 35.0})
@@ -1077,7 +1069,7 @@ async def perform_compression_job(
                         res_disp = f"{scale_h}p" if scale_h > 0 else "Auto Smart"
                         await safe_edit_text(
                             status,
-                            f"🎯 **{to_smallcaps('encoding video to target size')}** (`{int(safe_target_mb)} MB • {res_disp}`)...\n\n"
+                            f"🎯 **{to_smallcaps('encoding video to target size')}** (`{safe_target_mb} MB • {res_disp}`)...\n\n"
                             f"• ⚡ **{to_smallcaps('engine')}** : `FFmpeg Ultra-Fast ({eff_preset.upper()})`"
                         )
                         encode_success = await compress_to_target_size(
@@ -1171,7 +1163,6 @@ async def perform_compression_job(
                 )
                 return await task_repo.get_task(task_id)
 
-            # Guarantee output is <= MAX_BOT_FILE_SIZE before upload
             comp_size = os.path.getsize(output_path)
             if comp_size > MAX_BOT_FILE_SIZE and not is_audio_only and os.path.exists(input_path):
                 await safe_edit_text(
@@ -1238,7 +1229,6 @@ async def perform_compression_job(
         else:
             final_caption = base_caption
 
-        # ─── STAGE 3: FAULT-TOLERANT UPLOAD (NEVER ABORTS ON FLOODWAIT) ──────────
         task_manager.update_stage(task_id, "uploading", "running")
         await task_repo.update_task(task_id, {"status": "running", "stage": "uploading", "progress_pct": 85.0})
 
@@ -1249,6 +1239,13 @@ async def perform_compression_job(
         sent_msg = None
         last_up_err = None
 
+        from utils import temp as _t
+        attach_stream = bool(_t.BOT_CONFIG.get("auto_stream_global", True) and (not u or u.get("auto_stream", True)))
+        new_fid = secrets.token_urlsafe(10) if attach_stream else ""
+        w_url = f"{Config.BASE_URL}/watch/{new_fid}" if new_fid else ""
+        d_url = f"{Config.BASE_URL}/download/{new_fid}" if new_fid else ""
+
+        cur_thumb = thumb_path
         for up_attempt in range(max_retries):
             try:
                 if is_audio_only:
@@ -1256,9 +1253,10 @@ async def perform_compression_job(
                         client.send_audio,
                         chat_id=target_chat_id,
                         audio=output_path,
+                        file_name=out_name,
                         caption=final_caption,
                         duration=dur,
-                        thumb=thumb_path,
+                        thumb=cur_thumb,
                         progress=progress_for_pyrogram,
                         progress_args=("📤 uploading compressed audio", status, upload_start)
                     )
@@ -1270,11 +1268,12 @@ async def perform_compression_job(
                             client.send_video,
                             chat_id=target_chat_id,
                             video=output_path,
+                            file_name=out_name,
                             caption=final_caption,
                             duration=dur,
                             width=w,
                             height=h,
-                            thumb=thumb_path,
+                            thumb=cur_thumb,
                             supports_streaming=True,
                             progress=progress_for_pyrogram,
                             progress_args=("📤 uploading compressed video", status, upload_start)
@@ -1288,8 +1287,9 @@ async def perform_compression_job(
                             client.send_document,
                             chat_id=target_chat_id,
                             document=output_path,
+                            file_name=out_name,
                             caption=final_caption,
-                            thumb=thumb_path,
+                            thumb=None,
                             force_document=True,
                             progress=progress_for_pyrogram,
                             progress_args=("📤 uploading compressed file", status, upload_start)
@@ -1304,15 +1304,15 @@ async def perform_compression_job(
             except asyncio.CancelledError:
                 raise
             except Exception as e:
+                cur_thumb = None
                 last_up_err = e
                 task_manager.record_metric(retries=1, error=f"Upload attempt {up_attempt+1} failed: {e}")
                 await task_repo.record_task_error(task_id, f"Upload attempt {up_attempt+1} failed: {e}", stage="uploading")
                 await task_repo.update_task(task_id, {"retry_count": up_attempt + 1, "status": "retrying"})
                 if up_attempt < max_retries - 1:
-                    await asyncio.sleep(2.0 * (up_attempt + 1))
+                    await asyncio.sleep(1.5 * (up_attempt + 1))
 
         if sent_msg is None:
-            # Keep encoded file on disk so watchdog/recovery can retry upload without re-encoding!
             await task_repo.update_task(task_id, {"status": "interrupted", "stage": "encoded"})
             await safe_edit_text(status, f"⚠️ **{to_smallcaps('upload temporarily delayed; task queued for automatic recovery')}** : `{last_up_err}`")
             return await task_repo.get_task(task_id)
@@ -1328,19 +1328,13 @@ async def perform_compression_job(
             time.time() - start_dl,
         )
 
-        # Automatically attach 4-Player File Stream + Fast Download buttons to the compressed media
-        new_fid = ""
-        from utils import temp as _t
-        if sent_msg and _t.BOT_CONFIG.get("auto_stream_global", True) and (not u or u.get("auto_stream", True)):
+        if sent_msg and attach_stream and new_fid:
             try:
-                bin_chan = Config.BIN_CHANNEL if Config.BIN_CHANNEL != 0 else sent_msg.chat.id
-                log_msg = await safe_forward_message(sent_msg, bin_chan) if bin_chan != sent_msg.chat.id else sent_msg
-                new_fid = secrets.token_urlsafe(10)
                 out_media = sent_msg.video or sent_msg.document or sent_msg.audio
                 await file_repo.save_file(
                     file_id=new_fid,
-                    chat_id=log_msg.chat.id,
-                    message_id=log_msg.id,
+                    chat_id=sent_msg.chat.id,
+                    message_id=sent_msg.id,
                     file_name=out_name,
                     file_size=getattr(out_media, "file_size", comp_size),
                     mime_type=getattr(out_media, "mime_type", "video/mp4"),
@@ -1348,8 +1342,6 @@ async def perform_compression_job(
                     metadata=telegram_media_metadata(out_media, sent_msg),
                     tg_file_id=getattr(out_media, "file_id", None)
                 )
-                w_url = f"{Config.BASE_URL}/watch/{new_fid}"
-                d_url = f"{Config.BASE_URL}/download/{new_fid}"
                 stream_kb = InlineKeyboardMarkup([
                     [
                         InlineKeyboardButton(f"🎬 {to_smallcaps('watch (4 players)')}", url=w_url),
@@ -1360,10 +1352,19 @@ async def perform_compression_job(
                     ]
                 ])
                 await sent_msg.edit_reply_markup(reply_markup=stream_kb)
+                bin_chan = Config.BIN_CHANNEL if Config.BIN_CHANNEL != 0 else sent_msg.chat.id
+                if bin_chan != sent_msg.chat.id:
+                    async def _bg_fwd_comp(fid_val: str, s_msg: Message, b_ch: int):
+                        try:
+                            fwd = await safe_forward_message(s_msg, b_ch)
+                            if fwd and getattr(fwd, "chat", None) and getattr(fwd, "id", None):
+                                await file_repo.update_file(fid_val, {"chat_id": fwd.chat.id, "message_id": fwd.id})
+                        except Exception:
+                            pass
+                    asyncio.create_task(_bg_fwd_comp(new_fid, sent_msg, bin_chan))
             except Exception:
                 pass
 
-        # Mark task completed ONLY after output media has been delivered!
         completed_doc = await task_repo.update_task(
             task_id,
             {
@@ -1397,7 +1398,6 @@ async def perform_compression_job(
             await task_repo.update_task(task_id, {"status": "cancelled", "stage": "cancelled"})
             clean_temp_files(input_path, output_path, download_dir)
         else:
-            # Interrupted by bot restart, server rebuild, or container shutdown — preserve files & state!
             logger.warning(f"♻️ Checkpointing interrupted compression task {task_id} for automatic recovery on restart.")
             await task_repo.update_task(task_id, {"status": "interrupted"})
         raise
@@ -1407,8 +1407,6 @@ async def perform_compression_job(
         preserve_ws = bool(t_obj and not t_obj.is_cancelled and t_obj.status != "completed")
         await task_manager.cleanup_task(task_id, preserve_workspace=preserve_ws)
 
-
-# ==================== 2. AUTOMATIC FAULT-TOLERANT TASK RECOVERY ENGINE ====================
 
 async def checkpoint_active_tasks_before_shutdown(reason: str = "restart") -> int:
     """
@@ -1452,11 +1450,9 @@ async def _recover_single_task(bot: Any, task_doc: Dict[str, Any]) -> str:
     status_msg_id = int(task_doc.get("status_message_id", 0) or 0)
     params = dict(task_doc.get("params") or {})
 
-    # 1. Check if already running in memory
     if task_manager.get_task(task_id):
         return "skipped"
 
-    # 2. Check if already completed
     if task_doc.get("status") == "completed" and task_doc.get("output_message_id"):
         task_manager.record_metric(skipped=1)
         return "skipped"
@@ -1470,7 +1466,6 @@ async def _recover_single_task(bot: Any, task_doc: Dict[str, Any]) -> str:
         task_doc.get("max_retries", Config.TASK_MAX_RETRIES),
     )
 
-    # 3. Resolve original Telegram message (or synthesize local message wrapper if file is already on disk)
     original_msg = None
     if bot and getattr(bot, "is_connected", False) and chat_id and orig_msg_id:
         try:
@@ -1501,7 +1496,6 @@ async def _recover_single_task(bot: Any, task_doc: Dict[str, Any]) -> str:
         task_manager.record_metric(failed=1, error=f"Task {task_id}: source media unavailable")
         return "failed"
 
-    # Create lightweight fallback message wrapper if local file is present on disk
     if original_msg is None and has_local_media:
         class _LocalRecoveredMessage:
             def __init__(self, doc):
@@ -1588,7 +1582,6 @@ async def recover_and_complete_pending_tasks(bot: Any, trigger_source: str = "st
             trigger_source,
         )
 
-        # Process all recoverable tasks concurrently without blocking
         outcomes = await asyncio.gather(
             *(_recover_single_task(bot, tdoc) for tdoc in recoverable),
             return_exceptions=True,
@@ -1700,7 +1693,7 @@ async def run_task_recovery_watchdog(bot: Any, interval: int = None):
     Background watchdog that runs startup task recovery and continuously monitors
     for interrupted or stalled tasks across bot restarts, server rebuilds, and updates.
     """
-    eff_interval = max(5, int(interval or getattr(Config, "TASK_WATCHDOG_INTERVAL", 12)))
+    eff_interval = max(5, int(interval or getattr(Config, "TASK_WATCHDOG_INTERVAL", 15)))
     logger.info(f"♻️ Persistent Task Recovery & Watchdog Engine started (interval: {eff_interval}s).")
     await asyncio.sleep(2.0)
     try:
@@ -1722,8 +1715,7 @@ async def run_task_recovery_watchdog(bot: Any, interval: int = None):
     while True:
         try:
             await asyncio.sleep(eff_interval)
-            recoverable = await task_repo.get_recoverable_tasks()
-            # Filter to tasks not currently running in task_manager
+            recoverable = await task_repo.get_recoverable_tasks(sync_journal=False)
             stalled = [
                 t for t in recoverable
                 if not task_manager.get_task(str(t.get("task_id", "")))

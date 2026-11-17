@@ -13,8 +13,6 @@ except ImportError:
     AsyncIOMotorClient = None
 
 
-# ==================== 1. UNIFIED DATABASE MODELS ====================
-
 def new_user_dict(user_id: int, first_name: str, username: Optional[str] = None) -> Dict[str, Any]:
     now_ts = float(time.time())
     return {
@@ -131,8 +129,8 @@ def new_task_dict(
         "output_path": str(output_path or ""),
         "params": dict(params or {}),
         "idempotency_key": str(idempotency_key or f"{task_type}:{chat_id}:{original_message_id}"),
-        "status": "queued",      # queued | running | interrupted | retrying | completed | failed | cancelled | skipped
-        "stage": "initialized",  # initialized | downloading | downloaded | encoding | encoded | uploading | completed
+        "status": "queued",
+        "stage": "initialized",
         "progress_pct": 0.0,
         "retry_count": 0,
         "max_retries": int(max_retries or Config.TASK_MAX_RETRIES),
@@ -147,8 +145,6 @@ def new_task_dict(
         "completed_at": 0.0,
     }
 
-
-# ==================== 2. FALLBACK IN-MEMORY COLLECTION (WHEN MONGO OFFLINE) ====================
 
 class InMemoryCollection:
     """Async in-memory Mongo-compatible collection so the bot never crashes if MongoDB is unreachable."""
@@ -308,8 +304,6 @@ class InMemoryDB:
         self.tasks = InMemoryCollection("task_id")
 
 
-# ==================== 3. SINGLE UNIFIED DATABASE MANAGER ====================
-
 class MongoManager:
     """
     Single unified database manager (MongoDB Motor with automatic in-memory fallback).
@@ -387,8 +381,6 @@ class MongoManager:
 
 mongo = MongoManager()
 
-
-# ==================== 4. UNIFIED REPOSITORIES (WITH FAST CACHE) ====================
 
 class UserRepository:
     @property
@@ -777,8 +769,6 @@ class FileRepository:
         return await self.delete_file(file_id)
 
 
-# ==================== 5. PERSISTENT TASK RECOVERY REPOSITORY ====================
-
 class TaskRepository:
     """
     Dual-layer persistent task repository:
@@ -838,7 +828,6 @@ class TaskRepository:
                 jdata = self._read_journal_sync()
                 clean = {k: v for k, v in task_doc.items() if k != "_id"}
                 jdata[str(clean["task_id"])] = clean
-                # Keep journal bounded to most recent 1000 tasks
                 if len(jdata) > 1000:
                     sorted_keys = sorted(
                         jdata.keys(),
@@ -854,7 +843,6 @@ class TaskRepository:
         """Load tasks from local disk journal and workspace `task_state.json` files into active DB on startup."""
         async with self._journal_lock:
             jdata = await asyncio.to_thread(self._read_journal_sync)
-            # Also scan DOWNLOAD_DIR for any orphaned `task_state.json` files
             def _scan_workspaces():
                 found = {}
                 if os.path.isdir(Config.DOWNLOAD_DIR):
@@ -938,11 +926,12 @@ class TaskRepository:
             "error_history": hist,
         })
 
-    async def get_recoverable_tasks(self) -> List[Dict[str, Any]]:
+    async def get_recoverable_tasks(self, sync_journal: bool = True) -> List[Dict[str, Any]]:
         """
         Return all incomplete, interrupted, queued, running, retrying, or retry-eligible failed tasks.
         """
-        await self.load_journal_into_db()
+        if sync_journal:
+            await self.load_journal_into_db()
         cursor = self.col.find(
             {
                 "status": {

@@ -2838,8 +2838,6 @@ async def hd_security_and_flood_watchdog(client: Client, message: Message):
                 pass
 
 
-# ─── Extra Pro Group Helper Features (/nightmode, /gautoreact, /cleanblue) ────
-
 @Client.on_message(filters.command(["nightmode", "gautoreact", "cleanblue"], prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def hd_extra_pro_group_cmds(client: Client, message: Message):
     """Toggle Night Mode (media/sticker/link lock), Group Auto-Reaction, or Clean Blue Command Deletion."""
