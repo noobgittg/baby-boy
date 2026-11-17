@@ -32,6 +32,8 @@ from plugins.core_utils import (
     _flood_wait_seconds,
     _compute_edit_signature,
     _extract_msg_identity,
+    _normalize_reply_markup,
+    get_msg_text,
     rate_limit_manager,
     RedactSecretsFilter,
     redact_secrets,
@@ -134,7 +136,7 @@ async def is_chat_or_global_admin(
 
 async def safe_edit_message(
     message: Message,
-    text: str,
+    text: str = "",
     reply_markup: Optional[InlineKeyboardMarkup] = None,
     parse_mode: Optional[enums.ParseMode] = enums.ParseMode.HTML,
     disable_web_page_preview: bool = True,
@@ -145,6 +147,14 @@ async def safe_edit_message(
     """
     if not message:
         return False
+    if isinstance(message, str) and not isinstance(text, str) and hasattr(text, "chat"):
+        message, text = text, message
+    if isinstance(message, (str, bytes, int, float, bool)):
+        return False
+    if not isinstance(text, str):
+        text = get_msg_text(text)
+    if reply_markup is not None:
+        reply_markup = _normalize_reply_markup(reply_markup)
 
     chat_id, msg_id = _extract_msg_identity(message)
     sig = _compute_edit_signature(text, reply_markup)
