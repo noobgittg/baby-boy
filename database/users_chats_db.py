@@ -95,12 +95,29 @@ class Database:
             "total_broadcasts": 0,
         }
 
+    def _disable_mongo_collections(self):
+        self.db = None
+        self.col = None
+        self.grp = None
+        self.chnl = None
+        self.adm = None
+        self.hd_groups = None
+        self.hd_warns = None
+        self.hd_logs = None
+        self.notes_col = None
+        self.filters_col = None
+        self.blacklist_col = None
+        self.afk_col = None
+        self.autofwd_col = None
+
     async def ensure_indexes(self):
-        if self.db is None:
+        if self.db is None or self._client is None:
             logger.warning("⚠️ ᴍᴏɴɢᴏᴅʙ ᴜʀɪ ɴᴏᴛ ᴄᴏɴғɪɢᴜʀᴇᴅ › ʀᴜɴɴɪɴɢ ɪɴ ʟ1 ᴍᴇᴍᴏʀʏ-ᴏɴʟʏ ᴍᴏᴅᴇ")
+            self._disable_mongo_collections()
             return
         try:
             t0 = time.perf_counter()
+            await self._client.admin.command("ping")
             await self.col.create_index("id", background=True)
             await self.grp.create_index("id", background=True)
             await self.chnl.create_index("chat_id", unique=True, background=True)
@@ -116,7 +133,8 @@ class Database:
             elapsed = (time.perf_counter() - t0) * 1000.0
             logger.info("✅ ᴍᴏɴɢᴏᴅʙ ɪɴᴅᴇxᴇs ᴠᴇʀɪғɪᴇᴅ (11 ᴄᴏʟʟᴇᴄᴛɪᴏɴs) ɪɴ %.1f ᴍs", elapsed)
         except Exception as e:
-            logger.debug("⚠️ ᴅᴀᴛᴀʙᴀsᴇ ɪɴᴅᴇx ᴄʀᴇᴀᴛɪᴏɴ ɴᴏᴛɪᴄᴇ › %s", e)
+            logger.warning("⚠️ ᴍᴏɴɢᴏᴅʙ ᴜɴʀᴇᴀᴄʜᴀʙʟᴇ (%s) › sᴡɪᴛᴄʜɪɴɢ ᴅʙ ᴛᴏ 0ᴍs ʟ1 ᴍᴇᴍᴏʀʏ-ᴏɴʟʏ ᴍᴏᴅᴇ", e)
+            self._disable_mongo_collections()
 
     def default_helpdesk_group_config(self, chat_id: int) -> Dict[str, Any]:
         return {
@@ -202,10 +220,18 @@ class Database:
         }
 
     def new_user(self, id: int, name: str) -> Dict[str, Any]:
+        uid = int(id)
+        fname = name or "User"
+        now_ts = time.time()
         return {
-            "id": int(id),
-            "name": name or "User",
-            "joined_at": time.time(),
+            "id": uid,
+            "user_id": uid,
+            "name": fname,
+            "first_name": fname,
+            "is_banned": False,
+            "joined_at": now_ts,
+            "created_at": now_ts,
+            "updated_at": now_ts,
             "ban_status": {
                 "is_banned": False,
                 "ban_reason": "",
@@ -213,10 +239,15 @@ class Database:
         }
 
     def new_group(self, id: int, title: str) -> Dict[str, Any]:
+        cid = int(id)
+        now_ts = time.time()
         return {
-            "id": int(id),
+            "id": cid,
+            "chat_id": cid,
             "title": title or "Group",
-            "added_at": time.time(),
+            "added_at": now_ts,
+            "created_at": now_ts,
+            "updated_at": now_ts,
             "chat_status": {
                 "is_disabled": False,
                 "reason": "",
@@ -259,16 +290,22 @@ class Database:
         uid = int(id)
         if uid not in self._mem_users:
             self._mem_users[uid] = self.new_user(uid, name)
-        if self.col is not None:
-            try:
-                await self.col.update_one({"id": uid}, {"$setOnInsert": self._mem_users[uid]}, upsert=True)
-            except Exception as e:
-                logger.debug("⚠️ ᴀᴅᴅ_ᴜsᴇʀ ғᴀʟʟʙᴀᴄᴋ › %s", e)
         try:
             from plugins.core_db import user_repo
-            await user_repo.get_or_create(uid, name or "User")
+            repo_doc = await user_repo.get_or_create(uid, name or "User")
+            if isinstance(repo_doc, dict):
+                self._mem_users[uid].update(repo_doc)
         except Exception:
             pass
+        if self.col is not None:
+            try:
+                await self.col.update_one(
+                    {"$or": [{"user_id": uid}, {"id": uid}]},
+                    {"$setOnInsert": self._mem_users[uid]},
+                    upsert=True,
+                )
+            except Exception as e:
+                logger.debug("⚠️ ᴀᴅᴅ_ᴜsᴇʀ ғᴀʟʟʙᴀᴄᴋ › %s", e)
         logger.info("👤 ᴅʙ ᴜsᴇʀ ʀᴇɢɪsᴛᴇʀᴇᴅ › ɪᴅ=%s ɴᴀᴍᴇ=%s", uid, name)
 
     async def is_user_exist(self, id: int) -> bool:
@@ -306,9 +343,14 @@ class Database:
         ban_status = {"is_banned": False, "ban_reason": ""}
         user_doc = self._mem_users.setdefault(uid, self.new_user(uid, "User"))
         user_doc["ban_status"] = ban_status
+        user_doc["is_banned"] = False
         if self.col is not None:
             try:
-                await self.col.update_one({"id": uid}, {"$set": {"ban_status": ban_status}}, upsert=True)
+                await self.col.update_one(
+                    {"$or": [{"user_id": uid}, {"id": uid}]},
+                    {"$set": {"id": uid, "user_id": uid, "is_banned": False, "ban_status": ban_status}},
+                    upsert=True,
+                )
             except Exception:
                 pass
         try:
@@ -323,14 +365,19 @@ class Database:
         ban_status = {"is_banned": True, "ban_reason": ban_reason}
         user_doc = self._mem_users.setdefault(uid, self.new_user(uid, "User"))
         user_doc["ban_status"] = ban_status
+        user_doc["is_banned"] = True
         if self.col is not None:
             try:
-                await self.col.update_one({"id": uid}, {"$set": {"ban_status": ban_status}}, upsert=True)
+                await self.col.update_one(
+                    {"$or": [{"user_id": uid}, {"id": uid}]},
+                    {"$set": {"id": uid, "user_id": uid, "is_banned": True, "ban_status": ban_status}},
+                    upsert=True,
+                )
             except Exception:
                 pass
         try:
             from plugins.core_db import user_repo
-            await user_repo.ban_user(uid)
+            await user_repo.ban_user(uid, ban_reason=ban_reason)
         except Exception:
             pass
         logger.info("🚫 ᴅʙ ᴜsᴇʀ ʙᴀɴɴᴇᴅ › ɪᴅ=%s ʀᴇᴀsᴏɴ=%s", uid, ban_reason)
@@ -568,8 +615,8 @@ class Database:
         if self.col is not None:
             try:
                 await self.col.update_one(
-                    {"id": uid},
-                    {"$set": {"connected_channel": cid}},
+                    {"$or": [{"user_id": uid}, {"id": uid}]},
+                    {"$set": {"id": uid, "user_id": uid, "connected_channel": cid}},
                     upsert=True,
                 )
             except Exception:
