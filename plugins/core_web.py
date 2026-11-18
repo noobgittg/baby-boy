@@ -34,12 +34,104 @@ LOCAL_READ_CHUNK = max(CHUNK_SIZE, int(getattr(Config, "STREAM_CHUNK_SIZE", 4 * 
 MAX_CONCURRENT_STREAMS = max(8, min(64, int(getattr(Config, "WORKERS", 32))))
 
 _MSG_RESOLVE_LOCKS: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-_CHUNK_FETCH_LOCKS: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 _STREAM_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_STREAMS)
+
+_FILE_DOC_CACHE: Dict[str, tuple] = {}
+_FILE_DOC_CACHE_TTL = 20.0
+_FILE_DOC_CACHE_MAX = 2000
+
+_RESPONSE_CACHE: Dict[str, tuple] = {}
+_RESPONSE_CACHE_MAX = 1000
+_RESPONSE_CACHE_BODY_LIMIT = 500_000
+
+
+def _cacheable_ttl(path: str) -> float:
+    if path in ("/", "/stats"):
+        return 15.0
+    if path in ("/health", "/api/health", "/api/ping"):
+        return 3.0
+    if path in ("/api/status", "/api/stats"):
+        return 3.0
+    if path.startswith("/api/info/"):
+        return 10.0
+    if path.startswith("/api/search"):
+        return 5.0
+    if path.startswith("/watch/") or path.startswith("/dl/"):
+        return 10.0
+    return 0.0
+
+
+def _response_cache_get(key: str) -> Optional[tuple]:
+    entry = _RESPONSE_CACHE.get(key)
+    if not entry:
+        return None
+    if entry[0] <= time.time():
+        _RESPONSE_CACHE.pop(key, None)
+        return None
+    return entry
+
+
+def _response_cache_set(key: str, status: int, headers: List[tuple], body: bytes, ttl: float) -> None:
+    if len(_RESPONSE_CACHE) >= _RESPONSE_CACHE_MAX:
+        _RESPONSE_CACHE.clear()
+    _RESPONSE_CACHE[key] = (time.time() + ttl, status, list(headers), bytes(body))
+
+
+def _augment_headers(raw_headers: List[tuple], path: str) -> List[tuple]:
+    existing = {k.lower() for k, _ in raw_headers}
+    result = list(raw_headers)
+    if b"cache-control" not in existing:
+        if path in {"/", "/stats"}:
+            result.append((b"cache-control", b"public, max-age=60, stale-while-revalidate=600"))
+        elif path.startswith(("/watch/", "/dl/")):
+            result.append((b"cache-control", b"public, max-age=60, stale-while-revalidate=300"))
+        elif path.startswith("/api/info/"):
+            result.append((b"cache-control", b"private, max-age=15"))
+        elif path.startswith("/api/search"):
+            result.append((b"cache-control", b"private, max-age=10"))
+        elif path == "/api/status":
+            result.append((b"cache-control", b"private, max-age=5, stale-while-revalidate=15"))
+    if b"x-content-type-options" not in existing:
+        result.append((b"x-content-type-options", b"nosniff"))
+    if b"referrer-policy" not in existing:
+        result.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
+    return result
+
+
+async def _fetch_file_doc(file_id: str) -> Optional[Dict[str, Any]]:
+    now = time.time()
+    entry = _FILE_DOC_CACHE.get(file_id)
+    if entry and entry[0] > now:
+        return entry[1]
+    doc = None
+    try:
+        doc = await FileRepository.get_file_by_id(file_id)
+    except AttributeError:
+        try:
+            doc = await file_repo.get_file(file_id)
+        except AttributeError:
+            doc = None
+    if doc:
+        if len(_FILE_DOC_CACHE) >= _FILE_DOC_CACHE_MAX:
+            _FILE_DOC_CACHE.clear()
+        _FILE_DOC_CACHE[file_id] = (now + _FILE_DOC_CACHE_TTL, doc)
+    return doc
+
+
+async def _safe_cache_stats() -> Dict[str, Any]:
+    try:
+        fn = getattr(cache, "get_stats", None)
+        if fn is None:
+            return {"status": "unavailable"}
+        result = fn()
+        if hasattr(result, "__await__"):
+            result = await result
+        return result if isinstance(result, dict) else {"stats": result}
+    except Exception:
+        return {"status": "unavailable"}
 
 
 def parse_range_header(value: Optional[str], file_size: int):
-    """Parse HTTP Range header, including open-ended and suffix byte ranges."""
     if file_size <= 0:
         return None
     if not value:
@@ -82,13 +174,6 @@ FOUR_EXTERNAL_PLAYERS = [
 
 
 def build_4_external_player_links(stream_url: str, file_name: str = "video.mp4") -> Dict[str, str]:
-    """
-    Generates intent and scheme deep-links for the 4 external players:
-    1. PLAYit
-    2. MX Player (Ad & Pro with HW+ decode_mode=2)
-    3. VLC (Android Intent & Universal vlc:// scheme)
-    4. S Player (Simple Player & SPlayer fallback)
-    """
     clean_url_no_scheme = stream_url.replace("https://", "").replace("http://", "")
     scheme = "https" if stream_url.startswith("https://") else "http"
     safe_title = quote(file_name or "video.mp4")
@@ -114,7 +199,6 @@ def _safe_metadata_int(value: Any) -> int:
 
 
 def media_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize stored metadata for templates and JSON clients."""
     raw = dict(file_doc.get("metadata") or {})
     file_id = str(file_doc.get("file_id", ""))
     audio_tracks = list(raw.get("audio_tracks") or raw.get("audio_streams") or [])
@@ -160,7 +244,6 @@ def media_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def resolve_telegram_message(bot: Any, file_doc: Dict[str, Any], force_refresh: bool = False):
-    """Fetches and caches the Telegram message object with stampede lock protection and expired-reference refresh."""
     file_id = str(file_doc.get("file_id", ""))
     cache_key = f"tg_msg_{file_id}"
     if not force_refresh:
@@ -212,12 +295,6 @@ async def iter_12mbps_file_stream(
     end: int,
     request: Optional[Request] = None
 ) -> AsyncGenerator[bytes, None]:
-    """
-    Ultra-Fast Zero-Blocking Async Byte Streamer with Bounded Concurrency & Backpressure:
-    1. If local file exists on disk (`file_path`), streams asynchronously via `aiofiles` in chunks (with 256 KiB initial frame flush).
-    2. Otherwise, streams directly from Telegram (`bot.stream_media`) using a bounded prefetch buffer,
-       caching boundary chunks (first & last 1 MiB for MP4/MKV moov/cues headers) in RAM so player seeking is responsive.
-    """
     content_length = (end - start) + 1
     file_id = str(file_doc.get("file_id", ""))
     total_file_size = _safe_metadata_int(file_doc.get("file_size", 0))
@@ -322,12 +399,15 @@ async def iter_12mbps_file_stream(
                         if not retried_refresh and current_part == current_part_start:
                             retried_refresh = True
                             if "AUTH_BYTES_INVALID" in err_txt or "AUTHBYTESINVALID" in err_txt or "AUTH_KEY_UNREGISTERED" in err_txt:
-                                reset_fn = getattr(bot, "reset_media_sessions", None)
-                                if callable(reset_fn):
-                                    await reset_fn()
-                                else:
-                                    from plugins.core_services import _clear_stale_media_sessions
-                                    await _clear_stale_media_sessions(bot)
+                                try:
+                                    reset_fn = getattr(bot, "reset_media_sessions", None)
+                                    if callable(reset_fn):
+                                        await reset_fn()
+                                    else:
+                                        from plugins.core_services import _clear_stale_media_sessions
+                                        await _clear_stale_media_sessions(bot)
+                                except Exception:
+                                    pass
                                 await asyncio.sleep(0.35)
                             refreshed = await resolve_telegram_message(bot, file_doc, force_refresh=True)
                             if refreshed is not None:
@@ -366,7 +446,6 @@ async def iter_12mbps_file_stream(
                 pass
 
 
-
 class SafeStreamingResponse(StreamingResponse):
     async def stream_response(self, send) -> None:
         await send(
@@ -397,7 +476,8 @@ async def _prime_stream_iterator(iterator: AsyncGenerator[bytes, None]):
         first_chunk = await iterator.__anext__()
     except StopAsyncIteration:
         return None
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Stream priming failed: {e}")
         return None
 
     async def _chained():
@@ -407,6 +487,7 @@ async def _prime_stream_iterator(iterator: AsyncGenerator[bytes, None]):
             yield chunk
 
     return _chained()
+
 
 pages_router = APIRouter()
 stream_router = APIRouter()
@@ -432,7 +513,6 @@ templates = Jinja2Templates(directory=_TEMPLATE_DIR)
 @pages_router.get("/health")
 @pages_router.head("/health")
 async def root_health():
-    """Root /health endpoint required by Render/Koyeb health checks and KeepAlive pinger."""
     return {
         "status": "healthy",
         "service": "MMW-BOT-PRO",
@@ -454,7 +534,6 @@ async def root_stats_redirect(request: Request):
 @api_router.get("/bridge")
 @api_router.head("/bridge")
 async def native_gateway_endpoint(request: Request, action: str = "status", id: str = ""):
-    """Native Python HTTP 206 Stream & Telemetry Bridge."""
     act = (action or "status").strip().lower()
     clean_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(id or ""))
     base_url = str(request.base_url).rstrip("/")
@@ -522,7 +601,7 @@ async def index(request: Request):
 @pages_router.head("/code/{file_id}")
 async def code_preview_page(request: Request, file_id: str):
     import html as _html
-    file_doc = await FileRepository.get_file_by_id(file_id)
+    file_doc = await _fetch_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="Code file not found or link expired.")
     if request.method == "HEAD":
@@ -806,7 +885,7 @@ loadCodePreview();
 @pages_router.get("/watch/{file_id}")
 @pages_router.head("/watch/{file_id}")
 async def watch_page(request: Request, file_id: str):
-    file_doc = await FileRepository.get_file_by_id(file_id)
+    file_doc = await _fetch_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="Stream link expired or file not found.")
     if request.method == "HEAD":
@@ -841,6 +920,7 @@ async def watch_page(request: Request, file_id: str):
                         meta_base["width"] = probed["video_streams"][0].get("width", meta_base.get("width", 0))
                         meta_base["height"] = probed["video_streams"][0].get("height", meta_base.get("height", 0))
                     await file_repo.update_file(fid, {"metadata": meta_base})
+                    _FILE_DOC_CACHE.pop(fid, None)
             except Exception:
                 pass
         if not await cache.get(f"probe_lock_{file_id}"):
@@ -881,7 +961,7 @@ async def watch_page(request: Request, file_id: str):
 @pages_router.get("/dl/{file_id}")
 @pages_router.head("/dl/{file_id}")
 async def download_page(request: Request, file_id: str):
-    file_doc = await FileRepository.get_file_by_id(file_id)
+    file_doc = await _fetch_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="File not found or link expired.")
     if request.method == "HEAD":
@@ -921,7 +1001,7 @@ async def download_page(request: Request, file_id: str):
 @stream_router.get("/stream/{file_id}")
 @stream_router.head("/stream/{file_id}")
 async def stream_media_endpoint(request: Request, file_id: str, range: str = Header(None)):
-    file_doc = await FileRepository.get_file_by_id(file_id)
+    file_doc = await _fetch_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="Media file not found or revoked.")
 
@@ -979,7 +1059,6 @@ async def stream_media_endpoint(request: Request, file_id: str, range: str = Hea
         primed,
         status_code=status_code,
         headers=headers,
-        media_type=mime_type,
     )
 
 
@@ -988,8 +1067,7 @@ async def stream_media_endpoint(request: Request, file_id: str, range: str = Hea
 @stream_router.head("/download/{file_id}")
 @stream_router.head("/file/{file_id}")
 async def download_media_endpoint(request: Request, file_id: str, range: str = Header(None)):
-    """Handles high-speed multi-connection direct file downloads with HTTP 206 Range support."""
-    file_doc = await FileRepository.get_file_by_id(file_id)
+    file_doc = await _fetch_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="File not found or revoked.")
 
@@ -1019,7 +1097,7 @@ async def download_media_endpoint(request: Request, file_id: str, range: str = H
 
     headers = {
         "Accept-Ranges": "bytes",
-        "Content-Type": mimetypes.guess_type(file_name)[0] or "application/octet-stream",
+        "Content-Type": "application/octet-stream",
         "Content-Length": str(content_length),
         "Content-Disposition": content_disposition("attachment", file_name),
         "ETag": etag,
@@ -1044,7 +1122,6 @@ async def download_media_endpoint(request: Request, file_id: str, range: str = H
     return SafeStreamingResponse(
         primed,
         status_code=status_code,
-        media_type="application/octet-stream",
         headers=headers,
     )
 
@@ -1056,7 +1133,7 @@ async def api_status(request: Request):
         user_repo.get_total_users(),
         chat_repo.get_total_chats(),
         file_repo.get_total_files(),
-        cache.get_stats(),
+        _safe_cache_stats(),
     )
     start_time = getattr(request.app.state, "start_time", float(time.time()))
     uptime_sec = int(float(time.time()) - start_time)
@@ -1108,16 +1185,17 @@ async def api_ping():
 @api_router.get("/info/{file_id}")
 @api_router.head("/info/{file_id}")
 async def api_file_info(file_id: str):
-    file_doc = await file_repo.get_file(file_id)
+    file_doc = await _fetch_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="File not found")
     stream_url = f"{Config.BASE_URL}/stream/{file_id}"
     fname = file_doc.get("file_name", "video.mp4")
+    file_size_val = _safe_metadata_int(file_doc.get("file_size"))
     return {
         "file_id": file_doc["file_id"],
         "file_name": fname,
-        "file_size": file_doc.get("file_size"),
-        "file_size_formatted": humanbytes(file_doc.get("file_size", 0)),
+        "file_size": file_size_val,
+        "file_size_formatted": humanbytes(file_size_val),
         "mime_type": file_doc.get("mime_type"),
         "created_at": file_doc.get("created_at"),
         "stream_speed": "turbo HTTP 206 byte-range streaming",
@@ -1133,7 +1211,6 @@ async def api_file_info(file_id: str):
 
 @api_router.get("/user/{user_id}/files")
 async def api_user_files(user_id: int, skip: int = 0, limit: int = 20):
-    """Return paginated JSON list of a user's indexed files and 4-player stream links."""
     lim = max(1, min(50, int(limit)))
     sk = max(0, int(skip))
     files, total = await asyncio.gather(
@@ -1145,11 +1222,12 @@ async def api_user_files(user_id: int, skip: int = 0, limit: int = 20):
         fid = f.get("file_id")
         fname = f.get("file_name", "Media.mp4")
         s_url = f"{Config.BASE_URL}/stream/{fid}"
+        fs_val = _safe_metadata_int(f.get("file_size"))
         items.append({
             "file_id": fid,
             "file_name": fname,
-            "file_size": f.get("file_size", 0),
-            "file_size_formatted": humanbytes(f.get("file_size", 0)),
+            "file_size": fs_val,
+            "file_size_formatted": humanbytes(fs_val),
             "mime_type": f.get("mime_type", "video/mp4"),
             "created_at": f.get("created_at"),
             "watch_url": f"{Config.BASE_URL}/watch/{fid}",
@@ -1168,24 +1246,20 @@ async def api_user_files(user_id: int, skip: int = 0, limit: int = 20):
 
 @api_router.get("/logs/summary")
 async def api_logs_summary():
-    """Return live application log analytics, RateLimitManager, and Task Recovery health."""
     from utils import get_log_analytics
     return get_log_analytics()
 
 
 @api_router.get("/tasks/report")
 async def api_tasks_report():
-    """Return persistent task recovery and completion execution report."""
     from plugins.compressor import generate_task_execution_report
     return await generate_task_execution_report()
 
 
 @api_router.get("/ratelimit")
 async def api_ratelimit_status():
-    """Return centralized TelegramRateLimitManager telemetry."""
     from plugins.core_utils import rate_limit_manager
     return rate_limit_manager.get_stats()
-
 
 
 @api_router.get("/subtitles/{file_id}/{sub_idx}.vtt")
@@ -1194,7 +1268,7 @@ async def api_subtitle_vtt(file_id: str, sub_idx: int):
     cached_vtt = await cache.get(cache_key)
     if cached_vtt is not None:
         return Response(content=cached_vtt, media_type="text/vtt; charset=utf-8")
-    file_doc = await FileRepository.get_file_by_id(file_id)
+    file_doc = await _fetch_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="Subtitle source not found")
     fpath = file_doc.get("file_path")
@@ -1206,6 +1280,7 @@ async def api_subtitle_vtt(file_id: str, sub_idx: int):
     await cache.set(cache_key, vtt, ttl=900)
     return Response(content=vtt, media_type="text/vtt; charset=utf-8")
 
+
 @api_router.get("/search")
 async def api_search_files(q: str = ""):
     if not q or not q.strip():
@@ -1214,11 +1289,12 @@ async def api_search_files(q: str = ""):
     results = []
     for f in files:
         fid = f.get("file_id")
+        fs_val = _safe_metadata_int(f.get("file_size"))
         results.append({
             "file_id": fid,
             "file_name": f.get("file_name", "Media"),
-            "file_size": f.get("file_size", 0),
-            "file_size_formatted": humanbytes(f.get("file_size", 0)),
+            "file_size": fs_val,
+            "file_size_formatted": humanbytes(fs_val),
             "mime_type": f.get("mime_type", "application/octet-stream"),
             "created_at": f.get("created_at"),
             "stream_url": f"{Config.BASE_URL}/stream/{fid}",
@@ -1246,6 +1322,7 @@ def create_app(bot_instance=None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
     class SelectiveGZipMiddleware:
         def __init__(self, app, minimum_size: int = 500):
             self.app = app
@@ -1268,31 +1345,57 @@ def create_app(bot_instance=None) -> FastAPI:
             if scope["type"] != "http":
                 return await self.app(scope, receive, send)
             path = scope.get("path", "")
+            method = scope.get("method", "GET")
+            query = scope.get("query_string", b"").decode("latin-1")
 
             async def _send_with_headers(message):
                 if message["type"] == "http.response.start":
-                    raw_headers = list(message.get("headers", []))
-                    existing = {k.lower() for k, _ in raw_headers}
-                    if b"cache-control" not in existing:
-                        if path in {"/", "/stats"}:
-                            raw_headers.append((b"cache-control", b"public, max-age=60, stale-while-revalidate=600"))
-                        elif path.startswith(("/watch/", "/dl/")):
-                            raw_headers.append((b"cache-control", b"public, max-age=60, stale-while-revalidate=300"))
-                        elif path.startswith("/api/info/"):
-                            raw_headers.append((b"cache-control", b"private, max-age=15"))
-                        elif path.startswith("/api/search"):
-                            raw_headers.append((b"cache-control", b"private, max-age=10"))
-                        elif path == "/api/status":
-                            raw_headers.append((b"cache-control", b"private, max-age=5, stale-while-revalidate=15"))
-                    if b"x-content-type-options" not in existing:
-                        raw_headers.append((b"x-content-type-options", b"nosniff"))
-                    if b"referrer-policy" not in existing:
-                        raw_headers.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
-                    message = {**message, "headers": raw_headers}
+                    headers = _augment_headers(list(message.get("headers", [])), path)
+                    message = {**message, "headers": headers}
                 await send(message)
 
-            async with cache.response_scope(f"http:{path}"):
-                await self.app(scope, receive, _send_with_headers)
+            if method == "GET":
+                ttl = _cacheable_ttl(path)
+                if ttl > 0:
+                    cache_key = f"{path}?{query}" if query else path
+                    cached = _response_cache_get(cache_key)
+                    if cached:
+                        _, status, cached_headers, body = cached
+                        await _send_with_headers({"type": "http.response.start", "status": status, "headers": list(cached_headers)})
+                        await send({"type": "http.response.body", "body": body, "more_body": False})
+                        return
+
+                    captured_status = [200]
+                    captured_headers = [None]
+                    captured_body = bytearray()
+                    captured_too_large = [False]
+
+                    async def _capture_send(message):
+                        if message["type"] == "http.response.start":
+                            captured_status[0] = message["status"]
+                            captured_headers[0] = list(message.get("headers", []))
+                        elif message["type"] == "http.response.body":
+                            chunk = message.get("body", b"")
+                            if chunk and not captured_too_large[0]:
+                                if len(captured_body) + len(chunk) <= _RESPONSE_CACHE_BODY_LIMIT:
+                                    captured_body.extend(chunk)
+                                else:
+                                    captured_too_large[0] = True
+                                    captured_body.clear()
+                        await _send_with_headers(message)
+
+                    try:
+                        await self.app(scope, receive, _capture_send)
+                    except Exception:
+                        raise
+
+                    if (captured_status[0] == 200
+                            and captured_headers[0] is not None
+                            and not captured_too_large[0]):
+                        _response_cache_set(cache_key, captured_status[0], captured_headers[0], bytes(captured_body), ttl)
+                    return
+
+            await self.app(scope, receive, _send_with_headers)
 
     fastapi_app.add_middleware(PureASGICacheHeadersMiddleware)
 
