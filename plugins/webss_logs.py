@@ -479,7 +479,12 @@ async def handle_logs_cmds(client: Client, message: Message):
             mode = "err"
         elif arg1.lower() in ("flood", "floodwait"):
             mode = "flood"
-        elif arg1.lower() in ("media", "ffmpeg", "stream", "rename", "compress"):
+        elif arg1.lower() in ("recovery", "tasks", "task"):
+            mode = "tasks"
+        elif arg1.lower() in ("stream", "rename", "compress"):
+            mode = "media"
+            search_q = arg1.lower()
+        elif arg1.lower() in ("media", "ffmpeg"):
             mode = "media"
         else:
             search_q = " ".join(message.command[1:]).strip()

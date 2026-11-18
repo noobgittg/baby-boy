@@ -318,12 +318,21 @@ async def iter_12mbps_file_stream(
                     except asyncio.CancelledError:
                         raise
                     except Exception as inner_err:
-                        if not retried_refresh and current_part == 1:
+                        err_txt = f"{type(inner_err).__name__} {inner_err}".upper()
+                        if not retried_refresh and current_part == current_part_start:
                             retried_refresh = True
+                            if "AUTH_BYTES_INVALID" in err_txt or "AUTHBYTESINVALID" in err_txt or "AUTH_KEY_UNREGISTERED" in err_txt:
+                                reset_fn = getattr(bot, "reset_media_sessions", None)
+                                if callable(reset_fn):
+                                    await reset_fn()
+                                else:
+                                    from plugins.core_services import _clear_stale_media_sessions
+                                    await _clear_stale_media_sessions(bot)
+                                await asyncio.sleep(0.35)
                             refreshed = await resolve_telegram_message(bot, file_doc, force_refresh=True)
                             if refreshed is not None:
                                 active_msg = refreshed
-                                continue
+                            continue
                         raise inner_err
             except asyncio.CancelledError:
                 raise
@@ -356,6 +365,48 @@ async def iter_12mbps_file_stream(
             except (asyncio.CancelledError, Exception):
                 pass
 
+
+
+class SafeStreamingResponse(StreamingResponse):
+    async def stream_response(self, send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": self.status_code,
+                "headers": self.raw_headers,
+            }
+        )
+        try:
+            async for chunk in self.body_iterator:
+                if not isinstance(chunk, (bytes, memoryview)):
+                    chunk = chunk.encode(self.charset)
+                if chunk:
+                    await send({"type": "http.response.body", "body": chunk, "more_body": True})
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+        except (RuntimeError, ConnectionResetError, BrokenPipeError, asyncio.CancelledError) as exc:
+            msg = str(exc)
+            if "Response content shorter than Content-Length" in msg or isinstance(exc, (ConnectionResetError, BrokenPipeError, asyncio.CancelledError)):
+                logger.debug("Stream closed early before full Content-Length: %s", msg)
+                return
+            raise
+
+
+async def _prime_stream_iterator(iterator: AsyncGenerator[bytes, None]):
+    first_chunk = None
+    try:
+        first_chunk = await iterator.__anext__()
+    except StopAsyncIteration:
+        return None
+    except Exception:
+        return None
+
+    async def _chained():
+        if first_chunk:
+            yield first_chunk
+        async for chunk in iterator:
+            yield chunk
+
+    return _chained()
 
 pages_router = APIRouter()
 stream_router = APIRouter()
@@ -794,7 +845,11 @@ async def watch_page(request: Request, file_id: str):
                 pass
         if not await cache.get(f"probe_lock_{file_id}"):
             await cache.set(f"probe_lock_{file_id}", True, ttl=30)
-            asyncio.create_task(_bg_probe_update(file_id, file_path, dict(raw_meta)))
+            async def _delayed_probe():
+                if not (file_path and os.path.exists(file_path)):
+                    await asyncio.sleep(3.0)
+                await _bg_probe_update(file_id, file_path, dict(raw_meta))
+            asyncio.create_task(_delayed_probe())
     metadata = media_metadata_view(file_doc)
 
     base_url = str(request.base_url).rstrip("/")
@@ -916,8 +971,12 @@ async def stream_media_endpoint(request: Request, file_id: str, range: str = Hea
     if request.method == "HEAD":
         return Response(status_code=status_code, headers=headers)
 
-    return StreamingResponse(
-        iter_12mbps_file_stream(file_path, bot, file_doc, start, end, request),
+    primed = await _prime_stream_iterator(iter_12mbps_file_stream(file_path, bot, file_doc, start, end, request))
+    if primed is None:
+        raise HTTPException(status_code=503, detail="Upstream media stream temporarily unavailable. Please retry.")
+
+    return SafeStreamingResponse(
+        primed,
         status_code=status_code,
         headers=headers,
         media_type=mime_type,
@@ -978,8 +1037,12 @@ async def download_media_endpoint(request: Request, file_id: str, range: str = H
     if request.method == "HEAD":
         return Response(status_code=status_code, headers=headers)
 
-    return StreamingResponse(
-        iter_12mbps_file_stream(file_path, bot, file_doc, start, end, request),
+    primed = await _prime_stream_iterator(iter_12mbps_file_stream(file_path, bot, file_doc, start, end, request))
+    if primed is None:
+        raise HTTPException(status_code=503, detail="Upstream download stream temporarily unavailable. Please retry.")
+
+    return SafeStreamingResponse(
+        primed,
         status_code=status_code,
         media_type="application/octet-stream",
         headers=headers,
@@ -1197,24 +1260,41 @@ def create_app(bot_instance=None) -> FastAPI:
 
     fastapi_app.add_middleware(SelectiveGZipMiddleware, minimum_size=500)
 
-    @fastapi_app.middleware("http")
-    async def public_page_cache(request: Request, call_next):
-        async with cache.response_scope(f"http:{request.url.path}"):
-            response = await call_next(request)
-            path = request.url.path
-            if path in {"/", "/stats"}:
-                response.headers.setdefault("Cache-Control", "public, max-age=60, stale-while-revalidate=600")
-            elif path.startswith("/watch/") or path.startswith("/dl/"):
-                response.headers.setdefault("Cache-Control", "public, max-age=60, stale-while-revalidate=300")
-            elif path.startswith("/api/info/"):
-                response.headers.setdefault("Cache-Control", "private, max-age=15")
-            elif path.startswith("/api/search"):
-                response.headers.setdefault("Cache-Control", "private, max-age=10")
-            elif path == "/api/status":
-                response.headers.setdefault("Cache-Control", "private, max-age=5, stale-while-revalidate=15")
-            response.headers.setdefault("X-Content-Type-Options", "nosniff")
-            response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-            return response
+    class PureASGICacheHeadersMiddleware:
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] != "http":
+                return await self.app(scope, receive, send)
+            path = scope.get("path", "")
+
+            async def _send_with_headers(message):
+                if message["type"] == "http.response.start":
+                    raw_headers = list(message.get("headers", []))
+                    existing = {k.lower() for k, _ in raw_headers}
+                    if b"cache-control" not in existing:
+                        if path in {"/", "/stats"}:
+                            raw_headers.append((b"cache-control", b"public, max-age=60, stale-while-revalidate=600"))
+                        elif path.startswith(("/watch/", "/dl/")):
+                            raw_headers.append((b"cache-control", b"public, max-age=60, stale-while-revalidate=300"))
+                        elif path.startswith("/api/info/"):
+                            raw_headers.append((b"cache-control", b"private, max-age=15"))
+                        elif path.startswith("/api/search"):
+                            raw_headers.append((b"cache-control", b"private, max-age=10"))
+                        elif path == "/api/status":
+                            raw_headers.append((b"cache-control", b"private, max-age=5, stale-while-revalidate=15"))
+                    if b"x-content-type-options" not in existing:
+                        raw_headers.append((b"x-content-type-options", b"nosniff"))
+                    if b"referrer-policy" not in existing:
+                        raw_headers.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
+                    message = {**message, "headers": raw_headers}
+                await send(message)
+
+            async with cache.response_scope(f"http:{path}"):
+                await self.app(scope, receive, _send_with_headers)
+
+    fastapi_app.add_middleware(PureASGICacheHeadersMiddleware)
 
     fastapi_app.include_router(pages_router)
     fastapi_app.include_router(stream_router)

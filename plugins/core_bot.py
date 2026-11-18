@@ -75,6 +75,52 @@ class MMWProBot(Client):
             max_concurrent_transmissions=Config.TG_TRANSMISSION_WORKERS,
             plugins=dict(root="plugins")
         )
+        self._dc_auth_lock = asyncio.Lock()
+
+    async def reset_media_sessions(self, dc_id=None):
+        async with self._dc_auth_lock:
+            media_sessions = getattr(self, "media_sessions", None)
+            if not isinstance(media_sessions, dict) or not media_sessions:
+                return
+            keys = [dc_id] if (dc_id is not None and dc_id in media_sessions) else list(media_sessions.keys())
+            for k in keys:
+                sess = media_sessions.pop(k, None)
+                if sess is not None:
+                    try:
+                        stop_fn = getattr(sess, "stop", None)
+                        if callable(stop_fn):
+                            res = stop_fn()
+                            if asyncio.iscoroutine(res):
+                                await res
+                    except Exception:
+                        pass
+
+    async def get_file(self, *args, **kwargs):
+        file_id = args[0] if args else kwargs.get("file_id")
+        target_dc = getattr(file_id, "dc_id", None)
+        media_sessions = getattr(self, "media_sessions", None)
+        if target_dc is not None and isinstance(media_sessions, dict) and target_dc not in media_sessions:
+            async with self._dc_auth_lock:
+                pass
+        for attempt in range(3):
+            try:
+                async for chunk in super().get_file(*args, **kwargs):
+                    yield chunk
+                return
+            except Exception as exc:
+                err_txt = f"{type(exc).__name__} {exc}".upper()
+                if "AUTH_BYTES_INVALID" in err_txt or "AUTHBYTESINVALID" in err_txt or "AUTH_KEY_UNREGISTERED" in err_txt:
+                    logger.warning(
+                        "⚠️ [ᴍᴇᴅɪᴀ sᴇssɪᴏɴ ʀᴇᴄᴏᴠᴇʀʏ] %s on DC=%s (attempt %s/3) — resetting media session",
+                        type(exc).__name__,
+                        target_dc,
+                        attempt + 1,
+                    )
+                    await self.reset_media_sessions(target_dc)
+                    if attempt < 2:
+                        await asyncio.sleep(0.35 * (attempt + 1))
+                        continue
+                raise
 
     def add_handler(self, handler, group: int = 0):
         if hasattr(handler, "callback") and callable(handler.callback):

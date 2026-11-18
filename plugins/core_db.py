@@ -1053,6 +1053,56 @@ class TaskRepository:
             d.pop("_id", None)
         return docs
 
+    async def get_user_tasks(self, user_id: int, limit: int = 50) -> List[Dict[str, Any]]:
+        cursor = self.col.find({"user_id": int(user_id)}, {"_id": 0}).sort("updated_at", -1).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        for d in docs:
+            d.pop("_id", None)
+        return docs
+
+    async def _remove_from_journal(self, task_ids: List[str]) -> None:
+        if not task_ids:
+            return
+        targets = {str(t) for t in task_ids}
+        async with self._journal_lock:
+            def _do_rm():
+                jdata = self._read_journal_sync()
+                changed = False
+                for tid in targets:
+                    if tid in jdata:
+                        jdata.pop(tid, None)
+                        changed = True
+                if changed:
+                    self._write_journal_sync(jdata)
+            await asyncio.to_thread(_do_rm)
+
+    async def delete_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        tid = str(task_id)
+        doc = await self.get_task(tid)
+        await self.col.delete_one({"task_id": tid})
+        await cache.delete(f"task_{tid}")
+        await self._remove_from_journal([tid])
+        return doc
+
+    async def clear_tasks(
+        self,
+        user_id: Optional[int] = None,
+        statuses: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        query: Dict[str, Any] = {}
+        if user_id is not None:
+            query["user_id"] = int(user_id)
+        if statuses:
+            query["status"] = {"$in": list(statuses)}
+        cursor = self.col.find(query, {"_id": 0}).sort("updated_at", -1).limit(500)
+        docs = await cursor.to_list(length=500)
+        tids = [str(d["task_id"]) for d in docs if d.get("task_id")]
+        for tid in tids:
+            await self.col.delete_one({"task_id": tid})
+            await cache.delete(f"task_{tid}")
+        await self._remove_from_journal(tids)
+        return docs
+
 
 user_repo = UserRepository()
 chat_repo = ChatRepository()

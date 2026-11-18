@@ -3,7 +3,7 @@ import re
 import time
 import secrets
 import asyncio
-from typing import Optional, Dict, Any, List
+from typing import Tuple, Optional, Dict, Any, List, Tuple
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 from pyrogram.types import (
@@ -1819,3 +1819,172 @@ async def run_task_recovery_watchdog(bot: Any, interval: int = None):
             raise
         except Exception as e:
             logger.debug(f"Task watchdog cycle notice: {e}")
+
+
+def _safe_cleanup_task_workdir(work_dir: Optional[str]) -> None:
+    if not work_dir:
+        return
+    try:
+        base_dl = os.path.abspath(Config.DOWNLOAD_DIR)
+        target = os.path.abspath(str(work_dir))
+        if target != base_dl and target.startswith(base_dl + os.sep) and os.path.exists(target):
+            clean_temp_files(target)
+    except Exception:
+        pass
+
+
+async def _delete_single_task_safely(task_id: str) -> Tuple[bool, str]:
+    doc = await task_repo.get_task(task_id)
+    if not doc:
+        return False, "Task ID not found."
+    await task_manager.cancel_task(task_id)
+    work_dir = doc.get("work_dir")
+    await task_repo.delete_task(task_id)
+    _safe_cleanup_task_workdir(work_dir)
+    logger.info("🗑️ ᴛᴀsᴋ ᴅᴇʟᴇᴛᴇᴅ › ᴛᴀsᴋ_ɪᴅ=%s ᴜsᴇʀ=%s", task_id, doc.get("user_id"))
+    return True, f"Task {task_id} deleted and temporary workspace cleaned."
+
+
+async def _render_tasks_list_view(user_id: int) -> Tuple[str, InlineKeyboardMarkup]:
+    is_admin = user_id in Config.ADMINS
+    tasks = await (task_repo.get_all_tasks(limit=12) if is_admin else task_repo.get_user_tasks(user_id, limit=12))
+    scope_lbl = "ɢʟᴏʙᴀʟ ᴀᴅᴍɪɴ ᴠɪᴇᴡ" if is_admin else "ʏᴏᴜʀ ᴘᴇʀsᴏɴᴀʟ ᴛᴀsᴋs"
+    if not tasks:
+        text = (
+            f"✦ **{to_smallcaps('persistent task manager')}** (`{scope_lbl}`) ✦ ♻️\n\n"
+            f"ℹ️ **{to_smallcaps('no persistent tasks found.')}**\n\n"
+            f"💡 {to_smallcaps('use /taskreport for recovery metrics or send media to start a task.')}"
+            f"{format_watermark()}"
+        )
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(f"♻️ {to_smallcaps('recovery report')}", callback_data="task_rec#report"),
+                InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home"),
+            ]
+        ])
+        return text, kb
+
+    lines = [
+        f"✦ **{to_smallcaps('persistent task manager')}** (`{scope_lbl}`) ✦ ♻️\n",
+        f"• 📊 **{to_smallcaps('showing')}** : `{len(tasks)}` {to_smallcaps('recent task(s)')}\n",
+    ]
+    buttons = []
+    for t in tasks[:8]:
+        tid = str(t.get("task_id", ""))
+        st = str(t.get("status", "unknown")).upper()
+        ttype = str(t.get("task_type", "media")).upper()
+        fname = str(t.get("file_name", "Media"))[:32]
+        lines.append(f"• `{tid}` │ `{ttype}` │ `{st}` │ `{fname}`")
+        buttons.append([
+            InlineKeyboardButton(f"🗑️ {to_smallcaps('delete')} {tid[:18]}", callback_data=f"task_del#{tid}")
+        ])
+
+    lines.append(
+        f"\n💡 {to_smallcaps('commands')}: `/delete_task <id>` • `/clear_tasks` • `/recover`"
+        f"{format_watermark()}"
+    )
+    clear_row = [InlineKeyboardButton(f"🧹 {to_smallcaps('clear finished')}", callback_data="task_clear#mine")]
+    if is_admin:
+        clear_row.append(InlineKeyboardButton(f"🔥 {to_smallcaps('clear all global')}", callback_data="task_clear#global"))
+    buttons.append(clear_row)
+    buttons.append([
+        InlineKeyboardButton(f"♻️ {to_smallcaps('run recovery')}", callback_data="task_rec#run"),
+        InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home"),
+        InlineKeyboardButton(f"❌ {to_smallcaps('close')}", callback_data="close_data"),
+    ])
+    return "\n".join(lines), InlineKeyboardMarkup(buttons)
+
+
+@Client.on_message(filters.command(["tasks", "mytasks"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+async def list_tasks_command(client: Client, message: Message):
+    if not message.from_user:
+        return
+    uid = message.from_user.id
+    text, kb = await _render_tasks_list_view(uid)
+    await safe_reply_text(message, text, reply_markup=kb)
+
+
+@Client.on_message(filters.command(["delete_task", "deltask"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+async def delete_task_command(client: Client, message: Message):
+    if not message.from_user:
+        return
+    uid = message.from_user.id
+    if len(message.command) < 2:
+        return await safe_reply_text(
+            message,
+            f"📝 **{to_smallcaps('usage')}** : `/delete_task <task_id>`\n"
+            f"💡 {to_smallcaps('use /tasks to view your task ids.')}"
+            f"{format_watermark()}",
+        )
+    tid = message.command[1].strip()
+    doc = await task_repo.get_task(tid)
+    if not doc:
+        return await safe_reply_text(message, f"❌ **{to_smallcaps('task not found')}** : `{tid}`{format_watermark()}")
+    if int(doc.get("user_id") or 0) != uid and uid not in Config.ADMINS:
+        return await safe_reply_text(message, f"🚫 **{to_smallcaps('you are not authorized to delete this task!')}**{format_watermark()}")
+    ok, msg = await _delete_single_task_safely(tid)
+    badge = "✅" if ok else "❌"
+    await safe_reply_text(message, f"{badge} **{to_smallcaps(msg)}**{format_watermark()}")
+
+
+@Client.on_message(filters.command(["clear_tasks", "cleartasks"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+async def clear_tasks_command(client: Client, message: Message):
+    if not message.from_user:
+        return
+    uid = message.from_user.id
+    is_admin = uid in Config.ADMINS
+    arg = message.command[1].strip().lower() if len(message.command) > 1 else "finished"
+    if arg == "all":
+        statuses = None
+    elif arg == "failed":
+        statuses = ["failed", "cancelled"]
+    elif arg == "completed":
+        statuses = ["completed"]
+    else:
+        statuses = ["completed", "failed", "cancelled", "skipped"]
+
+    target_uid = None if (is_admin and arg == "all") else uid
+    deleted_docs = await task_repo.clear_tasks(user_id=target_uid, statuses=statuses)
+    for d in deleted_docs:
+        tid = d.get("task_id")
+        if tid:
+            await task_manager.cancel_task(str(tid))
+        _safe_cleanup_task_workdir(d.get("work_dir"))
+
+    logger.info("🧹 /clear_tasks › ᴜsᴇʀ=%s ᴍᴏᴅᴇ=%s ʀᴇᴍᴏᴠᴇᴅ=%s", uid, arg, len(deleted_docs))
+    await safe_reply_text(
+        message,
+        f"✦ **{to_smallcaps('task cleanup completed')}** ✦ 🧹\n\n"
+        f"• 🗑️ **{to_smallcaps('removed records')}** : `{len(deleted_docs)}`\n"
+        f"• 🏷️ **{to_smallcaps('scope')}** : `{'Global' if target_uid is None else 'Personal'} ({arg})`"
+        f"{format_watermark()}",
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^task_(del|clear)#(.+)$"))
+async def task_management_callback(client: Client, query: CallbackQuery):
+    uid = query.from_user.id if query.from_user else 0
+    action = query.matches[0].group(1)
+    payload = query.matches[0].group(2)
+
+    if action == "del":
+        doc = await task_repo.get_task(payload)
+        if not doc:
+            return await query.answer(to_smallcaps("task already removed!"), show_alert=True)
+        if int(doc.get("user_id") or 0) != uid and uid not in Config.ADMINS:
+            return await query.answer(to_smallcaps("unauthorized!"), show_alert=True)
+        await _delete_single_task_safely(payload)
+        await query.answer(to_smallcaps("task deleted!"))
+    elif action == "clear":
+        if payload == "global":
+            if uid not in Config.ADMINS:
+                return await query.answer(to_smallcaps("admins only!"), show_alert=True)
+            deleted = await task_repo.clear_tasks(user_id=None, statuses=["completed", "failed", "cancelled", "skipped"])
+        else:
+            deleted = await task_repo.clear_tasks(user_id=uid, statuses=["completed", "failed", "cancelled", "skipped"])
+        for d in deleted:
+            _safe_cleanup_task_workdir(d.get("work_dir"))
+        await query.answer(to_smallcaps(f"cleared {len(deleted)} task(s)!"))
+
+    text, kb = await _render_tasks_list_view(uid)
+    await safe_edit_text(query.message, text, reply_markup=kb)
