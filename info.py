@@ -1,17 +1,9 @@
 import re
 import time
-from os import environ
-from config import Config
+from config import Config, _clean_env
 from Script import script
 
 id_pattern = re.compile(r'^-?\d+$')
-
-
-def _clean_env(key: str, default: str = "") -> str:
-    raw = environ.get(key, default)
-    if raw is None:
-        return default
-    return str(raw).strip().strip("\"'").strip()
 
 
 def is_enabled(value, default: bool = True) -> bool:

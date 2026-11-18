@@ -39,6 +39,13 @@ from plugins.core_utils import (
     redact_secrets,
     setup_logger,
     to_smallcaps,
+    format_watermark,
+    format_watermark_html,
+    is_admin,
+    humanbytes,
+    time_formatter,
+    sanitize_filename,
+    clean_temp_files,
     task_manager,
 )
 
@@ -53,10 +60,6 @@ to_small_caps = to_smallcaps
 to_smallcap = to_smallcaps
 stylish = to_smallcaps
 sc = to_smallcaps
-
-
-def format_watermark_html() -> str:
-    return f"\n\n📢 <b>{to_smallcaps('join')} : <a href='{Config.WATERMARK_URL}'>{html.escape(Config.WATERMARK)}</a></b>"
 
 
 def make_progress_bar(percent: float, length: int = 10) -> str:
@@ -101,13 +104,9 @@ def is_admin_sync(user_id: Optional[Union[int, str]]) -> bool:
         return False
     try:
         uid = int(user_id)
-        return uid in ADMINS or str(uid) in ADMINS
+        return uid in ADMINS or str(uid) in ADMINS or uid in Config.ADMINS
     except (ValueError, TypeError):
         return str(user_id) in ADMINS
-
-
-async def is_admin(user_id: Optional[Union[int, str]], client=None) -> bool:
-    return is_admin_sync(user_id)
 
 
 async def is_chat_or_global_admin(
@@ -549,6 +548,10 @@ def get_readable_time(seconds: Union[int, float]) -> str:
 format_uptime_short = get_readable_time
 
 
+async def get_bot_uptime() -> str:
+    return format_uptime_short(int(time.time() - BOT_START_TIME))
+
+
 async def broadcast_messages(
     user_id: int,
     message: Message,
@@ -710,18 +713,6 @@ def last_online(from_user):
     else:
         status_str += "ᴀᴄᴛɪᴠᴇ"
     return status_str
-
-
-def humanbytes(size):
-    if not size:
-        return "0 ʙ"
-    power = 2**10
-    n = 0
-    Dic_powerN = {0: " ", 1: "ᴋɪ", 2: "ᴍɪ", 3: "ɢɪ", 4: "ᴛɪ"}
-    while size > power:
-        size /= power
-        n += 1
-    return str(round(size, 2)) + " " + Dic_powerN.get(n, "ᴘɪ") + "ʙ"
 
 
 def parse_Inline_buttons_from_text(raw_text: str) -> Tuple[str, Optional[InlineKeyboardMarkup]]:
