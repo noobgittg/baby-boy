@@ -9,18 +9,50 @@ from plugins.core_utils import to_smallcaps, format_watermark, safe_edit_text, s
 @Client.on_message(filters.private & filters.command(["autocaption", "auto_caption"], prefixes=COMMAND_PREFIXES))
 async def toggle_autocaption_cmd(client: Client, message: Message):
     user = await user_repo.get_or_create(message.from_user.id, message.from_user.first_name, message.from_user.username)
-    enabled = not bool(user.get("auto_caption", True))
+    if len(message.command) > 1:
+        arg = message.command[1].strip().lower()
+        enabled = arg in ("on", "true", "1", "yes", "enable")
+    else:
+        enabled = not bool(user.get("auto_caption", True))
     await user_repo.update_user(message.from_user.id, {"auto_caption": enabled})
     state = "🟢 ᴇɴᴀʙʟᴇᴅ" if enabled else "⚪ ᴅɪsᴀʙʟᴇᴅ"
-    await safe_reply_text(message, 
+    tbtn = f"⚪ {to_smallcaps('disable auto-caption')}" if enabled else f"🟢 {to_smallcaps('enable auto-caption')}"
+    await safe_reply_text(message,
         f"✦ **{to_smallcaps('auto-caption mode')}** ✦\n\n"
         f"• 📝 **{to_smallcaps('status')}** : `{state}`\n\n"
-        f"💡 {to_smallcaps('use /setcaption to define a template, or /autocaption to toggle metadata captions.')}"
+        f"💡 {to_smallcaps('use /setcaption to define a template, or tap below to toggle auto-caption.')}"
         f"{format_watermark()}",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton(f"⚙️ {to_smallcaps('settings')}", callback_data="nav_settings"),
-            InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home")
-        ]])
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(tbtn, callback_data="caption_toggle_cb")],
+            [
+                InlineKeyboardButton(f"⚙️ {to_smallcaps('settings')}", callback_data="nav_settings"),
+                InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home")
+            ]
+        ])
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^caption_toggle_cb$"))
+async def caption_toggle_callback(client: Client, query: CallbackQuery):
+    u = await user_repo.get_or_create(query.from_user.id, query.from_user.first_name, query.from_user.username)
+    enabled = not bool(u.get("auto_caption", True))
+    await user_repo.update_user(query.from_user.id, {"auto_caption": enabled})
+    state = "🟢 ᴇɴᴀʙʟᴇᴅ" if enabled else "⚪ ᴅɪsᴀʙʟᴇᴅ"
+    tbtn = f"⚪ {to_smallcaps('disable auto-caption')}" if enabled else f"🟢 {to_smallcaps('enable auto-caption')}"
+    await query.answer(to_smallcaps(f"auto-caption {'enabled' if enabled else 'disabled'}!"))
+    await safe_edit_text(
+        query.message,
+        f"✦ **{to_smallcaps('auto-caption mode')}** ✦\n\n"
+        f"• 📝 **{to_smallcaps('status')}** : `{state}`\n\n"
+        f"💡 {to_smallcaps('use /setcaption to define a template, or tap below to toggle auto-caption.')}"
+        f"{format_watermark()}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(tbtn, callback_data="caption_toggle_cb")],
+            [
+                InlineKeyboardButton(f"⚙️ {to_smallcaps('settings')}", callback_data="nav_settings"),
+                InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home")
+            ]
+        ])
     )
 
 @Client.on_message(filters.private & filters.command(["setcaption", "set_caption"], prefixes=COMMAND_PREFIXES))

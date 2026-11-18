@@ -530,7 +530,7 @@ async def remux_container(input_path: str, output_path: str) -> bool:
     stream_info = await check_media_streams(input_path)
     in_acodec = str(stream_info.get("audio_codec") or "").lower()
     can_copy_aud = (ext != ".mp4") or (in_acodec in ("aac", "mp3", "ac3", "eac3", ""))
-    aud_flags = ["-c:a", "copy"] if can_copy_aud else ["-c:a", "aac", "-aac_coder", "fast", "-b:a", "128k"]
+    aud_flags = ["-c:a", "copy"] if can_copy_aud else ["-c:a", "aac", "-b:a", "128k"]
     cmd = [
         FFMPEG_BIN, "-y",
         "-nostdin",
@@ -915,12 +915,7 @@ TURBO_X265_PARAMS = (
 )
 
 def _build_fast_decode_input_flags(total_duration: int, preset: str) -> List[str]:
-    p_low = str(preset or "turbo").lower()
-    flags = ["-flags2", "fast", "-skip_loop_filter", "all"]
-    if p_low in ("hyper", "turbo", "ultrafast") or total_duration >= 600:
-        flags.extend(["-skip_frame", "noref"])
-    flags.extend(["-threads", "0", "-thread_type", "frame+slice"])
-    return flags
+    return ["-err_detect", "ignore_err", "-fflags", "+genpts+igndts", "-threads", "0"]
 
 def _build_5min_turbo_vf(
     even_h: int,
@@ -950,22 +945,17 @@ def _build_5min_turbo_vf(
     if source_height > 0 and even_h > source_height:
         even_h = max(2, source_height - (source_height % 2))
 
-    skip_noref_active = (p_low in ("hyper", "turbo", "ultrafast") or total_duration >= 600)
     fps_prefix = ""
-    if not skip_noref_active:
-        target_fps = 20 if total_duration >= 900 else 24
-        if source_fps <= 0 or source_fps > target_fps:
-            fps_prefix = f"fps={target_fps},"
+    if total_duration >= 900 and source_fps > 30:
+        fps_prefix = "fps=24,"
 
     if even_h > 0:
-        vf_filter = f"{fps_prefix}scale=-2:{even_h}:flags={scale_flag},setsar=1"
+        vf_filter = f"{fps_prefix}scale=-2:{even_h}:flags={scale_flag},setsar=1,format=yuv420p"
     else:
-        vf_filter = f"{fps_prefix}scale=trunc(iw/2)*2:trunc(ih/2)*2:flags={scale_flag},setsar=1"
+        vf_filter = f"{fps_prefix}scale=trunc(iw/2)*2:trunc(ih/2)*2:flags={scale_flag},setsar=1,format=yuv420p"
 
     x264_p = HYPER_X264_PARAMS if is_hyper else TURBO_X264_PARAMS
     extra_x264: List[str] = []
-    if skip_noref_active:
-        extra_x264.extend(["-vsync", "vfr"])
     if is_turbo:
         extra_x264.extend(["-tune", "fastdecode", "-x264-params", x264_p])
     else:
@@ -1056,6 +1046,8 @@ async def _run_monitored_ffmpeg(
                 pass
         if process.returncode == 0 and await validate_media_output(output_path):
             return True
+        tail_clean = " ".join(error_tail.strip().splitlines()[-6:])[-400:]
+        logger.warning(f"FFmpeg non-zero/invalid output (rc={process.returncode}) for {engine_label}: {tail_clean}")
     except asyncio.CancelledError:
         if bg_edit_task and not bg_edit_task.done():
             bg_edit_task.cancel()
@@ -1137,7 +1129,7 @@ async def compress_media(
 
     in_acodec = str(stream_info.get("audio_codec") or "").lower()
     in_ach = int(stream_info.get("audio_channels") or 2)
-    can_copy_audio = in_acodec in ("aac", "mp3", "ac3", "eac3") and (in_ach <= 2 or in_acodec in ("aac", "mp3"))
+    can_copy_audio = in_acodec == "aac" and in_ach <= 2
     if str(audio_bitrate).lower() == "copy":
         audio_args = ["-c:a", "copy"]
         aud_label = "Audio Copy"
@@ -1146,7 +1138,7 @@ async def compress_media(
         aud_label = f"Audio Copy ({in_acodec.upper()})"
     else:
         abr = str(audio_bitrate if str(audio_bitrate).lower() not in ("auto", "copy") else "64k")
-        audio_args = ["-c:a", "aac", "-aac_coder", "fast", "-b:a", abr, "-ac", "2"]
+        audio_args = ["-c:a", "aac", "-b:a", abr, "-ac", "2"]
         aud_label = f"Fast AAC {abr}"
 
     primary_cmd = [
@@ -1182,28 +1174,22 @@ async def compress_media(
 
     safe_h = even_h if even_h > 0 else min(480, src_h if src_h > 0 else 480)
     safe_h = max(2, safe_h - (safe_h % 2))
-    safe_vf = f"scale=-2:{safe_h}:flags=neighbor,setsar=1"
+    safe_vf = f"scale=-2:{safe_h},setsar=1,format=yuv420p"
     fallback_cmd = [
         FFMPEG_BIN, "-y",
         "-nostdin",
-        "-flags2", "fast", "-skip_loop_filter", "all",
-        "-threads", "0", "-thread_type", "frame+slice",
+        "-err_detect", "ignore_err",
+        "-fflags", "+genpts+igndts",
         "-i", input_path,
-        "-filter_threads", "0",
         "-map", "0:v:0?",
         "-map", "0:a:0?",
         "-vf", safe_vf,
         "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-tune", "fastdecode",
-        "-x264-params", TURBO_X264_PARAMS,
-        "-crf", str(max(26, crf)),
-        *rate_cap_args,
+        "-preset", "veryfast",
+        "-crf", str(max(24, crf)),
         "-pix_fmt", "yuv420p",
-        "-threads", "0",
         "-c:a", "aac",
-        "-aac_coder", "fast",
-        "-b:a", "64k",
+        "-b:a", "96k",
         "-ac", "2",
         "-map_chapters", "-1",
         "-sn", "-dn",
@@ -1212,24 +1198,25 @@ async def compress_media(
         output_path
     ]
     if await _run_monitored_ffmpeg(
-        fallback_cmd, output_path, total_duration, progress_message, header_title, f"H.264 ULTRAFAST {safe_h}p + AAC 64k", task_id=task_id
+        fallback_cmd, output_path, total_duration, progress_message, header_title, f"H.264 SAFE {safe_h}p + AAC 96k", task_id=task_id
     ):
         return True
 
     video_only_cmd = [
         FFMPEG_BIN, "-y",
-        "-nostdin", "-threads", "0",
+        "-nostdin",
+        "-err_detect", "ignore_err",
+        "-fflags", "+genpts+igndts",
         "-i", input_path,
         "-map", "0:v:0?",
-        "-vf", safe_vf,
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
         "-c:v", "libx264",
         "-preset", "ultrafast",
-        "-x264-params", TURBO_X264_PARAMS,
-        "-crf", str(max(28, crf)),
-        *rate_cap_args,
+        "-crf", str(max(26, crf)),
         "-pix_fmt", "yuv420p",
         "-an",
         "-movflags", "+faststart",
+        "-max_muxing_queue_size", "9999",
         output_path
     ]
     return await _run_monitored_ffmpeg(
@@ -1551,7 +1538,7 @@ async def compress_to_target_size(
                 audio_bitrate_kb = 64
             else:
                 audio_bitrate_kb = 96
-        audio_args = ["-c:a", "aac", "-aac_coder", "fast", "-b:a", f"{audio_bitrate_kb}k", "-ac", "2"]
+        audio_args = ["-c:a", "aac", "-b:a", f"{audio_bitrate_kb}k", "-ac", "2"]
         aud_label = f"Fast AAC {audio_bitrate_kb}k"
 
     video_bitrate_kb = max(65, min(25000, int(total_kbps - audio_bitrate_kb)))
@@ -1620,24 +1607,19 @@ async def compress_to_target_size(
     fb_cmd = [
         FFMPEG_BIN, "-y",
         "-nostdin",
-        "-flags2", "fast", "-skip_loop_filter", "all",
-        "-threads", "0", "-thread_type", "frame+slice",
+        "-err_detect", "ignore_err",
+        "-fflags", "+genpts+igndts",
         "-i", input_path,
-        "-filter_threads", "0",
         "-map", "0:v:0?",
         "-map", "0:a:0?",
-        "-vf", f"scale=-2:{safe_h}:flags=neighbor,setsar=1",
+        "-vf", f"scale=-2:{safe_h},setsar=1,format=yuv420p",
         "-c:v", "libx264",
         "-b:v", f"{video_bitrate_kb}k",
         "-maxrate", f"{int(video_bitrate_kb * 1.22)}k",
         "-bufsize", f"{int(video_bitrate_kb * 2)}k",
         "-pix_fmt", "yuv420p",
-        "-preset", "ultrafast",
-        "-tune", "fastdecode",
-        "-x264-params", TURBO_X264_PARAMS,
-        "-threads", "0",
+        "-preset", "veryfast",
         "-c:a", "aac",
-        "-aac_coder", "fast",
         "-b:a", f"{audio_bitrate_kb}k",
         "-ac", "2",
         "-map_chapters", "-1",
@@ -1646,8 +1628,30 @@ async def compress_to_target_size(
         "-max_muxing_queue_size", "9999",
         output_path
     ]
+    if await _run_monitored_ffmpeg(
+        fb_cmd, output_path, dur, progress_message, header_title, f"SAFE FALLBACK • {video_bitrate_kb}k", task_id=task_id
+    ):
+        return True
+
+    vo_cmd = [
+        FFMPEG_BIN, "-y",
+        "-nostdin",
+        "-err_detect", "ignore_err",
+        "-fflags", "+genpts+igndts",
+        "-i", input_path,
+        "-map", "0:v:0?",
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+        "-c:v", "libx264",
+        "-b:v", f"{video_bitrate_kb}k",
+        "-pix_fmt", "yuv420p",
+        "-preset", "ultrafast",
+        "-an",
+        "-movflags", "+faststart",
+        "-max_muxing_queue_size", "9999",
+        output_path
+    ]
     return await _run_monitored_ffmpeg(
-        fb_cmd, output_path, dur, progress_message, header_title, f"FALLBACK ULTRAFAST • {video_bitrate_kb}k", task_id=task_id
+        vo_cmd, output_path, dur, progress_message, header_title, f"SAFE VIDEO-ONLY • {video_bitrate_kb}k", task_id=task_id
     )
 
 GLOBAL_THUMB_CACHE = os.path.join(Config.DOWNLOAD_DIR, "global_tham_cache.jpg")

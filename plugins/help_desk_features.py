@@ -2496,7 +2496,7 @@ async def hd_callback_router(client: Client, query: CallbackQuery):
         return
 
 
-@Client.on_chat_join_request()
+@Client.on_chat_join_request(group=1)
 async def hd_join_request_watchdog(client: Client, request: ChatJoinRequest):
     chat = request.chat
     user = request.from_user

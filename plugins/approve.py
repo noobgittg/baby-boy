@@ -69,10 +69,50 @@ async def auto_approve_command(client: Client, message: Message):
     await chat_repo.update_chat(chat_id, {"auto_approve_joins": curr})
     status_str = "🟢 ᴇɴᴀʙʟᴇᴅ" if curr else "⚪ ᴅɪsᴀʙʟᴇᴅ"
 
+    toggle_lbl = f"⚪ {to_smallcaps('disable auto-accept')}" if curr else f"🟢 {to_smallcaps('enable auto-accept')}"
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(toggle_lbl, callback_data=f"approve_toggle_{chat_id}")],
+        [
+            InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home"),
+            InlineKeyboardButton(f"❌ {to_smallcaps('close')}", callback_data="close_data"),
+        ],
+    ])
     await message.reply_text(
         f"✦ **{to_smallcaps('auto-accept join requests')}** ✦\n\n"
         f"• 🤝 **{to_smallcaps('status')}** : `{status_str}`\n"
         f"• 💬 **{to_smallcaps('chat')}** : `{message.chat.title or 'Private / Channels'}`\n\n"
         f"💡 {to_smallcaps('add the bot as admin in your channel or group with invite users permission to auto-accept all join requests instantly!')}"
-        f"{format_watermark()}"
+        f"{format_watermark()}",
+        reply_markup=kb,
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^approve_toggle_(-?\d+)$"))
+async def approve_toggle_callback(client: Client, query: CallbackQuery):
+    chat_id = int(query.matches[0].group(1))
+    uid = query.from_user.id if query.from_user else 0
+    if chat_id < 0 and not await is_chat_or_global_admin(client, chat_id, user_id=uid):
+        return await query.answer(to_smallcaps("only chat administrators can change auto-accept!"), show_alert=True)
+    chat_doc = await chat_repo.get_or_create_chat(chat_id, getattr(query.message.chat, "title", None) or "Chat", str(getattr(query.message.chat, "type", "private")))
+    new_state = not bool(chat_doc.get("auto_approve_joins", True))
+    await chat_repo.update_chat(chat_id, {"auto_approve_joins": new_state})
+    status_str = "🟢 ᴇɴᴀʙʟᴇᴅ" if new_state else "⚪ ᴅɪsᴀʙʟᴇᴅ"
+    toggle_lbl = f"⚪ {to_smallcaps('disable auto-accept')}" if new_state else f"🟢 {to_smallcaps('enable auto-accept')}"
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(toggle_lbl, callback_data=f"approve_toggle_{chat_id}")],
+        [
+            InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home"),
+            InlineKeyboardButton(f"❌ {to_smallcaps('close')}", callback_data="close_data"),
+        ],
+    ])
+    await query.answer(to_smallcaps(f"auto-accept {'enabled' if new_state else 'disabled'}!"))
+    from plugins.core_utils import safe_edit_text
+    await safe_edit_text(
+        query.message,
+        f"✦ **{to_smallcaps('auto-accept join requests')}** ✦\n\n"
+        f"• 🤝 **{to_smallcaps('status')}** : `{status_str}`\n"
+        f"• 💬 **{to_smallcaps('chat')}** : `{getattr(query.message.chat, 'title', None) or 'Private / Channels'}`\n\n"
+        f"💡 {to_smallcaps('add the bot as admin in your channel or group with invite users permission to auto-accept all join requests instantly!')}"
+        f"{format_watermark()}",
+        reply_markup=kb,
     )

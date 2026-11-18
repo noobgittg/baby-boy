@@ -55,7 +55,7 @@ from plugins.core_services import (
     optimize_code_file,
     compress_file_to_zip,
 )
-from plugins.media_types import is_code_file, detect_code_language, is_audio_mime, is_video_mime, normalize_mime
+from plugins.media_types import is_code_file, detect_code_language, is_audio_mime, is_video_mime, normalize_mime, extract_message_media
 
 MAX_BOT_FILE_SIZE = int(getattr(Config, "LARGE_FILE_THRESHOLD_BYTES", 2 * 1024 * 1024 * 1024))
 _RECOVERY_LOCK = None
@@ -308,7 +308,7 @@ async def compress_command_handler(client: Client, message: Message):
     from plugins.rename import resolve_target_media_message
     user_id = message.from_user.id if message.from_user else message.chat.id
     target = await resolve_target_media_message(client, message, user_id=user_id)
-    if not target or not (target.video or target.document or target.audio):
+    if not target or extract_message_media(target)[0] is None:
         return await safe_reply_text(
             message,
             f"⚠️ **{to_smallcaps('please reply to a video or audio file to compress with ffmpeg.')}**\n\n"
@@ -319,7 +319,7 @@ async def compress_command_handler(client: Client, message: Message):
 
     cmd_name = (message.command[0] if message.command else "compress").lower()
     raw_args = message.text.split(None, 1)[1].strip() if (message.text and len(message.text.split(None, 1)) > 1) else ""
-    media = target.video or target.document or target.audio
+    media = extract_message_media(target)[0]
     orig_size_bytes = int(getattr(media, "file_size", 0) or 0)
     dur_val = int(getattr(media, "duration", 0) or 0)
 
@@ -370,7 +370,7 @@ async def compress_menu_callback(client: Client, query: CallbackQuery):
 
 async def show_compression_menu(media_msg: Message, target_msg: Message, is_callback: bool = False, custom_target_mb: float = None):
     msg_id = media_msg.id
-    media = media_msg.video or media_msg.document or media_msg.audio
+    media = extract_message_media(media_msg)[0]
     raw_file_name = getattr(media, "file_name", None) or "video.mp4"
     file_name = raw_file_name.replace("`", "'")
     file_size_bytes = getattr(media, "file_size", 0)
@@ -479,7 +479,7 @@ async def show_custom_compress_menu(
     Speed Engine (5-10m Hyper Turbo / 10-15m Fast / 15-20m HD), and Audio Bitrate.
     """
     msg_id = media_msg.id
-    media = media_msg.video or media_msg.document or media_msg.audio
+    media = extract_message_media(media_msg)[0]
     raw_file_name = getattr(media, "file_name", None) or "video.mp4"
     file_name = raw_file_name.replace("`", "'")
     orig_size_bytes = int(getattr(media, "file_size", 0) or 0)
@@ -613,7 +613,7 @@ async def custom_compress_callback_handler(client: Client, query: CallbackQuery)
     if not original_msg or not original_msg.media:
         return await query.answer(to_smallcaps("original media not found!"), show_alert=True)
 
-    media = original_msg.video or original_msg.document or original_msg.audio
+    media = extract_message_media(original_msg)[0]
     orig_size_bytes = int(getattr(media, "file_size", 0) or 0)
     dur_val = int(getattr(media, "duration", 0) or 0)
     cfg = await _get_or_init_custom_comp_cfg(user_id, msg_id, orig_size_bytes, dur_val)
@@ -731,7 +731,7 @@ async def handle_custom_compress_text_input(client: Client, message: Message, wa
     if not original_msg or not original_msg.media:
         return await safe_reply_text(message, f"❌ **{to_smallcaps('original media message no longer exists!')}**")
 
-    media = original_msg.video or original_msg.document or original_msg.audio
+    media = extract_message_media(original_msg)[0]
     if orig_size_bytes <= 0:
         orig_size_bytes = int(getattr(media, "file_size", 0) or 0)
     dur_val = int(getattr(media, "duration", 0) or 0)
@@ -847,7 +847,7 @@ async def perform_compression_job(
     """
     msg_id = original_msg.id
     chat_id = original_msg.chat.id if original_msg.chat else user_id
-    media = original_msg.video or original_msg.document or original_msg.audio
+    media = extract_message_media(original_msg)[0]
     raw_name = getattr(media, "file_name", None) or f"video_{msg_id}.mp4"
     clean_name = sanitize_filename(raw_name)
     expected_input_size = int(getattr(media, "file_size", 0) or 0)
@@ -1415,7 +1415,7 @@ async def perform_compression_job(
         if sent_msg:
             try:
                 if attach_stream and new_fid:
-                    out_media = sent_msg.video or sent_msg.document or sent_msg.audio
+                    out_media = extract_message_media(sent_msg)[0]
                     await file_repo.save_file(
                         file_id=new_fid,
                         chat_id=sent_msg.chat.id,

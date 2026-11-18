@@ -110,13 +110,9 @@ async def render_media_studio_card(
         await cache.set(f"last_media_{user_id}", int(media_msg.id), ttl=3600)
 
     u = await user_repo.get_or_create(user_id, "User") if user_id else {}
-    media = media_msg.document or media_msg.video or media_msg.audio
-    raw_file_name = getattr(media, "file_name", None) or "Unknown_File.mp4"
+    media, raw_file_name, file_size_bytes, mime_type, dur_val = extract_message_media(media_msg)
     file_name = raw_file_name.replace("`", "'")
-    file_size_bytes = int(getattr(media, "file_size", 0) or 0)
     file_size = humanbytes(file_size_bytes)
-    mime_type = getattr(media, "mime_type", "application/octet-stream") or "application/octet-stream"
-    dur_val = int(getattr(media, "duration", 0) or 0)
     duration = time_formatter(seconds=dur_val) if dur_val > 0 else "N/A"
 
     normalized_mime = normalize_mime(mime_type)
@@ -278,7 +274,7 @@ async def rename_restricted_alert_cb(client: Client, query: CallbackQuery):
     )
 
 
-@Client.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.animation | filters.voice | filters.video_note | filters.photo))
+@Client.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.animation | filters.voice | filters.video_note))
 async def incoming_file_entry(client: Client, message: Message):
     user = message.from_user
     uid = user.id if user else 0
@@ -325,7 +321,7 @@ async def _process_incoming_file(client: Client, message: Message, user):
     normalized_mime = normalize_mime(mime_type)
     is_video = bool(message.video or message.animation or message.video_note or is_video_mime(normalized_mime))
     is_audio = bool(message.audio or message.voice or is_audio_mime(normalized_mime))
-    is_compressible = True
+    is_compressible = is_video or is_audio or is_code_file(raw_file_name, normalized_mime)
 
     logger.info(
         "📥 ɪɴᴄᴏᴍɪɴɢ ᴍᴇᴅɪᴀ › ᴜsᴇʀ=%s ᴍsɢ=%s ɴᴀᴍᴇ='%s' sɪᴢᴇ=%s (%s) ᴍɪᴍᴇ=%s",
@@ -507,7 +503,7 @@ async def del_prefix_suffix(client: Client, message: Message):
 async def rename_cmd_handler(client: Client, message: Message):
     user_id = message.from_user.id if message.from_user else message.chat.id
     target = await resolve_target_media_message(client, message, user_id=user_id)
-    if not target or not (target.document or target.video or target.audio):
+    if not target or extract_message_media(target)[0] is None:
         return await safe_reply_text(
             message,
             f"⚠️ **{to_smallcaps('please reply to a file, video, audio, or code file to rename.')}**\n\n"
@@ -517,7 +513,7 @@ async def rename_cmd_handler(client: Client, message: Message):
             f"{format_watermark()}"
         )
 
-    media = target.document or target.video or target.audio
+    media = extract_message_media(target)[0]
     file_size_bytes = int(getattr(media, "file_size", 0) or 0)
     if file_size_bytes > MAX_BOT_FILE_SIZE:
         await safe_reply_text(
@@ -577,7 +573,7 @@ async def rename_callback_ask(client: Client, query: CallbackQuery):
     if not original or not original.media:
         return await query.answer(to_smallcaps("media not found!"), show_alert=True)
 
-    media = original.document or original.video or original.audio
+    media = extract_message_media(original)[0]
     if int(getattr(media, "file_size", 0) or 0) > MAX_BOT_FILE_SIZE:
         await query.answer("🚫 ʀᴇɴᴀᴍᴇ ʀᴇsᴛʀɪᴄᴛᴇᴅ ғᴏʀ ғɪʟᴇs > 2ɢʙ! ᴜsᴇ ᴄᴏᴍᴘʀᴇss ᴏʀ sᴛʀᴇᴀᴍ.", show_alert=True)
         return await render_media_studio_card(
@@ -654,7 +650,7 @@ async def reply_force_rename_collector(client: Client, message: Message):
     try:
         orig_msg = await client.get_messages(message.chat.id, int(msg_id))
         if orig_msg and orig_msg.media:
-            orig_media = orig_msg.document or orig_msg.video or orig_msg.audio
+            orig_media = extract_message_media(orig_msg)[0]
             if int(getattr(orig_media, "file_size", 0) or 0) > MAX_BOT_FILE_SIZE:
                 return await safe_reply_text(
                     message,
@@ -716,7 +712,7 @@ async def execute_rename_operation(client: Client, query: CallbackQuery):
         await query.answer(to_smallcaps("original media not found!"), show_alert=True)
         return await safe_edit_text(query.message, f"❌ **{to_smallcaps('original media no longer exists!')}**")
 
-    media = original_msg.document or original_msg.video or original_msg.audio
+    media = extract_message_media(original_msg)[0]
     if int(getattr(media, "file_size", 0) or 0) > MAX_BOT_FILE_SIZE:
         await query.answer("🚫 ʀᴇɴᴀᴍᴇ ɪs ʀᴇsᴛʀɪᴄᴛᴇᴅ ғᴏʀ ғɪʟᴇs ᴀʙᴏᴠᴇ 2 ɢʙ!", show_alert=True)
         return await render_media_studio_card(client, original_msg, user_id, target_msg=query.message, is_edit=True)
@@ -764,7 +760,7 @@ async def run_rename_workflow(
     task_id: Optional[str] = None,
     is_recovery: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    source_media = original_msg.document or original_msg.video or original_msg.audio
+    source_media = extract_message_media(original_msg)[0]
     if int(getattr(source_media, "file_size", 0) or 0) > MAX_BOT_FILE_SIZE:
         return await render_media_studio_card(client, original_msg, user_id, target_msg=reply_msg if is_edit else None, is_edit=is_edit)
 
@@ -1067,7 +1063,7 @@ async def run_rename_workflow(
         if sent_msg:
             try:
                 if attach_stream and new_fid:
-                    out_media = sent_msg.video or sent_msg.document or sent_msg.audio
+                    out_media = extract_message_media(sent_msg)[0]
                     await file_repo.save_file(
                         file_id=new_fid,
                         chat_id=sent_msg.chat.id,

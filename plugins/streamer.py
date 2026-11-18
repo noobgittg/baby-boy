@@ -34,10 +34,38 @@ async def toggle_autostream_cmd(client: Client, message: Message):
         f"• 📱 **{to_smallcaps('players')}** : `PLAYit • MX Player • VLC • S Player`\n\n"
         f"💡 {to_smallcaps('when enabled, every file you send or rename automatically gets instant HTTP 206 byte-range stream & 4 external player links!')}"
         f"{format_watermark()}",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton(f"⚙️ {to_smallcaps('settings')}", callback_data="nav_settings"),
-            InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home")
-        ]])
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"⚪ {to_smallcaps('disable auto-stream')}" if new_state else f"🟢 {to_smallcaps('enable auto-stream')}", callback_data="autostream_toggle_cb")],
+            [
+                InlineKeyboardButton(f"⚙️ {to_smallcaps('settings')}", callback_data="nav_settings"),
+                InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home")
+            ]
+        ])
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^autostream_toggle_cb$"))
+async def autostream_toggle_callback(client: Client, query: CallbackQuery):
+    u = await user_repo.get_or_create(query.from_user.id, query.from_user.first_name, query.from_user.username)
+    new_state = not bool(u.get("auto_stream", False))
+    await user_repo.update_user(query.from_user.id, {"auto_stream": new_state})
+    badge = "🟢 ᴇɴᴀʙʟᴇᴅ" if new_state else "⚪ ᴅɪsᴀʙʟᴇᴅ"
+    tbtn = f"⚪ {to_smallcaps('disable auto-stream')}" if new_state else f"🟢 {to_smallcaps('enable auto-stream')}"
+    await query.answer(to_smallcaps(f"auto-stream {'enabled' if new_state else 'disabled'}!"))
+    await safe_edit_text(
+        query.message,
+        f"✦ **{to_smallcaps('auto-stream & 4 players mode')}** ✦ ⚡\n\n"
+        f"• 🎬 **{to_smallcaps('status')}** : `{badge}`\n"
+        f"• 📱 **{to_smallcaps('players')}** : `PLAYit • MX Player • VLC • S Player`\n\n"
+        f"💡 {to_smallcaps('when enabled, every file you send or rename automatically gets instant HTTP 206 byte-range stream & 4 external player links!')}"
+        f"{format_watermark()}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(tbtn, callback_data="autostream_toggle_cb")],
+            [
+                InlineKeyboardButton(f"⚙️ {to_smallcaps('settings')}", callback_data="nav_settings"),
+                InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home")
+            ]
+        ])
     )
 
 
