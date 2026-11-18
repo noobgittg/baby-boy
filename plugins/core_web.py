@@ -34,104 +34,14 @@ LOCAL_READ_CHUNK = max(CHUNK_SIZE, int(getattr(Config, "STREAM_CHUNK_SIZE", 4 * 
 MAX_CONCURRENT_STREAMS = max(8, min(64, int(getattr(Config, "WORKERS", 32))))
 
 _MSG_RESOLVE_LOCKS: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+_FILE_DOC_LOCKS: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+_CHUNK_FETCH_LOCKS: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+_STATS_LOCK = asyncio.Lock()
 _STREAM_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_STREAMS)
-
-_FILE_DOC_CACHE: Dict[str, tuple] = {}
-_FILE_DOC_CACHE_TTL = 20.0
-_FILE_DOC_CACHE_MAX = 2000
-
-_RESPONSE_CACHE: Dict[str, tuple] = {}
-_RESPONSE_CACHE_MAX = 1000
-_RESPONSE_CACHE_BODY_LIMIT = 500_000
-
-
-def _cacheable_ttl(path: str) -> float:
-    if path in ("/", "/stats"):
-        return 15.0
-    if path in ("/health", "/api/health", "/api/ping"):
-        return 3.0
-    if path in ("/api/status", "/api/stats"):
-        return 3.0
-    if path.startswith("/api/info/"):
-        return 10.0
-    if path.startswith("/api/search"):
-        return 5.0
-    if path.startswith("/watch/") or path.startswith("/dl/"):
-        return 10.0
-    return 0.0
-
-
-def _response_cache_get(key: str) -> Optional[tuple]:
-    entry = _RESPONSE_CACHE.get(key)
-    if not entry:
-        return None
-    if entry[0] <= time.time():
-        _RESPONSE_CACHE.pop(key, None)
-        return None
-    return entry
-
-
-def _response_cache_set(key: str, status: int, headers: List[tuple], body: bytes, ttl: float) -> None:
-    if len(_RESPONSE_CACHE) >= _RESPONSE_CACHE_MAX:
-        _RESPONSE_CACHE.clear()
-    _RESPONSE_CACHE[key] = (time.time() + ttl, status, list(headers), bytes(body))
-
-
-def _augment_headers(raw_headers: List[tuple], path: str) -> List[tuple]:
-    existing = {k.lower() for k, _ in raw_headers}
-    result = list(raw_headers)
-    if b"cache-control" not in existing:
-        if path in {"/", "/stats"}:
-            result.append((b"cache-control", b"public, max-age=60, stale-while-revalidate=600"))
-        elif path.startswith(("/watch/", "/dl/")):
-            result.append((b"cache-control", b"public, max-age=60, stale-while-revalidate=300"))
-        elif path.startswith("/api/info/"):
-            result.append((b"cache-control", b"private, max-age=15"))
-        elif path.startswith("/api/search"):
-            result.append((b"cache-control", b"private, max-age=10"))
-        elif path == "/api/status":
-            result.append((b"cache-control", b"private, max-age=5, stale-while-revalidate=15"))
-    if b"x-content-type-options" not in existing:
-        result.append((b"x-content-type-options", b"nosniff"))
-    if b"referrer-policy" not in existing:
-        result.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
-    return result
-
-
-async def _fetch_file_doc(file_id: str) -> Optional[Dict[str, Any]]:
-    now = time.time()
-    entry = _FILE_DOC_CACHE.get(file_id)
-    if entry and entry[0] > now:
-        return entry[1]
-    doc = None
-    try:
-        doc = await FileRepository.get_file_by_id(file_id)
-    except AttributeError:
-        try:
-            doc = await file_repo.get_file(file_id)
-        except AttributeError:
-            doc = None
-    if doc:
-        if len(_FILE_DOC_CACHE) >= _FILE_DOC_CACHE_MAX:
-            _FILE_DOC_CACHE.clear()
-        _FILE_DOC_CACHE[file_id] = (now + _FILE_DOC_CACHE_TTL, doc)
-    return doc
-
-
-async def _safe_cache_stats() -> Dict[str, Any]:
-    try:
-        fn = getattr(cache, "get_stats", None)
-        if fn is None:
-            return {"status": "unavailable"}
-        result = fn()
-        if hasattr(result, "__await__"):
-            result = await result
-        return result if isinstance(result, dict) else {"stats": result}
-    except Exception:
-        return {"status": "unavailable"}
 
 
 def parse_range_header(value: Optional[str], file_size: int):
+    """Parse HTTP Range header, including open-ended and suffix byte ranges."""
     if file_size <= 0:
         return None
     if not value:
@@ -165,6 +75,18 @@ def compute_etag(file_id: str, file_size: int) -> str:
     return f"\"{digest}\""
 
 
+def _js_safe_str(value: str) -> str:
+    escaped = (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+        .replace("</", "<\\/")
+    )
+    return f'"{escaped}"'
+
+
 FOUR_EXTERNAL_PLAYERS = [
     {"id": "playit", "name": "PLAYit", "badge": "Turbo Range"},
     {"id": "mxplayer", "name": "MX Player", "badge": "HW+ Decoder"},
@@ -174,6 +96,13 @@ FOUR_EXTERNAL_PLAYERS = [
 
 
 def build_4_external_player_links(stream_url: str, file_name: str = "video.mp4") -> Dict[str, str]:
+    """
+    Generates intent and scheme deep-links for the 4 external players:
+    1. PLAYit
+    2. MX Player (Ad & Pro with HW+ decode_mode=2)
+    3. VLC (Android Intent & Universal vlc:// scheme)
+    4. S Player (Simple Player & SPlayer fallback)
+    """
     clean_url_no_scheme = stream_url.replace("https://", "").replace("http://", "")
     scheme = "https" if stream_url.startswith("https://") else "http"
     safe_title = quote(file_name or "video.mp4")
@@ -199,6 +128,7 @@ def _safe_metadata_int(value: Any) -> int:
 
 
 def media_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize stored metadata for templates and JSON clients."""
     raw = dict(file_doc.get("metadata") or {})
     file_id = str(file_doc.get("file_id", ""))
     audio_tracks = list(raw.get("audio_tracks") or raw.get("audio_streams") or [])
@@ -243,7 +173,180 @@ def media_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+async def _cache_remove(key: str) -> None:
+    delete_fn = getattr(cache, "delete", None)
+    if callable(delete_fn):
+        await delete_fn(key)
+    else:
+        await cache.set(key, None, ttl=1)
+
+
+async def get_cached_file_doc(file_id: str, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
+    cache_key = f"file_doc_{file_id}"
+    if not force_refresh:
+        cached_doc = await cache.get(cache_key)
+        if cached_doc is not None:
+            return cached_doc
+
+    if len(_FILE_DOC_LOCKS) > 2000:
+        _FILE_DOC_LOCKS.clear()
+
+    async with _FILE_DOC_LOCKS[file_id]:
+        if not force_refresh:
+            cached_doc = await cache.get(cache_key)
+            if cached_doc is not None:
+                return cached_doc
+        doc = await FileRepository.get_file_by_id(file_id)
+        if doc is None:
+            doc = await file_repo.get_file(file_id)
+        if doc is not None:
+            await cache.set(cache_key, doc, ttl=300)
+        return doc
+
+
+async def invalidate_file_cache(file_id: str) -> None:
+    await asyncio.gather(
+        _cache_remove(f"file_doc_{file_id}"),
+        _cache_remove(f"meta_view_{file_id}"),
+        _cache_remove(f"api_info_{file_id}"),
+    )
+
+
+async def get_cached_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
+    file_id = str(file_doc.get("file_id", ""))
+    if not file_id:
+        return media_metadata_view(file_doc)
+    cache_key = f"meta_view_{file_id}"
+    cached_view = await cache.get(cache_key)
+    if cached_view is not None:
+        return cached_view
+    view = media_metadata_view(file_doc)
+    await cache.set(cache_key, view, ttl=180)
+    return view
+
+
+async def get_cached_chunk(file_id: str, chunk_idx: int) -> Optional[bytes]:
+    return await cache.get(f"chunk_{file_id}_{chunk_idx}")
+
+
+async def set_cached_chunk(file_id: str, chunk_idx: int, chunk: bytes, is_boundary: bool = False) -> None:
+    await cache.set(f"chunk_{file_id}_{chunk_idx}", chunk, ttl=900 if is_boundary else 300)
+
+
+async def get_cached_home_stats():
+    cached_stats = await cache.get("web_home_stats")
+    if cached_stats is not None:
+        return cached_stats
+    async with _STATS_LOCK:
+        cached_stats = await cache.get("web_home_stats")
+        if cached_stats is not None:
+            return cached_stats
+        users_count, chats_count, files_count = await asyncio.gather(
+            user_repo.get_total_users(),
+            chat_repo.get_total_chats(),
+            file_repo.get_total_files(),
+        )
+        result = (users_count, chats_count, files_count)
+        await cache.set("web_home_stats", result, ttl=15)
+        return result
+
+
+async def get_cached_api_info(file_id: str) -> Optional[Dict[str, Any]]:
+    cache_key = f"api_info_{file_id}"
+    cached_info = await cache.get(cache_key)
+    if cached_info is not None:
+        return cached_info
+    file_doc = await get_cached_file_doc(file_id)
+    if not file_doc:
+        return None
+    stream_url = f"{Config.BASE_URL}/stream/{file_id}"
+    fname = file_doc.get("file_name", "video.mp4")
+    metadata = await get_cached_metadata_view(file_doc)
+    payload = {
+        "file_id": file_doc["file_id"],
+        "file_name": fname,
+        "file_size": file_doc.get("file_size"),
+        "file_size_formatted": humanbytes(file_doc.get("file_size", 0)),
+        "mime_type": file_doc.get("mime_type"),
+        "created_at": file_doc.get("created_at"),
+        "stream_speed": "turbo HTTP 206 zero-buffer streaming",
+        "stream_url": stream_url,
+        "watch_url": f"{Config.BASE_URL}/watch/{file_id}",
+        "download_url": f"{Config.BASE_URL}/download/{file_id}",
+        "direct_download_url": f"{Config.BASE_URL}/file/{file_id}",
+        "external_players": build_4_external_player_links(stream_url, fname),
+        "metadata": metadata,
+        "watermark": Config.WATERMARK,
+    }
+    await cache.set(cache_key, payload, ttl=60)
+    return payload
+
+
+async def get_cached_user_files(user_id: int, skip: int, limit: int) -> Dict[str, Any]:
+    cache_key = f"user_files_{user_id}_{skip}_{limit}"
+    cached_payload = await cache.get(cache_key)
+    if cached_payload is not None:
+        return cached_payload
+    files, total = await asyncio.gather(
+        file_repo.get_user_files(user_id, skip=skip, limit=limit),
+        file_repo.get_user_files_count(user_id),
+    )
+    items = []
+    for f in files:
+        fid = f.get("file_id")
+        fname = f.get("file_name", "Media.mp4")
+        s_url = f"{Config.BASE_URL}/stream/{fid}"
+        items.append({
+            "file_id": fid,
+            "file_name": fname,
+            "file_size": f.get("file_size", 0),
+            "file_size_formatted": humanbytes(f.get("file_size", 0)),
+            "mime_type": f.get("mime_type", "video/mp4"),
+            "created_at": f.get("created_at"),
+            "watch_url": f"{Config.BASE_URL}/watch/{fid}",
+            "download_url": f"{Config.BASE_URL}/download/{fid}",
+            "stream_url": s_url,
+            "external_players": build_4_external_player_links(s_url, fname),
+        })
+    payload = {
+        "user_id": user_id,
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "files": items,
+    }
+    await cache.set(cache_key, payload, ttl=20)
+    return payload
+
+
+async def get_cached_search_results(query: str) -> List[Dict[str, Any]]:
+    q_hash = hashlib.md5(query.lower().encode("utf-8")).hexdigest()[:16]
+    cache_key = f"search_q_{q_hash}"
+    cached_res = await cache.get(cache_key)
+    if cached_res is not None:
+        return cached_res
+    files = await file_repo.search_files(query, limit=20)
+    results = []
+    for f in files:
+        fid = f.get("file_id")
+        results.append({
+            "file_id": fid,
+            "file_name": f.get("file_name", "Media"),
+            "file_size": f.get("file_size", 0),
+            "file_size_formatted": humanbytes(f.get("file_size", 0)),
+            "mime_type": f.get("mime_type", "application/octet-stream"),
+            "created_at": f.get("created_at"),
+            "stream_url": f"{Config.BASE_URL}/stream/{fid}",
+            "watch_url": f"{Config.BASE_URL}/watch/{fid}",
+            "download_url": f"{Config.BASE_URL}/download/{fid}",
+            "direct_download_url": f"{Config.BASE_URL}/file/{fid}",
+        })
+    await cache.set(cache_key, results, ttl=30)
+    return results
+
+
 async def resolve_telegram_message(bot: Any, file_doc: Dict[str, Any], force_refresh: bool = False):
+    """Fetches and caches the Telegram message object with stampede lock protection and expired-reference refresh."""
     file_id = str(file_doc.get("file_id", ""))
     cache_key = f"tg_msg_{file_id}"
     if not force_refresh:
@@ -295,6 +398,12 @@ async def iter_12mbps_file_stream(
     end: int,
     request: Optional[Request] = None
 ) -> AsyncGenerator[bytes, None]:
+    """
+    Ultra-Fast Zero-Buffering Async Byte Streamer with Bounded Concurrency:
+    1. If local file exists on disk (`file_path`), streams directly via `aiofiles` with 64 KiB initial frame flush.
+    2. Otherwise, streams directly from Telegram (`bot.stream_media`) with zero queue buffering,
+       caching boundary chunks (first & last 1 MiB for MP4/MKV moov/cues headers) in RAM so player seeking is responsive.
+    """
     content_length = (end - start) + 1
     file_id = str(file_doc.get("file_id", ""))
     total_file_size = _safe_metadata_int(file_doc.get("file_size", 0))
@@ -318,8 +427,13 @@ async def iter_12mbps_file_stream(
                         remaining -= len(data)
                         yield data
             else:
-                with open(file_path, "rb") as f:
-                    f.seek(start)
+                def _open_and_seek():
+                    fh = open(file_path, "rb")
+                    fh.seek(start)
+                    return fh
+
+                f = await asyncio.to_thread(_open_and_seek)
+                try:
                     remaining = content_length
                     first_read = True
                     while remaining > 0:
@@ -332,6 +446,8 @@ async def iter_12mbps_file_stream(
                             break
                         remaining -= len(data)
                         yield data
+                finally:
+                    await asyncio.to_thread(f.close)
             return
 
         offset_chunks = start // CHUNK_SIZE
@@ -339,111 +455,95 @@ async def iter_12mbps_file_stream(
         last_part_cut = (end % CHUNK_SIZE) + 1
         part_count = math.ceil((end + 1) / CHUNK_SIZE) - offset_chunks
 
-        current_part_start = 1
+        current_part = 1
         remaining_bytes = content_length
-        while current_part_start <= part_count:
-            abs_idx = offset_chunks + current_part_start - 1
-            cached_raw = await cache.get(f"chunk_{file_id}_{abs_idx}")
+        while current_part <= part_count and remaining_bytes > 0:
+            abs_idx = offset_chunks + current_part - 1
+            cached_raw = await get_cached_chunk(file_id, abs_idx)
             if cached_raw is None:
                 break
-            sliced = _slice_chunk(cached_raw, current_part_start, part_count, first_part_cut, last_part_cut)
+            sliced = _slice_chunk(cached_raw, current_part, part_count, first_part_cut, last_part_cut)
             if len(sliced) > remaining_bytes:
                 sliced = sliced[:remaining_bytes]
-            for idx in range(0, len(sliced), FIRST_FRAME_SLICE):
-                if request is not None and await request.is_disconnected():
-                    return
-                yield sliced[idx : idx + FIRST_FRAME_SLICE]
-            remaining_bytes -= len(sliced)
-            current_part_start += 1
+            if request is not None and await request.is_disconnected():
+                return
+            if current_part == 1 and len(sliced) > FIRST_FRAME_SLICE:
+                yield sliced[:FIRST_FRAME_SLICE]
+                remaining_bytes -= FIRST_FRAME_SLICE
+                rest = sliced[FIRST_FRAME_SLICE:]
+                if rest:
+                    yield rest
+                    remaining_bytes -= len(rest)
+            else:
+                yield sliced
+                remaining_bytes -= len(sliced)
+            current_part += 1
 
-        if current_part_start > part_count or remaining_bytes <= 0:
+        if current_part > part_count or remaining_bytes <= 0:
             return
 
         msg = await resolve_telegram_message(bot, file_doc)
         if not msg:
             return
 
-        queue: asyncio.Queue = asyncio.Queue(maxsize=PREFETCH_QUEUE_SIZE)
-        producer_error: List[Exception] = []
-
-        async def _producer():
-            active_msg = msg
-            retried_refresh = False
+        active_msg = msg
+        retried_refresh = False
+        while current_part <= part_count and remaining_bytes > 0:
             try:
-                current_part = current_part_start
-                while current_part <= part_count:
-                    try:
-                        async for chunk in bot.stream_media(active_msg, offset=offset_chunks + current_part - 1, limit=part_count - current_part + 1):
-                            if not chunk:
-                                break
-                            abs_chunk_idx = offset_chunks + current_part - 1
-                            if len(chunk) <= CHUNK_SIZE:
-                                is_boundary = abs_chunk_idx in (0, 1, max(0, last_chunk_index - 1), last_chunk_index)
-                                await cache.set(f"chunk_{file_id}_{abs_chunk_idx}", chunk, ttl=900 if is_boundary else 300)
-
-                            sliced = _slice_chunk(chunk, current_part, part_count, first_part_cut, last_part_cut)
-                            if current_part == current_part_start and len(sliced) > FIRST_FRAME_SLICE:
-                                for sub_i in range(0, len(sliced), FIRST_FRAME_SLICE):
-                                    await queue.put(sliced[sub_i : sub_i + FIRST_FRAME_SLICE])
-                            else:
-                                await queue.put(sliced)
-
-                            current_part += 1
-                            if current_part > part_count:
-                                break
+                async for raw_chunk in bot.stream_media(
+                    active_msg,
+                    offset=offset_chunks + current_part - 1,
+                    limit=part_count - current_part + 1,
+                ):
+                    if request is not None and await request.is_disconnected():
+                        return
+                    if not raw_chunk:
                         break
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as inner_err:
-                        err_txt = f"{type(inner_err).__name__} {inner_err}".upper()
-                        if not retried_refresh and current_part == current_part_start:
-                            retried_refresh = True
-                            if "AUTH_BYTES_INVALID" in err_txt or "AUTHBYTESINVALID" in err_txt or "AUTH_KEY_UNREGISTERED" in err_txt:
-                                try:
-                                    reset_fn = getattr(bot, "reset_media_sessions", None)
-                                    if callable(reset_fn):
-                                        await reset_fn()
-                                    else:
-                                        from plugins.core_services import _clear_stale_media_sessions
-                                        await _clear_stale_media_sessions(bot)
-                                except Exception:
-                                    pass
-                                await asyncio.sleep(0.35)
-                            refreshed = await resolve_telegram_message(bot, file_doc, force_refresh=True)
-                            if refreshed is not None:
-                                active_msg = refreshed
-                            continue
-                        raise inner_err
+                    chunk = bytes(raw_chunk) if not isinstance(raw_chunk, bytes) else raw_chunk
+                    abs_chunk_idx = offset_chunks + current_part - 1
+                    if len(chunk) <= CHUNK_SIZE:
+                        is_boundary = abs_chunk_idx in (0, 1, max(0, last_chunk_index - 1), last_chunk_index)
+                        await set_cached_chunk(file_id, abs_chunk_idx, chunk, is_boundary=is_boundary)
+
+                    sliced = _slice_chunk(chunk, current_part, part_count, first_part_cut, last_part_cut)
+                    if len(sliced) > remaining_bytes:
+                        sliced = sliced[:remaining_bytes]
+
+                    if current_part == 1 and len(sliced) > FIRST_FRAME_SLICE:
+                        yield sliced[:FIRST_FRAME_SLICE]
+                        remaining_bytes -= FIRST_FRAME_SLICE
+                        rest = sliced[FIRST_FRAME_SLICE:]
+                        if rest:
+                            yield rest
+                            remaining_bytes -= len(rest)
+                    elif sliced:
+                        yield sliced
+                        remaining_bytes -= len(sliced)
+
+                    current_part += 1
+                    if current_part > part_count or remaining_bytes <= 0:
+                        break
+                break
             except asyncio.CancelledError:
                 raise
-            except Exception as e:
-                producer_error.append(e)
-                logger.error(f"Telegram Stream producer error ({file_id}): {e}")
-            finally:
-                await queue.put(None)
-
-        producer_task = asyncio.create_task(_producer())
-        remaining = remaining_bytes
-        try:
-            while remaining > 0:
-                if request is not None and await request.is_disconnected():
-                    break
-                item = await queue.get()
-                if item is None:
-                    if producer_error:
-                        raise RuntimeError("Telegram media stream failed") from producer_error[0]
-                    break
-                if len(item) > remaining:
-                    item = item[:remaining]
-                remaining -= len(item)
-                yield item
-        finally:
-            if not producer_task.done():
-                producer_task.cancel()
-            try:
-                await producer_task
-            except (asyncio.CancelledError, Exception):
-                pass
+            except Exception as inner_err:
+                err_txt = f"{type(inner_err).__name__} {inner_err}".upper()
+                if not retried_refresh:
+                    retried_refresh = True
+                    if "AUTH_BYTES_INVALID" in err_txt or "AUTHBYTESINVALID" in err_txt or "AUTH_KEY_UNREGISTERED" in err_txt:
+                        reset_fn = getattr(bot, "reset_media_sessions", None)
+                        if callable(reset_fn):
+                            await reset_fn()
+                        else:
+                            from plugins.core_services import _clear_stale_media_sessions
+                            await _clear_stale_media_sessions(bot)
+                        await asyncio.sleep(0.25)
+                    refreshed = await resolve_telegram_message(bot, file_doc, force_refresh=True)
+                    if refreshed is not None:
+                        active_msg = refreshed
+                    continue
+                logger.error(f"Telegram Stream direct error ({file_id}): {inner_err}")
+                raise RuntimeError("Telegram media stream failed") from inner_err
 
 
 class SafeStreamingResponse(StreamingResponse):
@@ -468,6 +568,13 @@ class SafeStreamingResponse(StreamingResponse):
                 logger.debug("Stream closed early before full Content-Length: %s", msg)
                 return
             raise
+        finally:
+            aclose = getattr(self.body_iterator, "aclose", None)
+            if callable(aclose):
+                try:
+                    await aclose()
+                except Exception:
+                    pass
 
 
 async def _prime_stream_iterator(iterator: AsyncGenerator[bytes, None]):
@@ -475,16 +582,32 @@ async def _prime_stream_iterator(iterator: AsyncGenerator[bytes, None]):
     try:
         first_chunk = await iterator.__anext__()
     except StopAsyncIteration:
+        aclose = getattr(iterator, "aclose", None)
+        if callable(aclose):
+            await aclose()
         return None
-    except Exception as e:
-        logger.warning(f"Stream priming failed: {e}")
+    except Exception:
+        aclose = getattr(iterator, "aclose", None)
+        if callable(aclose):
+            try:
+                await aclose()
+            except Exception:
+                pass
         return None
 
     async def _chained():
-        if first_chunk:
-            yield first_chunk
-        async for chunk in iterator:
-            yield chunk
+        try:
+            if first_chunk:
+                yield first_chunk
+            async for chunk in iterator:
+                yield chunk
+        finally:
+            aclose = getattr(iterator, "aclose", None)
+            if callable(aclose):
+                try:
+                    await aclose()
+                except Exception:
+                    pass
 
     return _chained()
 
@@ -513,10 +636,11 @@ templates = Jinja2Templates(directory=_TEMPLATE_DIR)
 @pages_router.get("/health")
 @pages_router.head("/health")
 async def root_health():
+    """Root /health endpoint required by Render/Koyeb health checks and KeepAlive pinger."""
     return {
         "status": "healthy",
         "service": "MMW-BOT-PRO",
-        "stream_speed": "ultra-fast HTTP 206 byte-range streaming",
+        "stream_speed": "ultra-fast HTTP 206 zero-buffer streaming",
         "external_players": 4,
         "timestamp": float(time.time()),
         "watermark": Config.WATERMARK,
@@ -534,6 +658,7 @@ async def root_stats_redirect(request: Request):
 @api_router.get("/bridge")
 @api_router.head("/bridge")
 async def native_gateway_endpoint(request: Request, action: str = "status", id: str = ""):
+    """Native Python HTTP 206 Stream & Telemetry Bridge."""
     act = (action or "status").strip().lower()
     clean_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(id or ""))
     base_url = str(request.base_url).rstrip("/")
@@ -577,16 +702,7 @@ async def native_gateway_endpoint(request: Request, action: str = "status", id: 
 async def index(request: Request):
     if request.method == "HEAD":
         return Response(status_code=200)
-    cached_stats = await cache.get("web_home_stats")
-    if cached_stats:
-        users_count, chats_count, files_count = cached_stats
-    else:
-        users_count, chats_count, files_count = await asyncio.gather(
-            user_repo.get_total_users(),
-            chat_repo.get_total_chats(),
-            file_repo.get_total_files(),
-        )
-        await cache.set("web_home_stats", (users_count, chats_count, files_count), ttl=15)
+    users_count, chats_count, files_count = await get_cached_home_stats()
     return templates.TemplateResponse("index.html", {
         "request": request,
         "users_count": users_count,
@@ -601,7 +717,7 @@ async def index(request: Request):
 @pages_router.head("/code/{file_id}")
 async def code_preview_page(request: Request, file_id: str):
     import html as _html
-    file_doc = await _fetch_file_doc(file_id)
+    file_doc = await get_cached_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="Code file not found or link expired.")
     if request.method == "HEAD":
@@ -734,10 +850,10 @@ body.code-studio-body {{
     </div>
     <div class="code-actions">
       <button type="button" class="btn-primary" onclick="streamCodeDownload()">⬇️ Stream Save to Disk</button>
-      <a href="{download_url}" class="btn-secondary">📥 Direct Download</a>
+      <a href="{_html.escape(download_url)}" class="btn-secondary">📥 Direct Download</a>
       <button type="button" class="btn-secondary" onclick="copyCodeText()">📋 Copy Code</button>
       <button type="button" id="cancelCodeBtn" class="btn-secondary" onclick="cancelCodeStream()" style="display:none;">🛑 Cancel</button>
-      <a href="{watch_url}" class="btn-secondary">🎬 Watch Studio</a>
+      <a href="{_html.escape(watch_url)}" class="btn-secondary">🎬 Watch Studio</a>
     </div>
   </div>
   <div class="progress-wrap">
@@ -751,8 +867,8 @@ body.code-studio-body {{
 </div>
 <script>
 let codeAbortCtrl = null;
-const STREAM_URL = {stream_url!r};
-const FILE_NAME = {file_name!r};
+const STREAM_URL = {_js_safe_str(stream_url)};
+const FILE_NAME = {_js_safe_str(file_name)};
 const EXPECTED_SIZE = {max(1, file_size)};
 
 async function loadCodePreview() {{
@@ -885,7 +1001,7 @@ loadCodePreview();
 @pages_router.get("/watch/{file_id}")
 @pages_router.head("/watch/{file_id}")
 async def watch_page(request: Request, file_id: str):
-    file_doc = await _fetch_file_doc(file_id)
+    file_doc = await get_cached_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="Stream link expired or file not found.")
     if request.method == "HEAD":
@@ -920,7 +1036,7 @@ async def watch_page(request: Request, file_id: str):
                         meta_base["width"] = probed["video_streams"][0].get("width", meta_base.get("width", 0))
                         meta_base["height"] = probed["video_streams"][0].get("height", meta_base.get("height", 0))
                     await file_repo.update_file(fid, {"metadata": meta_base})
-                    _FILE_DOC_CACHE.pop(fid, None)
+                    await invalidate_file_cache(fid)
             except Exception:
                 pass
         if not await cache.get(f"probe_lock_{file_id}"):
@@ -930,7 +1046,7 @@ async def watch_page(request: Request, file_id: str):
                     await asyncio.sleep(3.0)
                 await _bg_probe_update(file_id, file_path, dict(raw_meta))
             asyncio.create_task(_delayed_probe())
-    metadata = media_metadata_view(file_doc)
+    metadata = await get_cached_metadata_view(file_doc)
 
     base_url = str(request.base_url).rstrip("/")
     stream_url = f"{base_url}/stream/{file_id}"
@@ -950,7 +1066,7 @@ async def watch_page(request: Request, file_id: str):
         "download_url": download_url,
         "dl_page_url": dl_page_url,
         "player_links": player_links,
-        "stream_speed": "ultra-fast HTTP 206 byte-range streaming",
+        "stream_speed": "ultra-fast HTTP 206 zero-buffer streaming",
         "watermark": Config.WATERMARK,
         "watermark_url": Config.WATERMARK_URL,
     })
@@ -961,14 +1077,14 @@ async def watch_page(request: Request, file_id: str):
 @pages_router.get("/dl/{file_id}")
 @pages_router.head("/dl/{file_id}")
 async def download_page(request: Request, file_id: str):
-    file_doc = await _fetch_file_doc(file_id)
+    file_doc = await get_cached_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="File not found or link expired.")
     if request.method == "HEAD":
         return Response(status_code=200, headers={"Content-Type": "text/html; charset=utf-8"})
 
     file_name = file_doc.get("file_name", "download.mp4")
-    metadata = media_metadata_view(file_doc)
+    metadata = await get_cached_metadata_view(file_doc)
     file_size_bytes = _safe_metadata_int(file_doc.get("file_size", 0))
     file_size = humanbytes(file_size_bytes)
     mime_type = file_doc.get("mime_type", "video/mp4")
@@ -990,7 +1106,7 @@ async def download_page(request: Request, file_id: str):
         "download_url": download_url,
         "watch_url": watch_url,
         "player_links": player_links,
-        "stream_speed": "ultra-fast HTTP 206 byte-range streaming",
+        "stream_speed": "ultra-fast HTTP 206 zero-buffer streaming",
         "watermark": Config.WATERMARK,
         "watermark_url": Config.WATERMARK_URL,
     })
@@ -1001,7 +1117,7 @@ async def download_page(request: Request, file_id: str):
 @stream_router.get("/stream/{file_id}")
 @stream_router.head("/stream/{file_id}")
 async def stream_media_endpoint(request: Request, file_id: str, range: str = Header(None)):
-    file_doc = await _fetch_file_doc(file_id)
+    file_doc = await get_cached_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="Media file not found or revoked.")
 
@@ -1036,8 +1152,9 @@ async def stream_media_endpoint(request: Request, file_id: str, range: str = Hea
         "Content-Length": str(content_length),
         "Content-Disposition": content_disposition("inline", file_name),
         "ETag": etag,
-        "X-Stream-Mode": "turbo-http-206-byte-range",
+        "X-Stream-Mode": "zero-buffer-http-206-byte-range",
         "X-Stream-Chunk-Size": str(CHUNK_SIZE),
+        "X-Accel-Buffering": "no",
         "Cache-Control": "public, max-age=86400, no-transform",
         "Connection": "keep-alive",
         "Vary": "Range",
@@ -1059,6 +1176,7 @@ async def stream_media_endpoint(request: Request, file_id: str, range: str = Hea
         primed,
         status_code=status_code,
         headers=headers,
+        media_type=mime_type,
     )
 
 
@@ -1067,7 +1185,8 @@ async def stream_media_endpoint(request: Request, file_id: str, range: str = Hea
 @stream_router.head("/download/{file_id}")
 @stream_router.head("/file/{file_id}")
 async def download_media_endpoint(request: Request, file_id: str, range: str = Header(None)):
-    file_doc = await _fetch_file_doc(file_id)
+    """Handles high-speed multi-connection direct file downloads with HTTP 206 Range support."""
+    file_doc = await get_cached_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="File not found or revoked.")
 
@@ -1083,6 +1202,7 @@ async def download_media_endpoint(request: Request, file_id: str, range: str = H
         raise HTTPException(status_code=404, detail="File missing on server.")
 
     file_name = file_doc.get("file_name", "download.mp4")
+    dl_mime = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
     etag = compute_etag(file_id, file_size)
 
     if not range and request.headers.get("if-none-match") == etag:
@@ -1097,11 +1217,12 @@ async def download_media_endpoint(request: Request, file_id: str, range: str = H
 
     headers = {
         "Accept-Ranges": "bytes",
-        "Content-Type": "application/octet-stream",
+        "Content-Type": dl_mime,
         "Content-Length": str(content_length),
         "Content-Disposition": content_disposition("attachment", file_name),
         "ETag": etag,
-        "X-Stream-Mode": "turbo-http-206-byte-range",
+        "X-Stream-Mode": "zero-buffer-http-206-byte-range",
+        "X-Accel-Buffering": "no",
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges, ETag",
         "Cache-Control": "public, max-age=86400, no-transform",
@@ -1122,6 +1243,7 @@ async def download_media_endpoint(request: Request, file_id: str, range: str = H
     return SafeStreamingResponse(
         primed,
         status_code=status_code,
+        media_type=dl_mime,
         headers=headers,
     )
 
@@ -1129,11 +1251,9 @@ async def download_media_endpoint(request: Request, file_id: str, range: str = H
 @api_router.get("/status")
 @api_router.head("/status")
 async def api_status(request: Request):
-    users_count, chats_count, files_count, cache_stats = await asyncio.gather(
-        user_repo.get_total_users(),
-        chat_repo.get_total_chats(),
-        file_repo.get_total_files(),
-        _safe_cache_stats(),
+    (users_count, chats_count, files_count), cache_stats = await asyncio.gather(
+        get_cached_home_stats(),
+        cache.get_stats(),
     )
     start_time = getattr(request.app.state, "start_time", float(time.time()))
     uptime_sec = int(float(time.time()) - start_time)
@@ -1142,7 +1262,7 @@ async def api_status(request: Request):
         "status": "operational",
         "service": "MMW All-In-One Pro Engine",
         "version": "8.0.0-ultra-max",
-        "stream_speed": "turbo HTTP 206 byte-range streaming",
+        "stream_speed": "turbo HTTP 206 zero-buffer streaming",
         "external_players": ["PLAYit", "MX Player", "VLC", "S Player"],
         "uptime_seconds": uptime_sec,
         "users": users_count,
@@ -1161,7 +1281,7 @@ async def api_health():
     return {
         "status": "healthy",
         "service": "MMW-BOT-PRO",
-        "engine": "turbo asynchronous HTTP 206 byte-range streamer",
+        "engine": "zero-buffer asynchronous HTTP 206 byte-range streamer",
         "timestamp": float(time.time()),
         "watermark": Config.WATERMARK,
     }
@@ -1185,79 +1305,37 @@ async def api_ping():
 @api_router.get("/info/{file_id}")
 @api_router.head("/info/{file_id}")
 async def api_file_info(file_id: str):
-    file_doc = await _fetch_file_doc(file_id)
-    if not file_doc:
+    payload = await get_cached_api_info(file_id)
+    if not payload:
         raise HTTPException(status_code=404, detail="File not found")
-    stream_url = f"{Config.BASE_URL}/stream/{file_id}"
-    fname = file_doc.get("file_name", "video.mp4")
-    file_size_val = _safe_metadata_int(file_doc.get("file_size"))
-    return {
-        "file_id": file_doc["file_id"],
-        "file_name": fname,
-        "file_size": file_size_val,
-        "file_size_formatted": humanbytes(file_size_val),
-        "mime_type": file_doc.get("mime_type"),
-        "created_at": file_doc.get("created_at"),
-        "stream_speed": "turbo HTTP 206 byte-range streaming",
-        "stream_url": stream_url,
-        "watch_url": f"{Config.BASE_URL}/watch/{file_id}",
-        "download_url": f"{Config.BASE_URL}/download/{file_id}",
-        "direct_download_url": f"{Config.BASE_URL}/file/{file_id}",
-        "external_players": build_4_external_player_links(stream_url, fname),
-        "metadata": media_metadata_view(file_doc),
-        "watermark": Config.WATERMARK,
-    }
+    return payload
 
 
 @api_router.get("/user/{user_id}/files")
 async def api_user_files(user_id: int, skip: int = 0, limit: int = 20):
+    """Return paginated JSON list of a user's indexed files and 4-player stream links."""
     lim = max(1, min(50, int(limit)))
     sk = max(0, int(skip))
-    files, total = await asyncio.gather(
-        file_repo.get_user_files(user_id, skip=sk, limit=lim),
-        file_repo.get_user_files_count(user_id),
-    )
-    items = []
-    for f in files:
-        fid = f.get("file_id")
-        fname = f.get("file_name", "Media.mp4")
-        s_url = f"{Config.BASE_URL}/stream/{fid}"
-        fs_val = _safe_metadata_int(f.get("file_size"))
-        items.append({
-            "file_id": fid,
-            "file_name": fname,
-            "file_size": fs_val,
-            "file_size_formatted": humanbytes(fs_val),
-            "mime_type": f.get("mime_type", "video/mp4"),
-            "created_at": f.get("created_at"),
-            "watch_url": f"{Config.BASE_URL}/watch/{fid}",
-            "download_url": f"{Config.BASE_URL}/download/{fid}",
-            "stream_url": s_url,
-            "external_players": build_4_external_player_links(s_url, fname),
-        })
-    return {
-        "user_id": user_id,
-        "total": total,
-        "skip": sk,
-        "limit": lim,
-        "files": items,
-    }
+    return await get_cached_user_files(user_id, sk, lim)
 
 
 @api_router.get("/logs/summary")
 async def api_logs_summary():
+    """Return live application log analytics, RateLimitManager, and Task Recovery health."""
     from utils import get_log_analytics
     return get_log_analytics()
 
 
 @api_router.get("/tasks/report")
 async def api_tasks_report():
+    """Return persistent task recovery and completion execution report."""
     from plugins.compressor import generate_task_execution_report
     return await generate_task_execution_report()
 
 
 @api_router.get("/ratelimit")
 async def api_ratelimit_status():
+    """Return centralized TelegramRateLimitManager telemetry."""
     from plugins.core_utils import rate_limit_manager
     return rate_limit_manager.get_stats()
 
@@ -1268,7 +1346,7 @@ async def api_subtitle_vtt(file_id: str, sub_idx: int):
     cached_vtt = await cache.get(cache_key)
     if cached_vtt is not None:
         return Response(content=cached_vtt, media_type="text/vtt; charset=utf-8")
-    file_doc = await _fetch_file_doc(file_id)
+    file_doc = await get_cached_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="Subtitle source not found")
     fpath = file_doc.get("file_path")
@@ -1285,23 +1363,7 @@ async def api_subtitle_vtt(file_id: str, sub_idx: int):
 async def api_search_files(q: str = ""):
     if not q or not q.strip():
         return {"query": "", "count": 0, "results": []}
-    files = await file_repo.search_files(q.strip(), limit=20)
-    results = []
-    for f in files:
-        fid = f.get("file_id")
-        fs_val = _safe_metadata_int(f.get("file_size"))
-        results.append({
-            "file_id": fid,
-            "file_name": f.get("file_name", "Media"),
-            "file_size": fs_val,
-            "file_size_formatted": humanbytes(fs_val),
-            "mime_type": f.get("mime_type", "application/octet-stream"),
-            "created_at": f.get("created_at"),
-            "stream_url": f"{Config.BASE_URL}/stream/{fid}",
-            "watch_url": f"{Config.BASE_URL}/watch/{fid}",
-            "download_url": f"{Config.BASE_URL}/download/{fid}",
-            "direct_download_url": f"{Config.BASE_URL}/file/{fid}",
-        })
+    results = await get_cached_search_results(q.strip())
     return {"query": q, "count": len(results), "results": results}
 
 
@@ -1345,57 +1407,31 @@ def create_app(bot_instance=None) -> FastAPI:
             if scope["type"] != "http":
                 return await self.app(scope, receive, send)
             path = scope.get("path", "")
-            method = scope.get("method", "GET")
-            query = scope.get("query_string", b"").decode("latin-1")
 
             async def _send_with_headers(message):
                 if message["type"] == "http.response.start":
-                    headers = _augment_headers(list(message.get("headers", [])), path)
-                    message = {**message, "headers": headers}
+                    raw_headers = list(message.get("headers", []))
+                    existing = {k.lower() for k, _ in raw_headers}
+                    if b"cache-control" not in existing:
+                        if path in {"/", "/stats"}:
+                            raw_headers.append((b"cache-control", b"public, max-age=60, stale-while-revalidate=600"))
+                        elif path.startswith(("/watch/", "/dl/", "/code/")):
+                            raw_headers.append((b"cache-control", b"public, max-age=60, stale-while-revalidate=300"))
+                        elif path.startswith("/api/info/"):
+                            raw_headers.append((b"cache-control", b"private, max-age=15"))
+                        elif path.startswith("/api/search"):
+                            raw_headers.append((b"cache-control", b"private, max-age=10"))
+                        elif path == "/api/status":
+                            raw_headers.append((b"cache-control", b"private, max-age=5, stale-while-revalidate=15"))
+                    if b"x-content-type-options" not in existing:
+                        raw_headers.append((b"x-content-type-options", b"nosniff"))
+                    if b"referrer-policy" not in existing:
+                        raw_headers.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
+                    message = {**message, "headers": raw_headers}
                 await send(message)
 
-            if method == "GET":
-                ttl = _cacheable_ttl(path)
-                if ttl > 0:
-                    cache_key = f"{path}?{query}" if query else path
-                    cached = _response_cache_get(cache_key)
-                    if cached:
-                        _, status, cached_headers, body = cached
-                        await _send_with_headers({"type": "http.response.start", "status": status, "headers": list(cached_headers)})
-                        await send({"type": "http.response.body", "body": body, "more_body": False})
-                        return
-
-                    captured_status = [200]
-                    captured_headers = [None]
-                    captured_body = bytearray()
-                    captured_too_large = [False]
-
-                    async def _capture_send(message):
-                        if message["type"] == "http.response.start":
-                            captured_status[0] = message["status"]
-                            captured_headers[0] = list(message.get("headers", []))
-                        elif message["type"] == "http.response.body":
-                            chunk = message.get("body", b"")
-                            if chunk and not captured_too_large[0]:
-                                if len(captured_body) + len(chunk) <= _RESPONSE_CACHE_BODY_LIMIT:
-                                    captured_body.extend(chunk)
-                                else:
-                                    captured_too_large[0] = True
-                                    captured_body.clear()
-                        await _send_with_headers(message)
-
-                    try:
-                        await self.app(scope, receive, _capture_send)
-                    except Exception:
-                        raise
-
-                    if (captured_status[0] == 200
-                            and captured_headers[0] is not None
-                            and not captured_too_large[0]):
-                        _response_cache_set(cache_key, captured_status[0], captured_headers[0], bytes(captured_body), ttl)
-                    return
-
-            await self.app(scope, receive, _send_with_headers)
+            async with cache.response_scope(f"http:{path}"):
+                await self.app(scope, receive, _send_with_headers)
 
     fastapi_app.add_middleware(PureASGICacheHeadersMiddleware)
 
