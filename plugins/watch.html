@@ -1,40 +1,32 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="dark light">
+    <meta name="color-scheme" content="light">
     <title>{{ file_name | default("Watch Media") }} — MMW Sonic Ultra Stream</title>
     <style>
         :root {
-            --bg: #040711;
-            --surface: rgba(13, 20, 40, 0.9);
-            --surface-2: rgba(20, 30, 56, 0.85);
-            --border: rgba(56, 189, 248, 0.24);
-            --accent: #38bdf8;
-            --accent-2: #818cf8;
-            --emerald: #10b981;
-            --amber: #f59e0b;
-            --danger: #ef4444;
-            --text: #f8fafc;
-            --muted: #94a3b8;
-            --header-bg: rgba(8, 13, 28, 0.92);
-        }
-        html:not(.dark) {
-            --bg: #f1f5f9;
-            --surface: rgba(255, 255, 255, 0.95);
-            --surface-2: rgba(241, 245, 249, 0.95);
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --surface-2: #f1f5f9;
             --border: rgba(14, 165, 233, 0.28);
+            --border-soft: rgba(15, 23, 42, 0.1);
+            --accent: #0284c7;
+            --accent-2: #4f46e5;
+            --emerald: #059669;
+            --amber: #d97706;
+            --danger: #dc2626;
             --text: #0f172a;
             --muted: #475569;
-            --header-bg: rgba(255, 255, 255, 0.94);
+            --header-bg: rgba(255, 255, 255, 0.96);
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             background-color: var(--bg);
             background-image:
-                radial-gradient(at 10% 10%, rgba(56, 189, 248, 0.14) 0px, transparent 50%),
-                radial-gradient(at 90% 85%, rgba(168, 85, 247, 0.12) 0px, transparent 50%);
+                radial-gradient(at 10% 10%, rgba(14, 165, 233, 0.1) 0px, transparent 50%),
+                radial-gradient(at 90% 85%, rgba(99, 102, 241, 0.08) 0px, transparent 50%);
             color: var(--text);
             font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
             min-height: 100vh;
@@ -53,14 +45,15 @@
             top: 0;
             z-index: 50;
             background: var(--header-bg);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
             border-bottom: 1px solid var(--border);
             padding: 12px 16px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 12px;
+            box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
         }
         .brand-wrap {
             display: flex;
@@ -73,8 +66,8 @@
             width: 38px;
             height: 38px;
             border-radius: 12px;
-            background: linear-gradient(135deg, #38bdf8, #0ea5e9);
-            color: #040711;
+            background: linear-gradient(135deg, #0ea5e9, #4f46e5);
+            color: #ffffff;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -82,12 +75,13 @@
             font-weight: 800;
             font-size: 1.1rem;
             flex-shrink: 0;
-            box-shadow: 0 6px 18px rgba(56, 189, 248, 0.35);
+            box-shadow: 0 6px 16px rgba(14, 165, 233, 0.28);
         }
         .title-wrap { min-width: 0; }
         .file-title {
             font-size: 0.96rem;
             font-weight: 800;
+            color: var(--text);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -123,36 +117,76 @@
         .player-box {
             position: relative;
             width: 100%;
-            background: #000;
+            background: #0f172a;
             border: 1px solid var(--border);
             border-radius: 20px;
             overflow: hidden;
-            box-shadow: 0 24px 50px -12px rgba(0, 0, 0, 0.8);
+            box-shadow: 0 18px 40px -12px rgba(15, 23, 42, 0.22);
         }
         .player-box.is-video { aspect-ratio: 16 / 9; }
-        .player-box.is-audio { min-height: 120px; display: flex; align-items: center; padding: 24px 16px; }
+        .player-box.is-audio {
+            min-height: 120px;
+            display: flex;
+            align-items: center;
+            padding: 24px 16px;
+            background: #ffffff;
+        }
+        .player-box.is-doc {
+            background: #ffffff;
+            min-height: 240px;
+        }
         .player-box video {
             width: 100%;
             height: 100%;
             display: block;
             object-fit: contain;
-            background: #000;
+            background: #000000;
         }
         .player-box audio { width: 100%; }
+        .player-box img.preview-image {
+            width: 100%;
+            max-height: 75vh;
+            object-fit: contain;
+            display: block;
+            background: #f8fafc;
+        }
+        .player-box iframe.preview-frame {
+            width: 100%;
+            height: 70vh;
+            border: none;
+            display: block;
+            background: #ffffff;
+        }
         .player-status-toast {
             position: absolute;
             left: 14px;
             right: 14px;
             bottom: 58px;
-            background: rgba(4, 7, 17, 0.9);
-            color: #f8fafc;
-            border: 1px solid rgba(56, 189, 248, 0.35);
+            background: rgba(255, 255, 255, 0.96);
+            color: var(--text);
+            border: 1px solid var(--border);
             border-radius: 12px;
             padding: 8px 14px;
             font-size: 0.8rem;
             font-weight: 700;
             pointer-events: none;
             z-index: 20;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+        }
+        .unmute-overlay-btn {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            z-index: 25;
+            background: #ffffff;
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            padding: 7px 14px;
+            font-size: 0.78rem;
+            font-weight: 800;
+            cursor: pointer;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.22);
         }
         .fallback-box {
             min-height: 220px;
@@ -163,17 +197,16 @@
             gap: 14px;
             padding: 28px 18px;
             text-align: center;
-            color: #f8fafc;
+            color: var(--text);
+            background: #ffffff;
         }
 
         .ultra-card {
             background: var(--surface);
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
             border: 1px solid var(--border);
             border-radius: 20px;
             padding: 18px;
-            box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.55);
+            box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.08);
         }
         .card-head {
             display: flex;
@@ -183,8 +216,8 @@
             flex-wrap: wrap;
             margin-bottom: 14px;
         }
-        .card-title { font-size: 1rem; font-weight: 800; display: flex; align-items: center; gap: 8px; }
-        .card-sub { font-size: 0.78rem; color: var(--muted); }
+        .card-title { font-size: 1rem; font-weight: 800; display: flex; align-items: center; gap: 8px; color: var(--text); }
+        .card-sub { font-size: 0.78rem; color: var(--muted); font-weight: 600; }
 
         .btn {
             display: inline-flex;
@@ -202,23 +235,25 @@
             color: var(--text);
             transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
         }
-        .btn:hover { transform: translateY(-1px); border-color: var(--accent); }
+        .btn:hover { transform: translateY(-1px); border-color: var(--accent); background: #e0f2fe; }
         .btn-primary {
-            background: linear-gradient(135deg, #38bdf8, #818cf8);
-            color: #040711;
+            background: linear-gradient(135deg, #0ea5e9, #4f46e5);
+            color: #ffffff;
             border-color: transparent;
             font-weight: 800;
         }
+        .btn-primary:hover { background: linear-gradient(135deg, #0284c7, #4338ca); color: #ffffff; }
         .btn-emerald {
-            background: linear-gradient(135deg, #10b981, #34d399);
-            color: #040711;
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: #ffffff;
             border-color: transparent;
             font-weight: 800;
         }
+        .btn-emerald:hover { background: linear-gradient(135deg, #047857, #059669); color: #ffffff; }
         .btn-danger {
-            background: rgba(239, 68, 68, 0.18);
-            color: #fca5a5;
-            border-color: rgba(239, 68, 68, 0.45);
+            background: rgba(220, 38, 38, 0.1);
+            color: var(--danger);
+            border-color: rgba(220, 38, 38, 0.35);
         }
         .btn-pill {
             padding: 7px 11px;
@@ -226,7 +261,7 @@
             border-radius: 10px;
         }
         .btn-pill.active {
-            background: rgba(56, 189, 248, 0.2);
+            background: #e0f2fe;
             border-color: var(--accent);
             color: var(--accent);
         }
@@ -252,18 +287,17 @@
 
         .meta-pills {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
             gap: 10px;
             margin-top: 12px;
         }
         .meta-item {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: var(--surface-2);
+            border: 1px solid var(--border-soft);
             border-radius: 12px;
             padding: 10px 12px;
             font-size: 0.78rem;
         }
-        html:not(.dark) .meta-item { background: rgba(15, 23, 42, 0.04); border-color: rgba(15, 23, 42, 0.08); }
         .meta-item .k { color: var(--muted); font-weight: 700; display: block; font-size: 0.7rem; }
         .meta-item .v { color: var(--accent); font-weight: 800; word-break: break-word; }
 
@@ -271,23 +305,22 @@
             margin-top: 12px;
             padding: 12px 14px;
             border-radius: 14px;
-            background: rgba(0, 0, 0, 0.28);
-            border: 1px solid rgba(56, 189, 248, 0.18);
+            background: var(--surface-2);
+            border: 1px solid var(--border);
             font-size: 0.82rem;
+            color: var(--text);
             white-space: pre-wrap;
             word-break: break-word;
         }
-        html:not(.dark) .panel-box { background: rgba(15, 23, 42, 0.04); }
 
         .stream-progress-box {
             margin-top: 14px;
             padding: 12px 14px;
             border-radius: 14px;
-            background: rgba(0, 0, 0, 0.34);
+            background: var(--surface-2);
             border: 1px solid var(--border);
             font-size: 0.78rem;
         }
-        html:not(.dark) .stream-progress-box { background: rgba(15, 23, 42, 0.05); }
         .progress-top {
             display: flex;
             align-items: center;
@@ -298,7 +331,7 @@
         .stream-progress-track {
             width: 100%;
             height: 8px;
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(15, 23, 42, 0.1);
             border-radius: 999px;
             overflow: hidden;
             margin-top: 8px;
@@ -306,7 +339,7 @@
         .stream-progress-fill {
             height: 100%;
             width: 0%;
-            background: linear-gradient(90deg, #38bdf8, #10b981);
+            background: linear-gradient(90deg, #0ea5e9, #10b981);
             transition: width 0.12s linear;
         }
 
@@ -325,10 +358,10 @@
             text-decoration: none;
             color: var(--text);
             border: 1px solid var(--border);
-            background: rgba(255, 255, 255, 0.03);
-            transition: transform 0.15s ease, border-color 0.15s ease;
+            background: var(--surface-2);
+            transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
         }
-        .player-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+        .player-card:hover { transform: translateY(-2px); border-color: var(--accent); background: #e0f2fe; }
         .player-card-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
         .player-icon {
             width: 38px;
@@ -341,17 +374,17 @@
             font-size: 0.85rem;
             flex-shrink: 0;
         }
-        .icon-playit { background: #f59e0b; color: #040711; }
-        .icon-mx { background: #3b82f6; color: #fff; }
-        .icon-vlc { background: #f97316; color: #fff; }
-        .icon-sp { background: #a855f7; color: #fff; }
+        .icon-playit { background: #f59e0b; color: #ffffff; }
+        .icon-mx { background: #2563eb; color: #ffffff; }
+        .icon-vlc { background: #ea580c; color: #ffffff; }
+        .icon-sp { background: #9333ea; color: #ffffff; }
         .player-name { font-weight: 800; font-size: 0.86rem; }
         .player-tag { font-size: 0.7rem; color: var(--muted); font-weight: 700; }
 
         .footer-actions {
             margin-top: 16px;
             padding-top: 14px;
-            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            border-top: 1px solid var(--border-soft);
             display: flex;
             flex-wrap: wrap;
             align-items: center;
@@ -363,9 +396,9 @@
             border-radius: 999px;
             font-size: 0.72rem;
             font-weight: 800;
-            background: rgba(16, 185, 129, 0.15);
+            background: rgba(5, 150, 105, 0.12);
             color: var(--emerald);
-            border: 1px solid rgba(16, 185, 129, 0.35);
+            border: 1px solid rgba(5, 150, 105, 0.3);
         }
 
         @media (max-width: 900px) {
@@ -378,16 +411,6 @@
             .ultra-card { padding: 14px; }
         }
     </style>
-    <script>
-        (function() {
-            const savedTheme = localStorage.getItem('theme');
-            if (savedTheme === 'light') {
-                document.documentElement.classList.remove('dark');
-            } else {
-                document.documentElement.classList.add('dark');
-            }
-        })();
-    </script>
 </head>
 <body class="smallcap-ui">
 
@@ -397,17 +420,15 @@
             <div class="title-wrap">
                 <h1 class="file-title" title="{{ file_name }}">{{ file_name | default("Streaming Media") }}</h1>
                 <div class="file-sub">
-                    <span>⚡ ᴍᴍᴡ sᴏɴɪᴄ ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ</span>
+                    <span>⚡ ᴍᴍᴡ sᴏɴɪᴄ ʜᴛᴛᴘ 206 ᴢᴇʀᴏ-ʙᴜғғᴇʀ sᴛʀᴇᴀᴍ</span>
+                    <span>•</span>
+                    <span>{{ metadata.media_kind | default('file') | upper }}</span>
                     <span>•</span>
                     <span>{{ file_size | default("") }}</span>
                 </div>
             </div>
         </div>
         <div class="topbar-actions">
-            <button type="button" id="themeToggle" class="btn btn-pill" aria-label="Toggle Theme">
-                <span class="dark:hidden">🌙</span>
-                <span class="hidden dark:inline">☀️</span>
-            </button>
             <button type="button" onclick="streamSaveToDisk()" class="btn btn-emerald">
                 <span>🚀</span>
                 <span class="hide-sm">Stream to Disk</span>
@@ -420,20 +441,25 @@
     </header>
 
     <main id="mainContainer" class="main-container">
-        <div id="playerContainer" class="player-box {% if metadata.media_kind == 'audio' %}is-audio{% elif metadata.media_kind == 'video' and metadata.browser_supported %}is-video{% endif %}">
+        <div id="playerContainer" class="player-box {% if metadata.media_kind == 'audio' %}is-audio{% elif metadata.media_kind == 'video' and metadata.browser_supported %}is-video{% else %}is-doc{% endif %}">
             {% if metadata.media_kind == 'audio' %}
-            <audio id="mediaPlayer" playsinline crossorigin="anonymous" preload="auto" controls>
-                <source src="{{ stream_url }}" type="{{ mime_type | default('audio/mpeg') }}">
+            <audio id="mediaPlayer" autoplay playsinline crossorigin="anonymous" preload="auto" controls>
+                <source src="{{ stream_url }}" type="{{ metadata.mime_type | default(mime_type | default('audio/mpeg')) }}">
             </audio>
             {% elif metadata.media_kind == 'video' and metadata.browser_supported %}
-            <video id="mediaPlayer" playsinline crossorigin="anonymous" preload="auto" fetchpriority="high" controls>
-                <source src="{{ stream_url }}" type="{{ mime_type | default('video/mp4') }}">
+            <video id="mediaPlayer" autoplay playsinline crossorigin="anonymous" preload="auto" fetchpriority="high" controls>
+                <source src="{{ stream_url }}" type="{{ metadata.mime_type | default(mime_type | default('video/mp4')) }}">
                 {% for track in metadata.subtitle_tracks %}{% if track.url %}<track kind="subtitles" src="{{ track.url }}" srclang="{{ track.lang_code | default('und') }}" label="{{ track.language | default('Subtitle ' ~ loop.index) }}">{% endif %}{% endfor %}
             </video>
+            <button type="button" id="unmuteAutoplayBtn" onclick="unmuteAutoplay()" class="unmute-overlay-btn hidden">🔊 ᴛᴀᴘ ᴛᴏ ᴜɴᴍᴜᴛᴇ</button>
+            {% elif metadata.media_kind == 'image' or (metadata.mime_type and metadata.mime_type.startswith('image/')) %}
+            <img src="{{ stream_url }}" alt="{{ file_name | default('Image Preview') }}" class="preview-image" loading="eager">
+            {% elif metadata.mime_type == 'application/pdf' %}
+            <iframe src="{{ stream_url }}" title="{{ file_name | default('PDF Preview') }}" class="preview-frame"></iframe>
             {% elif metadata.media_kind == 'code' %}
             <div class="fallback-box">
                 <span style="font-size: 2.6rem;">💻</span>
-                <p style="font-weight: 700;">⚡ ᴄᴏᴅᴇ ғɪʟᴇ ʀᴇᴀᴅʏ ғᴏʀ ʟɪᴠᴇ ɪɴsᴘᴇᴄᴛɪᴏɴ & ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ ({{ file_name }})</p>
+                <p style="font-weight: 700;">⚡ ᴄᴏᴅᴇ / ᴛᴇxᴛ ғɪʟᴇ ʀᴇᴀᴅʏ ({{ metadata.mime_type | default('text/plain') }} • {{ file_size }})</p>
                 <div class="controls-row" style="justify-content: center;">
                     <a href="/code/{{ file_id }}" class="btn btn-primary">💻 ᴏᴘᴇɴ ʟɪᴠᴇ ᴄᴏᴅᴇ ᴠɪᴇᴡᴇʀ</a>
                     <a href="{{ download_url }}" class="btn">⬇️ ғᴀsᴛ ᴅᴏᴡɴʟᴏᴀᴅ</a>
@@ -441,9 +467,12 @@
             </div>
             {% else %}
             <div class="fallback-box">
-                <span style="font-size: 2.6rem;">🎬</span>
-                <p style="font-weight: 700;">ᴛʜɪs ғɪʟᴇ ɪs ᴏᴘᴛɪᴍɪᴢᴇᴅ ғᴏʀ ᴇxᴛᴇʀɴᴀʟ ʜᴡ+ ᴘʟᴀʏᴇʀs (ᴍᴋᴠ / ʜᴇᴠᴄ / ᴅᴜᴀʟ ᴀᴜᴅɪᴏ)</p>
-                <a href="{{ download_url }}" class="btn btn-primary">⬇️ ᴅᴏᴡɴʟᴏᴀᴅ ᴏʀ ᴏᴘᴇɴ ɪɴ ᴘʟᴀʏɪᴛ / ᴍx / ᴠʟᴄ / s ᴘʟᴀʏᴇʀ</a>
+                <span style="font-size: 2.6rem;">{% if metadata.media_kind == 'video' %}🎬{% else %}📦{% endif %}</span>
+                <p style="font-weight: 700;">{% if metadata.media_kind == 'video' %}ᴛʜɪs ᴠɪᴅᴇᴏ ({{ metadata.mime_type }}) ɪs ᴏᴘᴛɪᴍɪᴢᴇᴅ ғᴏʀ ᴇxᴛᴇʀɴᴀʟ ʜᴡ+ ᴘʟᴀʏᴇʀs{% else %}{{ metadata.media_kind | default('document') | upper }} ғɪʟᴇ ({{ metadata.mime_type }}) ʀᴇᴀᴅʏ ғᴏʀ ᴢᴇʀᴏ-ʙᴜғғᴇʀ ᴅᴏᴡɴʟᴏᴀᴅ{% endif %}</p>
+                <div class="controls-row" style="justify-content: center;">
+                    <button type="button" onclick="streamSaveToDisk()" class="btn btn-emerald">🚀 sᴛʀᴇᴀᴍ sᴀᴠᴇ ᴛᴏ ᴅɪsᴋ</button>
+                    <a href="{{ download_url }}" class="btn btn-primary">⬇️ ғᴀsᴛ ᴅᴏᴡɴʟᴏᴀᴅ</a>
+                </div>
             </div>
             {% endif %}
             <div id="playerStatus" class="player-status-toast hidden" role="status" aria-live="polite"></div>
@@ -452,7 +481,7 @@
         <section class="ultra-card">
             <div class="card-head">
                 <h2 class="card-title">🎛️ <span>sᴏɴɪᴄ ᴜʟᴛʀᴀ ᴘʟᴀʏᴇʀ & ᴍᴇᴅɪᴀ ᴍᴇᴛᴀᴅᴀᴛᴀ</span></h2>
-                <span class="card-sub">{{ metadata.media_kind | default('document') }} · {{ metadata.mime_type | default(mime_type) }}</span>
+                <span class="card-sub">{{ metadata.media_kind | default('document') }} · {{ metadata.mime_type | default(mime_type) }}{% if metadata.width and metadata.height %} · {{ metadata.width }}×{{ metadata.height }}{% endif %}</span>
             </div>
 
             <div class="meta-pills">
@@ -472,10 +501,14 @@
                     <span class="k">💬 sᴜʙᴛɪᴛʟᴇs</span>
                     <span class="v" id="metaSubsCount">{{ metadata.subtitle_tracks | length }} ᴛʀᴀᴄᴋ(s)</span>
                 </div>
+                <div class="meta-item">
+                    <span class="k">📄 ᴍɪᴍᴇ / ᴛʏᴘᴇ</span>
+                    <span class="v" id="metaMimeType">{{ metadata.mime_type | default(mime_type) }}</span>
+                </div>
             </div>
 
             <div class="controls-row">
-                <button type="button" class="btn btn-pill" onclick="toggleMetadata('captionPanel')" id="btnCaptionToggle">📝 ᴄᴀᴘᴛɪᴏɴ</button>
+                <button type="button" class="btn btn-pill {% if metadata.caption %}active{% endif %}" onclick="toggleMetadata('captionPanel')" id="btnCaptionToggle">📝 ᴄᴀᴘᴛɪᴏɴ</button>
                 <button type="button" class="btn btn-pill" onclick="toggleMetadata('audioPanel')" id="btnAudioToggle">🎧 ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋs</button>
                 <button type="button" class="btn btn-pill" onclick="toggleMetadata('languagePanel')" id="btnLangToggle">🌐 ʟᴀɴɢᴜᴀɢᴇ & sᴜʙs</button>
                 <select id="audioTrackSelect" class="track-select" onchange="switchAudioTrack(this.value)" title="Select Audio Track">
@@ -506,12 +539,12 @@
                 <button type="button" class="btn btn-pill" onclick="toggleTheatre()" id="theatreBtn">🖥️ ᴛʜᴇᴀᴛʀᴇ</button>
                 <button type="button" class="btn btn-pill" onclick="toggleFit()" id="fitBtn">▣ ғɪᴛ</button>
                 <button type="button" class="btn btn-pill" onclick="toggleMirror()" id="mirrorBtn">↔ ᴍɪʀʀᴏʀ</button>
-                <button type="button" class="btn btn-pill" onclick="captureFrame()">📸 ғʀᴀᴍᴇ</button>
-                <button type="button" class="btn btn-pill" onclick="togglePiP()">⛶ ᴘɪᴘ</button>
-                <button type="button" class="btn btn-pill" onclick="toggleSleepTimer()">⏱️ sʟᴇᴇᴘ</button>
-                <button type="button" class="btn btn-pill" onclick="toggleWakeLock()">☀ ᴡᴀᴋᴇ</button>
-                <button type="button" class="btn btn-pill" onclick="toggleScreenLock()">⌧ ʟᴏᴄᴋ</button>
-                <button type="button" class="btn btn-pill" onclick="retryMedia()">↻ ʀᴇᴛʀʏ</button>
+                <button type="button" class="btn btn-pill" onclick="captureFrame()" id="frameBtn">📸 ғʀᴀᴍᴇ</button>
+                <button type="button" class="btn btn-pill" onclick="togglePiP()" id="pipBtn">⛶ ᴘɪᴘ</button>
+                <button type="button" class="btn btn-pill" onclick="toggleSleepTimer()" id="sleepBtn">⏱️ sʟᴇᴇᴘ</button>
+                <button type="button" class="btn btn-pill" onclick="toggleWakeLock()" id="wakeBtn">☀ ᴡᴀᴋᴇ</button>
+                <button type="button" class="btn btn-pill" onclick="toggleScreenLock()" id="lockBtn">⌧ ʟᴏᴄᴋ</button>
+                <button type="button" class="btn btn-pill" onclick="retryMedia()" id="retryBtn">↻ ʀᴇᴛʀʏ</button>
                 <span id="networkState" class="card-sub" style="padding: 4px 8px;">🟢 ᴏɴʟɪɴᴇ</span>
             </div>
             {% endif %}
@@ -529,14 +562,15 @@
                 </div>
             </div>
 
-            <div id="captionPanel" class="panel-box hidden">{{ metadata.caption | default('No custom caption attached to this media.') }}</div>
-            <div id="audioPanel" class="panel-box hidden"><strong>🎧 ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋs ({{ metadata.audio_track }}):</strong>{% if metadata.audio_tracks %}{% for track in metadata.audio_tracks %}
-• Track {{ loop.index }}: {{ track.language | default(track.lang | default('Undetermined')) }} · {{ track.codec | default('AUDIO') }} · {{ track.channels | default(2) }}ch ({{ track.channel_layout | default('stereo') }}){% endfor %}{% else %}
-• Default Audio Stream{% endif %}</div>
-            <div id="languagePanel" class="panel-box hidden"><strong>🌐 ʟᴀɴɢᴜᴀɢᴇ:</strong> {{ metadata.language }}
-<strong>💬 sᴜʙᴛɪᴛʟᴇs:</strong>{% if metadata.subtitle_tracks %}{% for track in metadata.subtitle_tracks %}
-• Subtitle {{ loop.index }}: {{ track.language | default(track.lang | default('Undetermined')) }} ({{ track.codec | default('SUB') }}){% endfor %}{% else %}
-• No embedded subtitle tracks detected{% endif %}</div>
+            <div id="captionPanel" class="panel-box {% if not metadata.caption %}hidden{% endif %}"><strong>📝 ᴄᴀᴘᴛɪᴏɴ:</strong>
+<span id="captionText">{{ metadata.caption if metadata.caption else 'No custom caption attached to this media.' }}</span></div>
+            <div id="audioPanel" class="panel-box hidden"><strong>🎧 ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋs (<span id="audioPanelSummary">{{ metadata.audio_track }}</span>):</strong>
+<span id="audioPanelList">{% if metadata.audio_tracks %}{% for track in metadata.audio_tracks %}• Track {{ loop.index }}: {{ track.language | default(track.lang | default('Undetermined')) }} · {{ track.codec | default('AUDIO') }} · {{ track.channels | default(2) }}ch ({{ track.channel_layout | default('stereo') }})
+{% endfor %}{% else %}• Default Audio Stream{% endif %}</span></div>
+            <div id="languagePanel" class="panel-box hidden"><strong>🌐 ʟᴀɴɢᴜᴀɢᴇ:</strong> <span id="langPanelValue">{{ metadata.language }}</span>
+<strong>💬 sᴜʙᴛɪᴛʟᴇs:</strong>
+<span id="subPanelList">{% if metadata.subtitle_tracks %}{% for track in metadata.subtitle_tracks %}• Subtitle {{ loop.index }}: {{ track.language | default(track.lang | default('Undetermined')) }} ({{ track.codec | default('SUB') }})
+{% endfor %}{% else %}• No embedded subtitle tracks detected{% endif %}</span></div>
         </section>
 
         <section class="ultra-card">
@@ -598,7 +632,7 @@
                 <div class="controls-row" style="margin-top: 0;">
                     <button type="button" onclick="streamSaveToDisk()" class="btn btn-emerald">🚀 sᴛʀᴇᴀᴍ sᴀᴠᴇ ᴛᴏ ᴅɪsᴋ</button>
                     <a href="{{ download_url }}" class="btn btn-primary">⬇️ ᴅɪʀᴇᴄᴛ ʀᴀɴɢᴇ ᴅᴏᴡɴʟᴏᴀᴅ</a>
-                    <button type="button" onclick="copyStreamUrl('{{ stream_url }}')" class="btn"><span id="copyBtnText">📋 ᴄᴏᴘʏ sᴛʀᴇᴀᴍ ᴜʀʟ</span></button>
+                    <button type="button" onclick="copyStreamUrl()" class="btn"><span id="copyBtnText">📋 ᴄᴏᴘʏ sᴛʀᴇᴀᴍ ᴜʀʟ</span></button>
                     <a href="{{ dl_page_url | default(download_url) }}" class="btn">📦 ᴅᴏᴡɴʟᴏᴀᴅ ʜᴜʙ</a>
                 </div>
                 <a href="{{ watermark_url | default('https://t.me/mallumovieworldmain2') }}" target="_blank" style="color: var(--accent); font-size: 0.78rem; font-weight: 700; text-decoration: none;">
@@ -614,6 +648,7 @@
             const media = document.getElementById('mediaPlayer');
             const status = document.getElementById('playerStatus');
             const network = document.getElementById('networkState');
+            const unmuteBtn = document.getElementById('unmuteAutoplayBtn');
             const watchStreamStatus = document.getElementById('watchStreamStatus');
             const watchStreamStats = document.getElementById('watchStreamStats');
             const watchStreamBar = document.getElementById('watchStreamBar');
@@ -622,11 +657,11 @@
             const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
             const boosts = [1.0, 1.5, 2.0, 3.0];
             const fits = ['contain', 'cover', 'fill'];
-            const FILE_ID = "{{ file_id | default('') }}";
-            const STREAM_URL = "{{ stream_url }}";
-            const DOWNLOAD_URL = "{{ download_url }}";
-            const FILE_NAME = "{{ file_name | default('stream_media.mp4') }}";
-            const EXPECTED_BYTES = Number("{{ file_size_bytes | default(0) }}") || 0;
+            const FILE_ID = {{ file_id | default('') | tojson }};
+            const STREAM_URL = {{ stream_url | tojson }};
+            const DOWNLOAD_URL = {{ download_url | tojson }};
+            const FILE_NAME = {{ file_name | default('stream_media.mp4') | tojson }};
+            const EXPECTED_BYTES = Number({{ file_size_bytes | default(0) | tojson }}) || 0;
             let speedIdx = 2;
             let boostIdx = 0;
             let fitIdx = 0;
@@ -638,6 +673,7 @@
             let abStart = null;
             let abEnd = null;
             let wakeLock = null;
+            let autoplayAttempted = false;
 
             function formatBytes(bytes) {
                 const v = Number(bytes) || 0;
@@ -645,6 +681,38 @@
                 const u = ['B', 'KB', 'MB', 'GB', 'TB'];
                 const i = Math.min(u.length - 1, Math.floor(Math.log(v) / Math.log(1024)));
                 return (v / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 2) + ' ' + u[i];
+            }
+
+            function formatDuration(sec) {
+                const s = Math.max(0, Math.round(Number(sec) || 0));
+                if (s <= 0) return '0s';
+                const h = Math.floor(s / 3600);
+                const m = Math.floor((s % 3600) / 60);
+                const rem = s % 60;
+                if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m ${String(rem).padStart(2, '0')}s`;
+                if (m > 0) return `${m}m ${String(rem).padStart(2, '0')}s`;
+                return `${rem}s`;
+            }
+
+            function getCachedApiInfo(fileId) {
+                if (!fileId) return null;
+                try {
+                    const raw = sessionStorage.getItem('mmw-info:' + fileId);
+                    if (!raw) return null;
+                    const parsed = JSON.parse(raw);
+                    if (parsed && parsed.expires > Date.now()) return parsed.data;
+                } catch (_) {}
+                return null;
+            }
+
+            function setCachedApiInfo(fileId, data) {
+                if (!fileId || !data) return;
+                try {
+                    sessionStorage.setItem('mmw-info:' + fileId, JSON.stringify({
+                        expires: Date.now() + 60000,
+                        data: data
+                    }));
+                } catch (_) {}
             }
 
             function notify(message, persistent = false) {
@@ -655,9 +723,43 @@
                 if (!persistent) statusTimer = setTimeout(() => status.classList.add('hidden'), 2600);
             }
 
+            async function attemptAutoPlay() {
+                if (!media || autoplayAttempted) return;
+                autoplayAttempted = true;
+                try {
+                    await media.play();
+                    if (unmuteBtn) unmuteBtn.classList.add('hidden');
+                } catch (_) {
+                    try {
+                        media.muted = true;
+                        await media.play();
+                        if (unmuteBtn) unmuteBtn.classList.remove('hidden');
+                        notify('🔇 ᴀᴜᴛᴏ-ᴘʟᴀʏ sᴛᴀʀᴛᴇᴅ ᴍᴜᴛᴇᴅ — ᴛᴀᴘ ᴜɴᴍᴜᴛᴇ');
+                    } catch (_) {}
+                }
+            }
+
+            window.unmuteAutoplay = () => {
+                if (!media) return;
+                media.muted = false;
+                if (media.paused) media.play().catch(() => {});
+                if (unmuteBtn) unmuteBtn.classList.add('hidden');
+                notify('🔊 ᴀᴜᴅɪᴏ ᴜɴᴍᴜᴛᴇᴅ');
+            };
+
+            const panelButtonMap = {
+                captionPanel: 'btnCaptionToggle',
+                audioPanel: 'btnAudioToggle',
+                languagePanel: 'btnLangToggle'
+            };
+
             window.toggleMetadata = (id) => {
                 const panel = document.getElementById(id);
-                if (panel) panel.classList.toggle('hidden');
+                if (!panel) return;
+                const isHidden = panel.classList.toggle('hidden');
+                const btnId = panelButtonMap[id];
+                const btn = btnId ? document.getElementById(btnId) : null;
+                if (btn) btn.classList.toggle('active', !isHidden);
             };
 
             window.togglePlayPause = () => {
@@ -743,9 +845,11 @@
 
             window.toggleTheatre = () => {
                 const mc = document.getElementById('mainContainer');
+                const btn = document.getElementById('theatreBtn');
                 if (mc) {
-                    mc.classList.toggle('theatre-active');
-                    notify(mc.classList.contains('theatre-active') ? '🖥️ Theatre Mode ON' : '🖥️ Theatre Mode OFF');
+                    const active = mc.classList.toggle('theatre-active');
+                    if (btn) btn.classList.toggle('active', active);
+                    notify(active ? '🖥️ Theatre Mode ON' : '🖥️ Theatre Mode OFF');
                 }
             };
 
@@ -824,42 +928,49 @@
             };
 
             const metadataHash = window.location.hash.replace('#', '');
-            if (['captionPanel', 'audioPanel', 'languagePanel'].includes(metadataHash)) window.toggleMetadata(metadataHash);
-
-            const themeToggle = document.getElementById('themeToggle');
-            if (themeToggle) themeToggle.addEventListener('click', () => {
-                const isDark = document.documentElement.classList.toggle('dark');
-                localStorage.setItem('theme', isDark ? 'dark' : 'light');
-            });
+            if (['captionPanel', 'audioPanel', 'languagePanel'].includes(metadataHash)) {
+                const panel = document.getElementById(metadataHash);
+                if (panel && panel.classList.contains('hidden')) window.toggleMetadata(metadataHash);
+            }
 
             async function copyText(value) {
                 try {
                     if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(value);
-                    else { const input = document.createElement('textarea'); input.value = value; input.style.position = 'fixed'; input.style.opacity = '0'; document.body.appendChild(input); input.select(); document.execCommand('copy'); input.remove(); }
+                    else {
+                        const input = document.createElement('textarea');
+                        input.value = value;
+                        input.style.position = 'fixed';
+                        input.style.opacity = '0';
+                        document.body.appendChild(input);
+                        input.select();
+                        document.execCommand('copy');
+                        input.remove();
+                    }
                     const el = document.getElementById('copyBtnText');
                     if (el) { el.textContent = '✅ ᴄᴏᴘɪᴇᴅ'; setTimeout(() => { el.textContent = '📋 ᴄᴏᴘʏ sᴛʀᴇᴀᴍ ᴜʀʟ'; }, 2500); }
+                    notify('📋 sᴛʀᴇᴀᴍ ᴜʀʟ ᴄᴏᴘɪᴇᴅ');
                 } catch (_) { notify('ᴄᴏᴘʏ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); }
             }
-            window.copyStreamUrl = copyText;
+            window.copyStreamUrl = (val) => copyText(val || STREAM_URL);
 
             const PLAYER_LINKS = {
                 playit: {
-                    intent: "{{ player_links.playit_intent if player_links else '' }}",
-                    scheme: "{{ player_links.playit if player_links else ('playit://playerv2/video?url=' ~ stream_url) }}"
+                    intent: {{ (player_links.playit_intent if player_links else '') | tojson }},
+                    scheme: {{ (player_links.playit if player_links else ('playit://playerv2/video?url=' ~ stream_url)) | tojson }}
                 },
                 mxplayer: {
-                    intent: "{{ player_links.mxplayer if player_links else '' }}",
-                    fallback: "{{ player_links.mxplayer_pro if player_links else '' }}",
-                    scheme: "{{ player_links.mxplayer if player_links else '' }}"
+                    intent: {{ (player_links.mxplayer if player_links else '') | tojson }},
+                    fallback: {{ (player_links.mxplayer_pro if player_links else '') | tojson }},
+                    scheme: {{ (player_links.mxplayer if player_links else '') | tojson }}
                 },
                 vlc: {
-                    intent: "{{ player_links.vlc_intent if player_links else '' }}",
-                    scheme: "{{ player_links.vlc if player_links else ('vlc://' ~ stream_url) }}"
+                    intent: {{ (player_links.vlc_intent if player_links else '') | tojson }},
+                    scheme: {{ (player_links.vlc if player_links else ('vlc://' ~ stream_url)) | tojson }}
                 },
                 splayer: {
-                    intent: "{{ player_links.splayer if player_links else '' }}",
-                    fallback: "{{ player_links.splayer_alt if player_links else '' }}",
-                    scheme: "{{ player_links.splayer if player_links else '' }}"
+                    intent: {{ (player_links.splayer if player_links else '') | tojson }},
+                    fallback: {{ (player_links.splayer_alt if player_links else '') | tojson }},
+                    scheme: {{ (player_links.splayer if player_links else '') | tojson }}
                 }
             };
 
@@ -901,69 +1012,111 @@
                 if (media.duration > 0) {
                     const pct = Math.min(100, (media.currentTime / media.duration) * 100);
                     if (watchStreamBar && !watchAbortController) watchStreamBar.style.width = pct.toFixed(1) + '%';
-                    if (watchStreamStats && !watchAbortController) watchStreamStats.textContent = `${pct.toFixed(1)}% • ${Math.round(media.currentTime)}s / ${Math.round(media.duration)}s`;
+                    if (watchStreamStats && !watchAbortController) watchStreamStats.textContent = `${pct.toFixed(1)}% • ${formatDuration(media.currentTime)} / ${formatDuration(media.duration)}`;
+                }
+            }
+
+            function applyMetadataPayload(data) {
+                if (!data || !data.metadata) return;
+                const m = data.metadata;
+                const langEl = document.getElementById('metaLanguage');
+                const audEl = document.getElementById('metaAudioTrack');
+                const durEl = document.getElementById('metaDuration');
+                const subEl = document.getElementById('metaSubsCount');
+                const mimeEl = document.getElementById('metaMimeType');
+                const langPanelVal = document.getElementById('langPanelValue');
+                const audioPanelSum = document.getElementById('audioPanelSummary');
+                const audioPanelList = document.getElementById('audioPanelList');
+                const subPanelList = document.getElementById('subPanelList');
+                const captionTextEl = document.getElementById('captionText');
+
+                if (langEl && m.language && m.language !== 'Undetermined') langEl.textContent = m.language;
+                if (langPanelVal && m.language) langPanelVal.textContent = m.language;
+                if (audEl && m.audio_track && m.audio_track !== 'Default Audio') audEl.textContent = m.audio_track;
+                if (audioPanelSum && m.audio_track) audioPanelSum.textContent = m.audio_track;
+                if (durEl && m.duration > 0) durEl.textContent = formatDuration(m.duration);
+                if (subEl && Array.isArray(m.subtitle_tracks)) subEl.textContent = m.subtitle_tracks.length + ' ᴛʀᴀᴄᴋ(s)';
+                if (mimeEl && m.mime_type) mimeEl.textContent = m.mime_type;
+                if (captionTextEl && m.caption) captionTextEl.textContent = m.caption;
+
+                if (audioPanelList && Array.isArray(m.audio_tracks) && m.audio_tracks.length > 0) {
+                    audioPanelList.textContent = m.audio_tracks.map((tr, i) =>
+                        `• Track ${i + 1}: ${tr.language || tr.lang || 'Undetermined'} · ${tr.codec || 'AUDIO'} · ${tr.channels || 2}ch (${tr.channel_layout || 'stereo'})`
+                    ).join('\n');
+                }
+                if (subPanelList && Array.isArray(m.subtitle_tracks) && m.subtitle_tracks.length > 0) {
+                    subPanelList.textContent = m.subtitle_tracks.map((tr, i) =>
+                        `• Subtitle ${i + 1}: ${tr.language || tr.lang || 'Undetermined'} (${tr.codec || 'SUB'})`
+                    ).join('\n');
+                }
+
+                const audSelect = document.getElementById('audioTrackSelect');
+                if (audSelect && Array.isArray(m.audio_tracks) && m.audio_tracks.length > 0 && audSelect.options.length <= 1) {
+                    m.audio_tracks.forEach((tr, i) => {
+                        const opt = document.createElement('option');
+                        opt.value = String(i);
+                        opt.textContent = `🎧 ${tr.language || tr.lang || 'Track ' + (i + 1)} (${tr.codec || 'AUDIO'} ${tr.channels || 2}ch)`;
+                        audSelect.appendChild(opt);
+                    });
+                }
+                const subSelect = document.getElementById('subtitleSelect');
+                if (subSelect && Array.isArray(m.subtitle_tracks) && m.subtitle_tracks.length > 0 && subSelect.options.length <= 1) {
+                    m.subtitle_tracks.forEach((tr, i) => {
+                        const opt = document.createElement('option');
+                        opt.value = String(i);
+                        opt.textContent = `💬 ${tr.language || tr.lang || 'Subtitle ' + (i + 1)}`;
+                        subSelect.appendChild(opt);
+                        if (media && tr.url) {
+                            const trackEl = document.createElement('track');
+                            trackEl.kind = 'subtitles';
+                            trackEl.src = tr.url;
+                            trackEl.srclang = tr.lang_code || 'und';
+                            trackEl.label = tr.language || tr.lang || ('Subtitle ' + (i + 1));
+                            media.appendChild(trackEl);
+                        }
+                    });
                 }
             }
 
             async function refreshLiveMetadata() {
                 if (!FILE_ID) return;
+                const cached = getCachedApiInfo(FILE_ID);
+                if (cached) {
+                    applyMetadataPayload(cached);
+                    return;
+                }
                 try {
-                    const r = await fetch('/api/info/' + encodeURIComponent(FILE_ID), { cache: 'no-store' });
+                    const r = await fetch('/api/info/' + encodeURIComponent(FILE_ID));
                     if (!r.ok) return;
                     const data = await r.json();
-                    const m = data.metadata || {};
-                    const langEl = document.getElementById('metaLanguage');
-                    const audEl = document.getElementById('metaAudioTrack');
-                    const durEl = document.getElementById('metaDuration');
-                    const subEl = document.getElementById('metaSubsCount');
-                    if (langEl && m.language && m.language !== 'Undetermined') langEl.textContent = m.language;
-                    if (audEl && m.audio_track && m.audio_track !== 'Default Audio') audEl.textContent = m.audio_track;
-                    if (durEl && m.duration > 0) durEl.textContent = m.duration + 's';
-                    if (subEl && Array.isArray(m.subtitle_tracks)) subEl.textContent = m.subtitle_tracks.length + ' ᴛʀᴀᴄᴋ(s)';
-
-                    const audSelect = document.getElementById('audioTrackSelect');
-                    if (audSelect && Array.isArray(m.audio_tracks) && m.audio_tracks.length > 0 && audSelect.options.length <= 1) {
-                        m.audio_tracks.forEach((tr, i) => {
-                            const opt = document.createElement('option');
-                            opt.value = String(i);
-                            opt.textContent = `🎧 ${tr.language || tr.lang || 'Track ' + (i + 1)} (${tr.codec || 'AUDIO'} ${tr.channels || 2}ch)`;
-                            audSelect.appendChild(opt);
-                        });
-                    }
-                    const subSelect = document.getElementById('subtitleSelect');
-                    if (subSelect && Array.isArray(m.subtitle_tracks) && m.subtitle_tracks.length > 0 && subSelect.options.length <= 1) {
-                        m.subtitle_tracks.forEach((tr, i) => {
-                            const opt = document.createElement('option');
-                            opt.value = String(i);
-                            opt.textContent = `💬 ${tr.language || tr.lang || 'Subtitle ' + (i + 1)}`;
-                            subSelect.appendChild(opt);
-                            if (media && tr.url) {
-                                const trackEl = document.createElement('track');
-                                trackEl.kind = 'subtitles';
-                                trackEl.src = tr.url;
-                                trackEl.srclang = tr.lang_code || 'und';
-                                trackEl.label = tr.language || tr.lang || ('Subtitle ' + (i + 1));
-                                media.appendChild(trackEl);
-                            }
-                        });
-                    }
+                    setCachedApiInfo(FILE_ID, data);
+                    applyMetadataPayload(data);
                 } catch (_) {}
             }
+
+            const initialDur = Number({{ metadata.duration | default(0) | tojson }}) || 0;
+            const durElInit = document.getElementById('metaDuration');
+            if (durElInit && initialDur > 0) durElInit.textContent = formatDuration(initialDur);
 
             if (media) {
                 restoreState();
                 media.addEventListener('timeupdate', saveState, { passive: true });
                 media.addEventListener('volumechange', saveState, { passive: true });
+                media.addEventListener('canplay', attemptAutoPlay, { once: true });
                 media.addEventListener('waiting', () => {
-                    notify('⏳ ʙᴜғғᴇʀɪɴɢ…', true);
-                    if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '⏳ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ʙᴜғғᴇʀɪɴɢ sᴏɴɪᴄ ʀᴀɴɢᴇ…';
+                    notify('⏳ ʟᴏᴀᴅɪɴɢ sᴛʀᴇᴀᴍ…', true);
+                    if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '⏳ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ʟᴏᴀᴅɪɴɢ ᴢᴇʀᴏ-ʙᴜғғᴇʀ ʀᴀɴɢᴇ…';
                 });
                 media.addEventListener('playing', () => {
                     if (status) status.classList.add('hidden');
                     if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '🟢 sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: sᴛʀᴇᴀᴍɪɴɢ ʟɪᴠᴇ';
+                    const playBtn = document.getElementById('playPauseBtn');
+                    if (playBtn) playBtn.classList.add('active');
                 });
                 media.addEventListener('pause', () => {
                     if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '⏸️ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴘᴀᴜsᴇᴅ';
+                    const playBtn = document.getElementById('playPauseBtn');
+                    if (playBtn) playBtn.classList.remove('active');
                 });
                 media.addEventListener('ended', () => {
                     if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '✅ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴘʟᴀʏʙᴀᴄᴋ ᴄᴏᴍᴘʟᴇᴛᴇᴅ';
@@ -976,23 +1129,133 @@
                     notify('✅ sᴏɴɪᴄ ʀᴀɴɢᴇ sᴛʀᴇᴀᴍ ʀᴇᴀᴅʏ');
                     if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '✅ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: sᴏɴɪᴄ ʀᴀɴɢᴇ ʀᴇᴀᴅʏ';
                     const durEl = document.getElementById('metaDuration');
-                    if (durEl && media.duration > 0) durEl.textContent = Math.round(media.duration) + 's';
+                    if (durEl && media.duration > 0) durEl.textContent = formatDuration(media.duration);
+                    attemptAutoPlay();
                 });
                 media.addEventListener('timeupdate', () => {
                     if (abStart !== null && abEnd !== null && media.currentTime >= abEnd) media.currentTime = abStart;
                 });
+                setTimeout(attemptAutoPlay, 150);
             }
 
-            window.toggleLoop = () => { if (!media) return; media.loop = !media.loop; notify(media.loop ? '🔁 ʟᴏᴏᴘ ᴏɴ' : '⏹️ ʟᴏᴏᴘ ᴏғғ'); };
-            window.togglePiP = async () => { try { if (document.pictureInPictureElement) await document.exitPictureInPicture(); else if (media && document.pictureInPictureEnabled) await media.requestPictureInPicture(); else notify('ᴘɪᴘ ɴᴏᴛ sᴜᴘᴘᴏʀᴛᴇᴅ'); } catch (_) { notify('ᴘɪᴘ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); } };
-            window.captureFrame = () => { if (!media || media.tagName !== 'VIDEO') return notify('ғʀᴀᴍᴇ ᴄᴀᴘᴛᴜʀᴇ ɪs ᴏɴʟʏ ғᴏʀ ᴠɪᴅᴇᴏ'); try { const canvas = document.createElement('canvas'); canvas.width = media.videoWidth; canvas.height = media.videoHeight; canvas.getContext('2d').drawImage(media, 0, 0); const a = document.createElement('a'); a.href = canvas.toDataURL('image/jpeg', 0.92); a.download = 'mmw-frame.jpg'; a.click(); } catch (_) { notify('ғʀᴀᴍᴇ ᴄᴀᴘᴛᴜʀᴇ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); } };
-            window.toggleSleepTimer = () => { if (sleepTimer) { clearTimeout(sleepTimer); sleepTimer = null; return notify('⏱️ sʟᴇᴇᴘ ᴛɪᴍᴇʀ ᴄᴀɴᴄᴇʟʟᴇᴅ'); } const minutes = Number(window.prompt('Sleep timer minutes', '30')); if (Number.isFinite(minutes) && minutes > 0) { sleepTimer = setTimeout(() => { media?.pause(); notify('⏱️ sʟᴇᴇᴘ ᴛɪᴍᴇʀ ᴘᴀᴜsᴇᴅ ᴘʟᴀʏʙᴀᴄᴋ'); }, minutes * 60000); notify(`⏱️ sʟᴇᴇᴘ ɪɴ ${minutes} ᴍɪɴ`); } };
-            window.setABPoint = () => { if (!media) return; if (abStart === null) { abStart = media.currentTime || 0; notify(`ᴀ–ʙ ᴀ sᴇᴛ: ${Math.round(abStart)}s`); } else if (abEnd === null) { abEnd = media.currentTime || 0; if (abEnd <= abStart) { abStart = null; abEnd = null; return notify('ᴀ–ʙ ʙ ᴍᴜsᴛ ʙᴇ ᴀғᴛᴇʀ ᴀ'); } notify(`ᴀ–ʙ ʟᴏᴏᴘ: ${Math.round(abStart)}s → ${Math.round(abEnd)}s`); } else { abStart = null; abEnd = null; notify('ᴀ–ʙ ʟᴏᴏᴘ ᴄʟᴇᴀʀᴇᴅ'); } };
-            window.retryMedia = () => { if (!media) return; const position = media.currentTime || 0; media.load(); media.addEventListener('loadedmetadata', () => { media.currentTime = position; media.play().catch(() => {}); }, { once: true }); notify('↻ ʀᴇᴛʀʏɪɴɢ ᴍᴇᴅɪᴀ…'); };
-            window.toggleFit = () => { if (!media) return; fitIdx = (fitIdx + 1) % fits.length; media.style.objectFit = fits[fitIdx]; notify(`▣ ғɪᴛ: ${fits[fitIdx].toUpperCase()}`); };
-            window.toggleMirror = () => { if (!media) return; media.style.transform = media.style.transform === 'scaleX(-1)' ? '' : 'scaleX(-1)'; notify('↔ ᴍɪʀʀᴏʀ ᴛᴏɢɢʟᴇᴅ'); };
-            window.toggleWakeLock = async () => { try { if (wakeLock) { await wakeLock.release(); wakeLock = null; return notify('☀ ᴡᴀᴋᴇ ʟᴏᴄᴋ ᴏғғ'); } if (!('wakeLock' in navigator)) return notify('ᴡᴀᴋᴇ ʟᴏᴄᴋ ɴᴏᴛ sᴜᴘᴘᴏʀᴛᴇᴅ'); wakeLock = await navigator.wakeLock.request('screen'); notify('☀ ᴡᴀᴋᴇ ʟᴏᴄᴋ ᴏɴ'); } catch (_) { notify('ᴡᴀᴋᴇ ʟᴏᴄᴋ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); } };
-            window.toggleScreenLock = () => { document.body.classList.toggle('select-none'); notify(document.body.classList.contains('select-none') ? '⌧ ᴛᴏᴜᴄʜ ʟᴏᴄᴋᴇᴅ' : '⌧ ᴛᴏᴜᴄʜ ᴜɴʟᴏᴄᴋᴇᴅ'); };
+            window.toggleLoop = () => {
+                if (!media) return;
+                media.loop = !media.loop;
+                const btn = document.getElementById('loopBtn');
+                if (btn) btn.classList.toggle('active', media.loop);
+                notify(media.loop ? '🔁 ʟᴏᴏᴘ ᴏɴ' : '⏹️ ʟᴏᴏᴘ ᴏғғ');
+            };
+            window.togglePiP = async () => {
+                try {
+                    if (document.pictureInPictureElement) await document.exitPictureInPicture();
+                    else if (media && document.pictureInPictureEnabled && media.tagName === 'VIDEO') await media.requestPictureInPicture();
+                    else notify('ᴘɪᴘ ɴᴏᴛ sᴜᴘᴘᴏʀᴛᴇᴅ');
+                } catch (_) { notify('ᴘɪᴘ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); }
+            };
+            window.captureFrame = () => {
+                if (!media || media.tagName !== 'VIDEO') return notify('ғʀᴀᴍᴇ ᴄᴀᴘᴛᴜʀᴇ ɪs ᴏɴʟʏ ғᴏʀ ᴠɪᴅᴇᴏ');
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = media.videoWidth;
+                    canvas.height = media.videoHeight;
+                    canvas.getContext('2d').drawImage(media, 0, 0);
+                    const a = document.createElement('a');
+                    a.href = canvas.toDataURL('image/jpeg', 0.92);
+                    a.download = 'mmw-frame.jpg';
+                    a.click();
+                    notify('📸 ғʀᴀᴍᴇ sᴀᴠᴇᴅ');
+                } catch (_) { notify('ғʀᴀᴍᴇ ᴄᴀᴘᴛᴜʀᴇ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); }
+            };
+            window.toggleSleepTimer = () => {
+                const btn = document.getElementById('sleepBtn');
+                if (sleepTimer) {
+                    clearTimeout(sleepTimer);
+                    sleepTimer = null;
+                    if (btn) btn.classList.remove('active');
+                    return notify('⏱️ sʟᴇᴇᴘ ᴛɪᴍᴇʀ ᴄᴀɴᴄᴇʟʟᴇᴅ');
+                }
+                const minutes = Number(window.prompt('Sleep timer minutes', '30'));
+                if (Number.isFinite(minutes) && minutes > 0) {
+                    if (btn) btn.classList.add('active');
+                    sleepTimer = setTimeout(() => {
+                        if (media) media.pause();
+                        sleepTimer = null;
+                        if (btn) btn.classList.remove('active');
+                        notify('⏱️ sʟᴇᴇᴘ ᴛɪᴍᴇʀ ᴘᴀᴜsᴇᴅ ᴘʟᴀʏʙᴀᴄᴋ');
+                    }, minutes * 60000);
+                    notify(`⏱️ sʟᴇᴇᴘ ɪɴ ${minutes} ᴍɪɴ`);
+                }
+            };
+            window.setABPoint = () => {
+                if (!media) return;
+                const btn = document.getElementById('abBtn');
+                if (abStart === null) {
+                    abStart = media.currentTime || 0;
+                    if (btn) btn.classList.add('active');
+                    notify(`ᴀ–ʙ ᴀ sᴇᴛ: ${Math.round(abStart)}s`);
+                } else if (abEnd === null) {
+                    abEnd = media.currentTime || 0;
+                    if (abEnd <= abStart) {
+                        abStart = null;
+                        abEnd = null;
+                        if (btn) btn.classList.remove('active');
+                        return notify('ᴀ–ʙ ʙ ᴍᴜsᴛ ʙᴇ ᴀғᴛᴇʀ ᴀ');
+                    }
+                    notify(`ᴀ–ʙ ʟᴏᴏᴘ: ${Math.round(abStart)}s → ${Math.round(abEnd)}s`);
+                } else {
+                    abStart = null;
+                    abEnd = null;
+                    if (btn) btn.classList.remove('active');
+                    notify('ᴀ–ʙ ʟᴏᴏᴘ ᴄʟᴇᴀʀᴇᴅ');
+                }
+            };
+            window.retryMedia = () => {
+                if (!media) return;
+                const position = media.currentTime || 0;
+                media.load();
+                media.addEventListener('loadedmetadata', () => {
+                    media.currentTime = position;
+                    media.play().catch(() => {});
+                }, { once: true });
+                notify('↻ ʀᴇᴛʀʏɪɴɢ ᴍᴇᴅɪᴀ…');
+            };
+            window.toggleFit = () => {
+                if (!media) return;
+                fitIdx = (fitIdx + 1) % fits.length;
+                media.style.objectFit = fits[fitIdx];
+                const btn = document.getElementById('fitBtn');
+                if (btn) btn.textContent = `▣ ${fits[fitIdx].toUpperCase()}`;
+                notify(`▣ ғɪᴛ: ${fits[fitIdx].toUpperCase()}`);
+            };
+            window.toggleMirror = () => {
+                if (!media) return;
+                const mirrored = media.style.transform !== 'scaleX(-1)';
+                media.style.transform = mirrored ? 'scaleX(-1)' : '';
+                const btn = document.getElementById('mirrorBtn');
+                if (btn) btn.classList.toggle('active', mirrored);
+                notify(mirrored ? '↔ ᴍɪʀʀᴏʀ ᴏɴ' : '↔ ᴍɪʀʀᴏʀ ᴏғғ');
+            };
+            window.toggleWakeLock = async () => {
+                const btn = document.getElementById('wakeBtn');
+                try {
+                    if (wakeLock) {
+                        await wakeLock.release();
+                        wakeLock = null;
+                        if (btn) btn.classList.remove('active');
+                        return notify('☀ ᴡᴀᴋᴇ ʟᴏᴄᴋ ᴏғғ');
+                    }
+                    if (!('wakeLock' in navigator)) return notify('ᴡᴀᴋᴇ ʟᴏᴄᴋ ɴᴏᴛ sᴜᴘᴘᴏʀᴛᴇᴅ');
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    if (btn) btn.classList.add('active');
+                    notify('☀ ᴡᴀᴋᴇ ʟᴏᴄᴋ ᴏɴ');
+                } catch (_) { notify('ᴡᴀᴋᴇ ʟᴏᴄᴋ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); }
+            };
+            window.toggleScreenLock = () => {
+                const locked = document.body.classList.toggle('select-none');
+                const btn = document.getElementById('lockBtn');
+                if (btn) btn.classList.toggle('active', locked);
+                notify(locked ? '⌧ ᴛᴏᴜᴄʜ ʟᴏᴄᴋᴇᴅ' : '⌧ ᴛᴏᴜᴄʜ ᴜɴʟᴏᴄᴋᴇᴅ');
+            };
 
             document.addEventListener('keydown', (event) => {
                 if (!media || ['INPUT', 'TEXTAREA', 'BUTTON', 'SELECT'].includes(document.activeElement?.tagName)) return;
@@ -1010,8 +1273,8 @@
             window.addEventListener('offline', updateNetwork);
             updateNetwork();
 
-            if (Number("{{ metadata.duration | default(0) }}") === 0 || "{{ metadata.language | default('Undetermined') }}" === "Undetermined") {
-                setTimeout(refreshLiveMetadata, 2500);
+            if (initialDur === 0 || {{ (metadata.language | default('Undetermined')) | tojson }} === 'Undetermined') {
+                setTimeout(refreshLiveMetadata, 2000);
             }
         })();
     </script>
