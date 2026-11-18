@@ -1074,7 +1074,7 @@ async def code_pro_command_entry(client: Client, message: Message):
     if not target or not target.document:
         return await safe_reply_text(
             message,
-            f"⚠️ **{to_smallcaps('please reply to a .py, .html, .css, .php, .js, or .json code file!')}**\n\n"
+            f"⚠️ **{to_smallcaps('please reply to a .py, .html, .js, .ts, .json, .sql, or .sh code file!')}**\n\n"
             f"• **{to_smallcaps('usage')}** : {to_smallcaps('reply to any code file with')} `/codepro`, `/minify`, {to_smallcaps('or')} `/checkcode`"
             f"{format_watermark()}"
         )
@@ -1109,7 +1109,7 @@ async def show_code_pro_menu(media_msg: Message, target_msg: Message, is_callbac
     lang = detect_code_language(raw_name, getattr(doc, "mime_type", "")).upper()
 
     text = (
-        f"✦ **{to_smallcaps('code pro studio (py • html • css • php)')}** ✦ 💻⚡\n\n"
+        f"✦ **{to_smallcaps('code pro studio (py • html • js • json)')}** ✦ 💻⚡\n\n"
         f"• 📁 **{to_smallcaps('file name')}** : `{clean_name}`\n"
         f"• 📦 **{to_smallcaps('file size')}** : `{fsize}`\n"
         f"• 🧠 **{to_smallcaps('language')}** : `{lang}`\n\n"

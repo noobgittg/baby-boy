@@ -959,7 +959,17 @@ class TaskRepository:
                 restored += 1
         return restored
 
-    async def create_task(self, **kwargs) -> Dict[str, Any]:
+    async def create_task(self, task_id: Optional[str] = None, user_id: Optional[int] = None, task_type: Optional[str] = None, params: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
+        if task_id is not None:
+            kwargs.setdefault("task_id", task_id)
+        if user_id is not None:
+            kwargs.setdefault("user_id", user_id)
+        if task_type is not None:
+            kwargs.setdefault("task_type", task_type)
+        if params is not None:
+            kwargs.setdefault("params", params)
+        kwargs.setdefault("chat_id", kwargs.get("user_id") or 0)
+        kwargs.setdefault("original_message_id", (kwargs.get("params") or {}).get("msg_id", 0))
         doc = new_task_dict(**kwargs)
         await self.col.update_one({"task_id": doc["task_id"]}, {"$set": doc}, upsert=True)
         await cache.set(f"task_{doc['task_id']}", doc, ttl=1800)

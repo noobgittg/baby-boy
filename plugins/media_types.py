@@ -43,9 +43,6 @@ CODE_EXTENSIONS = {
     ".pyw": ("python", "text/x-python"),
     ".html": ("html", "text/html"),
     ".htm": ("html", "text/html"),
-    ".css": ("css", "text/css"),
-    ".php": ("php", "application/x-httpd-php"),
-    ".phtml": ("php", "application/x-httpd-php"),
     ".js": ("javascript", "application/javascript"),
     ".mjs": ("javascript", "application/javascript"),
     ".ts": ("typescript", "application/typescript"),
@@ -64,11 +61,6 @@ CODE_MIME_TYPES = {
     "text/x-script.phyton",
     "text/html",
     "application/xhtml+xml",
-    "text/css",
-    "application/x-httpd-php",
-    "application/php",
-    "text/x-php",
-    "text/php",
     "application/javascript",
     "text/javascript",
     "application/json",
@@ -113,10 +105,6 @@ def detect_code_language(file_name: str | None = None, mime_type: str | None = N
         return "python"
     if "html" in mime:
         return "html"
-    if "css" in mime:
-        return "css"
-    if "php" in mime:
-        return "php"
     if "javascript" in mime:
         return "javascript"
     if "json" in mime:
@@ -142,5 +130,5 @@ def browser_media_supported(value: str | None, file_name: str | None = None) -> 
     if is_code_file(file_name, mime):
         return True
     return mime.startswith(("audio/", "video/")) or mime in {
-        "application/ogg", "application/vnd.apple.mpegurl", "application/dash+xml", "text/html", "text/css"
+        "application/ogg", "application/vnd.apple.mpegurl", "application/dash+xml", "text/html"
     }

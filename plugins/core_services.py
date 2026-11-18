@@ -2273,21 +2273,15 @@ def analyze_code_file_sync(file_path: str, file_name: str = "") -> Dict[str, Any
         classes_cnt = len(re.findall(r"<style\b", content, re.I))
         imports_cnt = len(re.findall(r"<link\b", content, re.I))
         syntax_ok = ("<html" in content.lower() or "<!doctype" in content.lower() or len(tags) > 0)
-        syntax_detail = f"HTML5 Ready ({len(tags)} elements, {functions_cnt} scripts, {classes_cnt} styles)"
-    elif lang == "css":
-        rules = re.findall(r"\{[^{}]*\}", content)
-        classes_cnt = len(rules)
-        imports_cnt = len(re.findall(r"@import\b|@media\b|@keyframes\b", content, re.I))
+        syntax_detail = f"HTML5 Single-File ({len(tags)} elements, {functions_cnt} scripts, {classes_cnt} styles)"
+    elif lang in ("javascript", "typescript"):
+        functions_cnt = len(re.findall(r"\bfunction\b|=>", content))
+        classes_cnt = len(re.findall(r"\bclass\s+[a-zA-Z0-9_]+", content))
+        imports_cnt = len(re.findall(r"\b(?:import|export|require)\b", content))
         open_b = content.count("{")
         close_b = content.count("}")
         syntax_ok = (open_b == close_b)
-        syntax_detail = f"CSS Stylesheet ({classes_cnt} rules, {imports_cnt} directives)" if syntax_ok else f"Unbalanced braces ({open_b} vs {close_b})"
-    elif lang == "php":
-        functions_cnt = len(re.findall(r"\bfunction\s+[a-zA-Z0-9_]+", content, re.I))
-        classes_cnt = len(re.findall(r"\bclass\s+[a-zA-Z0-9_]+", content, re.I))
-        imports_cnt = len(re.findall(r"\b(?:require|require_once|include|include_once|use)\b", content, re.I))
-        syntax_ok = ("<?php" in content.lower() or "<?=" in content.lower() or functions_cnt > 0)
-        syntax_detail = f"PHP Script ({functions_cnt} functions, {classes_cnt} classes)"
+        syntax_detail = f"{lang.upper()} Module ({functions_cnt} functions, {classes_cnt} classes)" if syntax_ok else f"Unbalanced braces ({open_b} vs {close_b})"
     elif lang == "json":
         try:
             json.loads(content)
@@ -2358,24 +2352,25 @@ def optimize_code_file_sync(input_path: str, output_path: str, file_name: str = 
             optimized = cand
         except Exception:
             optimized = content
-    elif lang == "css":
-        cand = re.sub(r"/\*.*?\*/", "", content, flags=re.S)
-        cand = re.sub(r"\s+", " ", cand)
-        cand = re.sub(r"\s*([{};:,>~])\s*", r"\1", cand)
-        cand = cand.replace(";}", "}").strip()
-        if cand:
-            optimized = cand + "\n"
     elif lang == "html":
-        cand = re.sub(r"<!--(?!\[if).*?-->", "", content, flags=re.S)
+        def _min_style_block(m: re.Match) -> str:
+            open_tag, body, close_tag = m.group(1), m.group(2), m.group(3)
+            body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+            body = re.sub(r"\s+", " ", body)
+            body = re.sub(r"\s*([{};:,>~])\s*", r"\1", body)
+            body = body.replace(";}", "}").strip()
+            return f"{open_tag}{body}{close_tag}"
+        cand = re.sub(r"(<style\b[^>]*>)(.*?)(</style>)", _min_style_block, content, flags=re.S | re.I)
+        cand = re.sub(r"<!--(?!\[if).*?-->", "", cand, flags=re.S)
         cand = re.sub(r">\s+<", "><", cand)
         cand = re.sub(r"\n{2,}", "\n", cand).strip()
         if cand:
             optimized = cand + "\n"
-    elif lang == "php":
+    elif lang in ("javascript", "typescript"):
         out_lines = []
         for line in content.splitlines():
             s = line.strip()
-            if s.startswith("//") or (s.startswith("#") and not s.startswith("#[")):
+            if s.startswith("//"):
                 continue
             out_lines.append(line.rstrip())
         cand = "\n".join(out_lines)

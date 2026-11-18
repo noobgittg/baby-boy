@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import math
 import asyncio
@@ -12,7 +13,7 @@ import uvicorn
 from fastapi import FastAPI, APIRouter, Request, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import StreamingResponse, Response, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 try:
@@ -30,8 +31,11 @@ CHUNK_SIZE = 1024 * 1024
 FIRST_FRAME_SLICE = 256 * 1024
 PREFETCH_QUEUE_SIZE = max(16, int(getattr(Config, "STREAM_BUFFER_CHUNKS", 64)))
 LOCAL_READ_CHUNK = max(CHUNK_SIZE, int(getattr(Config, "STREAM_CHUNK_SIZE", 4 * 1024 * 1024)))
+MAX_CONCURRENT_STREAMS = max(8, min(64, int(getattr(Config, "WORKERS", 32))))
 
 _MSG_RESOLVE_LOCKS: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+_CHUNK_FETCH_LOCKS: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+_STREAM_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_STREAMS)
 
 
 def parse_range_header(value: Optional[str], file_size: int):
@@ -127,13 +131,14 @@ def media_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-async def resolve_telegram_message(bot: Any, file_doc: Dict[str, Any]):
-    """Fetches and caches the Telegram message object with stampede lock protection."""
+async def resolve_telegram_message(bot: Any, file_doc: Dict[str, Any], force_refresh: bool = False):
+    """Fetches and caches the Telegram message object with stampede lock protection and expired-reference refresh."""
     file_id = str(file_doc.get("file_id", ""))
     cache_key = f"tg_msg_{file_id}"
-    cached_msg = await cache.get(cache_key)
-    if cached_msg is not None:
-        return cached_msg
+    if not force_refresh:
+        cached_msg = await cache.get(cache_key)
+        if cached_msg is not None:
+            return cached_msg
 
     if not bot or not getattr(bot, "is_connected", False):
         return None
@@ -143,10 +148,14 @@ async def resolve_telegram_message(bot: Any, file_doc: Dict[str, Any]):
     if not chat_id or not message_id:
         return None
 
+    if len(_MSG_RESOLVE_LOCKS) > 2000:
+        _MSG_RESOLVE_LOCKS.clear()
+
     async with _MSG_RESOLVE_LOCKS[file_id]:
-        cached_msg = await cache.get(cache_key)
-        if cached_msg is not None:
-            return cached_msg
+        if not force_refresh:
+            cached_msg = await cache.get(cache_key)
+            if cached_msg is not None:
+                return cached_msg
         try:
             msg = await bot.get_messages(int(chat_id), int(message_id))
             if msg and msg.media:
@@ -176,117 +185,136 @@ async def iter_12mbps_file_stream(
     request: Optional[Request] = None
 ) -> AsyncGenerator[bytes, None]:
     """
-    Ultra-Fast Zero-Blocking Async Byte Streamer:
-    1. If local file exists on disk (`file_path`), streams asynchronously via `aiofiles` in 4 MiB chunks (with 256 KiB initial frame flush).
-    2. Otherwise, streams directly from Telegram (`bot.stream_media`) using a 64-chunk prefetch buffer,
-       caching boundary chunks (first & last 1 MiB for MP4/MKV moov/cues headers) in RAM so external player seeking is instant!
+    Ultra-Fast Zero-Blocking Async Byte Streamer with Bounded Concurrency & Backpressure:
+    1. If local file exists on disk (`file_path`), streams asynchronously via `aiofiles` in chunks (with 256 KiB initial frame flush).
+    2. Otherwise, streams directly from Telegram (`bot.stream_media`) using a bounded prefetch buffer,
+       caching boundary chunks (first & last 1 MiB for MP4/MKV moov/cues headers) in RAM so player seeking is responsive.
     """
     content_length = (end - start) + 1
     file_id = str(file_doc.get("file_id", ""))
     total_file_size = _safe_metadata_int(file_doc.get("file_size", 0))
     last_chunk_index = max(0, (total_file_size - 1) // CHUNK_SIZE) if total_file_size > 0 else -1
 
-    if file_path and os.path.exists(file_path):
-        if aiofiles is not None:
-            async with aiofiles.open(file_path, "rb") as f:
-                await f.seek(start)
-                remaining = content_length
-                first_read = True
-                while remaining > 0:
-                    if request is not None and await request.is_disconnected():
-                        return
-                    read_size = min(FIRST_FRAME_SLICE if first_read else LOCAL_READ_CHUNK, remaining)
-                    first_read = False
-                    data = await f.read(read_size)
-                    if not data:
-                        break
-                    remaining -= len(data)
-                    yield data
-        else:
-            with open(file_path, "rb") as f:
-                f.seek(start)
-                remaining = content_length
-                while remaining > 0:
-                    if request is not None and await request.is_disconnected():
-                        return
-                    read_size = min(LOCAL_READ_CHUNK, remaining)
-                    data = await asyncio.to_thread(f.read, read_size)
-                    if not data:
-                        break
-                    remaining -= len(data)
-                    yield data
-        return
-
-    offset_chunks = start // CHUNK_SIZE
-    first_part_cut = start % CHUNK_SIZE
-    last_part_cut = (end % CHUNK_SIZE) + 1
-    part_count = math.ceil((end + 1) / CHUNK_SIZE) - offset_chunks
-
-    if part_count == 1 and offset_chunks in (0, last_chunk_index):
-        cached_raw = await cache.get(f"chunk_{file_id}_{offset_chunks}")
-        if cached_raw is not None:
-            sliced = _slice_chunk(cached_raw, 1, 1, first_part_cut, last_part_cut)
-            for idx in range(0, len(sliced), FIRST_FRAME_SLICE):
-                yield sliced[idx : idx + FIRST_FRAME_SLICE]
+    async with _STREAM_SEMAPHORE:
+        if file_path and os.path.exists(file_path):
+            if aiofiles is not None:
+                async with aiofiles.open(file_path, "rb") as f:
+                    await f.seek(start)
+                    remaining = content_length
+                    first_read = True
+                    while remaining > 0:
+                        if request is not None and await request.is_disconnected():
+                            return
+                        read_size = min(FIRST_FRAME_SLICE if first_read else LOCAL_READ_CHUNK, remaining)
+                        first_read = False
+                        data = await f.read(read_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+            else:
+                with open(file_path, "rb") as f:
+                    f.seek(start)
+                    remaining = content_length
+                    first_read = True
+                    while remaining > 0:
+                        if request is not None and await request.is_disconnected():
+                            return
+                        read_size = min(FIRST_FRAME_SLICE if first_read else LOCAL_READ_CHUNK, remaining)
+                        first_read = False
+                        data = await asyncio.to_thread(f.read, read_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
             return
 
-    msg = await resolve_telegram_message(bot, file_doc)
-    if not msg:
-        return
+        offset_chunks = start // CHUNK_SIZE
+        first_part_cut = start % CHUNK_SIZE
+        last_part_cut = (end % CHUNK_SIZE) + 1
+        part_count = math.ceil((end + 1) / CHUNK_SIZE) - offset_chunks
 
-    queue: asyncio.Queue = asyncio.Queue(maxsize=PREFETCH_QUEUE_SIZE)
-    producer_error: List[Exception] = []
+        if part_count == 1 and offset_chunks in (0, last_chunk_index):
+            chunk_cache_key = f"chunk_{file_id}_{offset_chunks}"
+            cached_raw = await cache.get(chunk_cache_key)
+            if cached_raw is not None:
+                sliced = _slice_chunk(cached_raw, 1, 1, first_part_cut, last_part_cut)
+                for idx in range(0, len(sliced), FIRST_FRAME_SLICE):
+                    yield sliced[idx : idx + FIRST_FRAME_SLICE]
+                return
 
-    async def _producer():
+        msg = await resolve_telegram_message(bot, file_doc)
+        if not msg:
+            return
+
+        queue: asyncio.Queue = asyncio.Queue(maxsize=PREFETCH_QUEUE_SIZE)
+        producer_error: List[Exception] = []
+
+        async def _producer():
+            active_msg = msg
+            retried_refresh = False
+            try:
+                current_part = 1
+                while True:
+                    try:
+                        async for chunk in bot.stream_media(active_msg, offset=offset_chunks + current_part - 1, limit=part_count - current_part + 1):
+                            if not chunk:
+                                break
+                            abs_chunk_idx = offset_chunks + current_part - 1
+                            if abs_chunk_idx in (0, last_chunk_index) and len(chunk) <= CHUNK_SIZE:
+                                await cache.set(f"chunk_{file_id}_{abs_chunk_idx}", chunk, ttl=900)
+
+                            sliced = _slice_chunk(chunk, current_part, part_count, first_part_cut, last_part_cut)
+                            if current_part == 1 and len(sliced) > FIRST_FRAME_SLICE:
+                                for sub_i in range(0, len(sliced), FIRST_FRAME_SLICE):
+                                    await queue.put(sliced[sub_i : sub_i + FIRST_FRAME_SLICE])
+                            else:
+                                await queue.put(sliced)
+
+                            current_part += 1
+                            if current_part > part_count:
+                                break
+                        break
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as inner_err:
+                        if not retried_refresh and current_part == 1:
+                            retried_refresh = True
+                            refreshed = await resolve_telegram_message(bot, file_doc, force_refresh=True)
+                            if refreshed is not None:
+                                active_msg = refreshed
+                                continue
+                        raise inner_err
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                producer_error.append(e)
+                logger.error(f"Telegram Stream producer error ({file_id}): {e}")
+            finally:
+                await queue.put(None)
+
+        producer_task = asyncio.create_task(_producer())
+        remaining = content_length
         try:
-            current_part = 1
-            async for chunk in bot.stream_media(msg, offset=offset_chunks, limit=part_count):
-                if not chunk:
+            while remaining > 0:
+                if request is not None and await request.is_disconnected():
                     break
-                abs_chunk_idx = offset_chunks + current_part - 1
-                if abs_chunk_idx in (0, last_chunk_index) and len(chunk) <= CHUNK_SIZE:
-                    await cache.set(f"chunk_{file_id}_{abs_chunk_idx}", chunk, ttl=900)
-
-                sliced = _slice_chunk(chunk, current_part, part_count, first_part_cut, last_part_cut)
-                if current_part == 1 and len(sliced) > FIRST_FRAME_SLICE:
-                    for sub_i in range(0, len(sliced), FIRST_FRAME_SLICE):
-                        await queue.put(sliced[sub_i : sub_i + FIRST_FRAME_SLICE])
-                else:
-                    await queue.put(sliced)
-
-                current_part += 1
-                if current_part > part_count:
+                item = await queue.get()
+                if item is None:
+                    if producer_error:
+                        raise RuntimeError("Telegram media stream failed") from producer_error[0]
                     break
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            producer_error.append(e)
-            logger.error(f"Telegram Stream producer error ({file_id}): {e}")
+                if len(item) > remaining:
+                    item = item[:remaining]
+                remaining -= len(item)
+                yield item
         finally:
-            await queue.put(None)
-
-    producer_task = asyncio.create_task(_producer())
-    remaining = content_length
-    try:
-        while remaining > 0:
-            if request is not None and await request.is_disconnected():
-                break
-            item = await queue.get()
-            if item is None:
-                if producer_error:
-                    raise RuntimeError("Telegram media stream failed") from producer_error[0]
-                break
-            if len(item) > remaining:
-                item = item[:remaining]
-            remaining -= len(item)
-            yield item
-    finally:
-        if not producer_task.done():
-            producer_task.cancel()
-        try:
-            await producer_task
-        except (asyncio.CancelledError, Exception):
-            pass
+            if not producer_task.done():
+                producer_task.cancel()
+            try:
+                await producer_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 pages_router = APIRouter()
@@ -325,14 +353,17 @@ async def root_health():
 
 
 @pages_router.get("/stats")
+@pages_router.head("/stats")
 async def root_stats_redirect(request: Request):
     return await index(request)
 
 
-@pages_router.get("/stream_bridge.php")
-@pages_router.head("/stream_bridge.php")
-async def stream_bridge_endpoint(request: Request, action: str = "status", id: str = ""):
-    from fastapi.responses import RedirectResponse
+@pages_router.get("/bridge")
+@pages_router.head("/bridge")
+@api_router.get("/bridge")
+@api_router.head("/bridge")
+async def native_gateway_endpoint(request: Request, action: str = "status", id: str = ""):
+    """Native Python HTTP 206 Stream & Telemetry Bridge."""
     act = (action or "status").strip().lower()
     clean_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(id or ""))
     base_url = str(request.base_url).rstrip("/")
@@ -341,7 +372,7 @@ async def stream_bridge_endpoint(request: Request, action: str = "status", id: s
         return {
             "status": "healthy",
             "branch": "MALLU",
-            "bridge": "PHP-HTTP206-Turbo",
+            "bridge": "Python-FastAPI-HTTP206-Native",
             "rename_limit_gb": 2,
             "compress_any_size": True,
             "stream_any_size": True,
@@ -357,6 +388,7 @@ async def stream_bridge_endpoint(request: Request, action: str = "status", id: s
     return {
         "service": "MMW All-In-One Pro Engine (MALLU Branch)",
         "status": "operational",
+        "bridge": "Python-FastAPI-HTTP206-Native",
         "backend": base_url,
         "endpoints": {
             "health": "?action=health",
@@ -395,29 +427,15 @@ async def index(request: Request):
     })
 
 
-
-
-@pages_router.get("/static/style.css")
-async def serve_static_css():
-    css_path = os.path.join(_CURRENT_DIR, "style.css")
-    if os.path.exists(css_path):
-        with open(css_path, "r", encoding="utf-8") as f:
-            css_body = f.read()
-    else:
-        css_body = ":root { --bg: #040711; --accent: #38bdf8; }"
-    return Response(
-        content=css_body,
-        media_type="text/css; charset=utf-8",
-        headers={"Cache-Control": "public, max-age=86400"},
-    )
-
-
 @pages_router.get("/code/{file_id}")
+@pages_router.head("/code/{file_id}")
 async def code_preview_page(request: Request, file_id: str):
     import html as _html
     file_doc = await FileRepository.get_file_by_id(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="Code file not found or link expired.")
+    if request.method == "HEAD":
+        return Response(status_code=200, headers={"Content-Type": "text/html; charset=utf-8"})
     file_name = file_doc.get("file_name") or "code.py"
     file_size = _safe_metadata_int(file_doc.get("file_size", 0))
     lang = detect_code_language(file_name, file_doc.get("mime_type"))
@@ -431,7 +449,110 @@ async def code_preview_page(request: Request, file_id: str):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{_html.escape(file_name)} — MMW Code Pro Studio</title>
-<link rel="stylesheet" href="/static/style.css">
+<style>
+:root {{
+    --bg: #040711;
+    --card-bg: rgba(11, 18, 36, 0.88);
+    --card-border: rgba(56, 189, 248, 0.25);
+    --accent: #38bdf8;
+    --accent-2: #a855f7;
+    --accent-3: #10b981;
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+}}
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body.code-studio-body {{
+    background: var(--bg);
+    color: var(--text-main);
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    min-height: 100vh;
+    padding: 28px 16px;
+}}
+.code-container {{
+    max-width: 1120px;
+    margin: 0 auto;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 22px;
+    padding: 28px;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.75);
+}}
+.code-header {{
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    margin-bottom: 20px;
+}}
+.lang-badge {{
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: rgba(56, 189, 248, 0.15);
+    color: var(--accent);
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+}}
+.code-header h1 {{ font-size: 1.35rem; margin-bottom: 4px; word-break: break-all; }}
+.code-header p {{ color: var(--text-muted); font-size: 0.88rem; }}
+.code-actions {{ display: flex; flex-wrap: wrap; gap: 10px; }}
+.btn-primary, .btn-secondary {{
+    text-decoration: none;
+    padding: 10px 18px;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 0.88rem;
+    transition: transform 0.15s ease;
+    cursor: pointer;
+    border: none;
+}}
+.btn-primary {{ background: linear-gradient(135deg, #38bdf8, #818cf8); color: #040711; }}
+.btn-secondary {{ background: rgba(255, 255, 255, 0.06); color: var(--text-main); border: 1px solid var(--card-border); }}
+.btn-primary:hover, .btn-secondary:hover {{ transform: translateY(-2px); }}
+.progress-wrap {{
+    margin-bottom: 16px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 12px 16px;
+}}
+.progress-track {{
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    overflow: hidden;
+    margin: 8px 0;
+}}
+.progress-fill {{
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #38bdf8, #10b981);
+    transition: width 0.12s linear;
+}}
+.progress-meta {{
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}}
+.code-pre {{
+    background: #02040a;
+    border: 1px solid rgba(56, 189, 248, 0.18);
+    border-radius: 14px;
+    padding: 20px;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.88rem;
+    line-height: 1.55;
+    color: #e2e8f0;
+    max-height: 75vh;
+}}
+</style>
 </head>
 <body class="code-studio-body">
 <div class="code-container">
@@ -442,18 +563,149 @@ async def code_preview_page(request: Request, file_id: str):
       <p>Size: {_html.escape(humanbytes(file_size))} • Instant HTTP 206 Byte-Range Stream</p>
     </div>
     <div class="code-actions">
-      <a href="{download_url}" class="btn-primary">⬇️ Fast Download</a>
-      <a href="{stream_url}" class="btn-secondary" target="_blank">📄 Raw Stream</a>
+      <button type="button" class="btn-primary" onclick="streamCodeDownload()">⬇️ Stream Save to Disk</button>
+      <a href="{download_url}" class="btn-secondary">📥 Direct Download</a>
+      <button type="button" class="btn-secondary" onclick="copyCodeText()">📋 Copy Code</button>
+      <button type="button" id="cancelCodeBtn" class="btn-secondary" onclick="cancelCodeStream()" style="display:none;">🛑 Cancel</button>
       <a href="{watch_url}" class="btn-secondary">🎬 Watch Studio</a>
     </div>
+  </div>
+  <div class="progress-wrap">
+    <div class="progress-meta">
+      <span id="codeStatusMsg">Status: Idle</span>
+      <span id="codeProgressPct">0%</span>
+    </div>
+    <div class="progress-track"><div id="codeProgressBar" class="progress-fill"></div></div>
   </div>
   <pre id="code-box" class="code-pre">Loading code stream...</pre>
 </div>
 <script>
-fetch({stream_url!r}, {{ headers: {{ "Range": "bytes=0-262143" }} }})
-  .then(r => r.text())
-  .then(t => {{ document.getElementById("code-box").textContent = t; }})
-  .catch(e => {{ document.getElementById("code-box").textContent = "Preview error: " + e; }});
+let codeAbortCtrl = null;
+const STREAM_URL = {stream_url!r};
+const FILE_NAME = {file_name!r};
+const EXPECTED_SIZE = {max(1, file_size)};
+
+async function loadCodePreview() {{
+  const box = document.getElementById("code-box");
+  const statusEl = document.getElementById("codeStatusMsg");
+  const pctEl = document.getElementById("codeProgressPct");
+  const barEl = document.getElementById("codeProgressBar");
+  const cancelBtn = document.getElementById("cancelCodeBtn");
+  codeAbortCtrl = new AbortController();
+  cancelBtn.style.display = "inline-block";
+  statusEl.textContent = "Status: Streaming code preview...";
+  try {{
+    const resp = await fetch(STREAM_URL, {{
+      headers: {{ "Range": "bytes=0-262143" }},
+      signal: codeAbortCtrl.signal
+    }});
+    if (!resp.ok && resp.status !== 206) throw new Error("HTTP " + resp.status);
+    const total = Number(resp.headers.get("Content-Length")) || Math.min(EXPECTED_SIZE, 262144);
+    if (!resp.body || !resp.body.getReader) {{
+      const txt = await resp.text();
+      box.textContent = txt;
+      barEl.style.width = "100%";
+      pctEl.textContent = "100%";
+      statusEl.textContent = "Status: Completed";
+      return;
+    }}
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let received = 0;
+    let output = "";
+    while (true) {{
+      const {{ done, value }} = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      output += decoder.decode(value, {{ stream: true }});
+      const pct = Math.min(100, Math.round((received / Math.max(1, total)) * 100));
+      barEl.style.width = pct + "%";
+      pctEl.textContent = pct + "% (" + received + " B)";
+    }}
+    output += decoder.decode();
+    box.textContent = output;
+    barEl.style.width = "100%";
+    pctEl.textContent = "100%";
+    statusEl.textContent = "Status: Completed (" + received + " bytes streamed)";
+  }} catch (e) {{
+    if (e && e.name === "AbortError") {{
+      statusEl.textContent = "Status: Cancelled by user";
+    }} else {{
+      statusEl.textContent = "Status: Error (" + e + ")";
+      box.textContent = "Preview error: " + e;
+    }}
+  }} finally {{
+    cancelBtn.style.display = "none";
+    codeAbortCtrl = null;
+  }}
+}}
+
+function cancelCodeStream() {{
+  if (codeAbortCtrl) codeAbortCtrl.abort();
+}}
+
+function copyCodeText() {{
+  const txt = document.getElementById("code-box").textContent || "";
+  if (navigator.clipboard) navigator.clipboard.writeText(txt);
+  document.getElementById("codeStatusMsg").textContent = "Status: Copied code to clipboard!";
+}}
+
+async function streamCodeDownload() {{
+  const statusEl = document.getElementById("codeStatusMsg");
+  const pctEl = document.getElementById("codeProgressPct");
+  const barEl = document.getElementById("codeProgressBar");
+  const cancelBtn = document.getElementById("cancelCodeBtn");
+  codeAbortCtrl = new AbortController();
+  cancelBtn.style.display = "inline-block";
+  statusEl.textContent = "Status: Connecting stream download...";
+  try {{
+    let writable = null;
+    if (window.showSaveFilePicker) {{
+      const handle = await window.showSaveFilePicker({{ suggestedName: FILE_NAME }});
+      writable = await handle.createWritable();
+    }}
+    const resp = await fetch(STREAM_URL, {{ signal: codeAbortCtrl.signal }});
+    if (!resp.ok && resp.status !== 206) throw new Error("HTTP " + resp.status);
+    const total = Number(resp.headers.get("Content-Length")) || EXPECTED_SIZE;
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+    const t0 = performance.now();
+    while (true) {{
+      const {{ done, value }} = await reader.read();
+      if (done) break;
+      if (writable) await writable.write(value);
+      else chunks.push(value);
+      received += value.byteLength;
+      const pct = Math.min(100, Math.round((received / Math.max(1, total)) * 100));
+      const elapsed = Math.max(0.001, (performance.now() - t0) / 1000);
+      const speedKbps = ((received / 1024) / elapsed).toFixed(1);
+      barEl.style.width = pct + "%";
+      pctEl.textContent = pct + "% • " + speedKbps + " KB/s";
+      statusEl.textContent = "Status: Streaming to disk...";
+    }}
+    if (writable) {{
+      await writable.close();
+    }} else {{
+      const blob = new Blob(chunks);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = FILE_NAME;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }}
+    statusEl.textContent = "Status: Download completed (" + received + " bytes)";
+  }} catch (e) {{
+    if (e && e.name === "AbortError") statusEl.textContent = "Status: Download cancelled";
+    else statusEl.textContent = "Status: Download error (" + e + ")";
+  }} finally {{
+    cancelBtn.style.display = "none";
+    codeAbortCtrl = null;
+  }}
+}}
+
+loadCodePreview();
 </script>
 </body>
 </html>"""
@@ -461,10 +713,13 @@ fetch({stream_url!r}, {{ headers: {{ "Range": "bytes=0-262143" }} }})
 
 
 @pages_router.get("/watch/{file_id}")
+@pages_router.head("/watch/{file_id}")
 async def watch_page(request: Request, file_id: str):
     file_doc = await FileRepository.get_file_by_id(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="Stream link expired or file not found.")
+    if request.method == "HEAD":
+        return Response(status_code=200, headers={"Content-Type": "text/html; charset=utf-8"})
 
     file_name = file_doc.get("file_name") or file_doc.get("name") or "Media Stream.mp4"
     file_size = _safe_metadata_int(file_doc.get("file_size") or file_doc.get("size", 0))
@@ -472,7 +727,7 @@ async def watch_page(request: Request, file_id: str):
     mime_type = file_doc.get("mime_type") or "video/mp4"
     file_path = file_doc.get("file_path")
     raw_meta = file_doc.get("metadata") or {}
-    if file_path and os.path.exists(file_path) and not raw_meta.get("audio_streams") and not raw_meta.get("audio_tracks"):
+    if getattr(request.app.state, "bot", None) is not None and file_path and os.path.exists(file_path) and not raw_meta.get("duration") and not raw_meta.get("audio_streams") and not raw_meta.get("audio_tracks"):
         async def _bg_probe_update(fid: str, fpath: str, meta_base: dict):
             try:
                 from plugins.core_services import get_detailed_mediainfo
@@ -519,14 +774,18 @@ async def watch_page(request: Request, file_id: str):
 
 
 @pages_router.get("/dl/{file_id}")
+@pages_router.head("/dl/{file_id}")
 async def download_page(request: Request, file_id: str):
     file_doc = await FileRepository.get_file_by_id(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="File not found or link expired.")
+    if request.method == "HEAD":
+        return Response(status_code=200, headers={"Content-Type": "text/html; charset=utf-8"})
 
     file_name = file_doc.get("file_name", "download.mp4")
     metadata = media_metadata_view(file_doc)
-    file_size = humanbytes(_safe_metadata_int(file_doc.get("file_size", 0)))
+    file_size_bytes = _safe_metadata_int(file_doc.get("file_size", 0))
+    file_size = humanbytes(file_size_bytes)
     mime_type = file_doc.get("mime_type", "video/mp4")
     base_url = str(request.base_url).rstrip("/")
     stream_url = f"{base_url}/stream/{file_id}"
@@ -539,6 +798,7 @@ async def download_page(request: Request, file_id: str):
         "file_id": file_id,
         "file_name": file_name,
         "file_size": file_size,
+        "file_size_bytes": file_size_bytes,
         "mime_type": mime_type,
         "metadata": metadata,
         "stream_url": stream_url,
@@ -572,8 +832,11 @@ async def stream_media_endpoint(request: Request, file_id: str, range: str = Hea
         raise HTTPException(status_code=404, detail="File size invalid or source unavailable.")
 
     file_name = file_doc.get("file_name", "video.mp4")
-    mime_type = file_doc.get("mime_type") or mimetypes.guess_type(file_name)[0] or "video/mp4"
+    mime_type = normalize_mime(file_doc.get("mime_type") or mimetypes.guess_type(file_name)[0] or "video/mp4")
     etag = compute_etag(file_id, file_size)
+
+    if not range and request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
 
     parsed_range = parse_range_header(range, file_size)
     if parsed_range is None:
@@ -635,6 +898,9 @@ async def download_media_endpoint(request: Request, file_id: str, range: str = H
     file_name = file_doc.get("file_name", "download.mp4")
     etag = compute_etag(file_id, file_size)
 
+    if not range and request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+
     parsed_range = parse_range_header(range, file_size)
     if parsed_range is None:
         return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
@@ -671,6 +937,7 @@ async def download_media_endpoint(request: Request, file_id: str, range: str = H
 
 
 @api_router.get("/status")
+@api_router.head("/status")
 async def api_status(request: Request):
     users_count, chats_count, files_count, cache_stats = await asyncio.gather(
         user_repo.get_total_users(),
@@ -699,6 +966,7 @@ async def api_status(request: Request):
 
 
 @api_router.get("/health")
+@api_router.head("/health")
 async def api_health():
     return {
         "status": "healthy",
@@ -715,6 +983,7 @@ async def api_system_stats(request: Request):
 
 
 @api_router.get("/ping")
+@api_router.head("/ping")
 async def api_ping():
     return {
         "status": "ok",
@@ -724,6 +993,7 @@ async def api_ping():
 
 
 @api_router.get("/info/{file_id}")
+@api_router.head("/info/{file_id}")
 async def api_file_info(file_id: str):
     file_doc = await file_repo.get_file(file_id)
     if not file_doc:
@@ -830,7 +1100,7 @@ async def api_search_files(q: str = ""):
 def create_app(bot_instance=None) -> FastAPI:
     fastapi_app = FastAPI(
         title="MMW All-In-One Pro Turbo Stream Server",
-        version="7.0.0",
+        version="8.0.0",
         docs_url="/docs",
         redoc_url=None,
     )

@@ -5,10 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
     <title>Download {{ file_name }} — MMW Ultra Max Stream</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preload" as="style" fetchpriority="high" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"></noscript>
     <style>
         .smallcap-ui { font-variant: small-caps; letter-spacing: 0.015em; }
         .smallcap-ui code, .smallcap-ui input, .smallcap-ui button { font-variant: normal; }
@@ -22,7 +18,7 @@
             --text-main: #f8fafc;
             --text-muted: #94a3b8;
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
         body {
             background-color: var(--bg);
             background-image:
@@ -41,8 +37,8 @@
             -webkit-backdrop-filter: blur(22px);
             border: 1px solid var(--card-border);
             border-radius: 28px;
-            padding: 38px 30px;
-            max-width: 620px;
+            padding: 36px 28px;
+            max-width: 640px;
             width: 100%;
             text-align: center;
             box-shadow: 0 28px 55px -12px rgba(0, 0, 0, 0.78);
@@ -60,14 +56,14 @@
             font-weight: 800;
             margin-bottom: 14px;
         }
-        .icon { font-size: 3.2rem; margin-bottom: 10px; display: inline-block; }
+        .icon { font-size: 3rem; margin-bottom: 10px; display: inline-block; }
         h1 { font-size: 1.35rem; font-weight: 800; margin-bottom: 18px; word-break: break-all; line-height: 1.4; }
         .file-meta-box {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 18px;
             padding: 16px 20px;
-            margin-bottom: 20px;
+            margin-bottom: 18px;
             display: flex;
             flex-direction: column;
             gap: 10px;
@@ -76,12 +72,48 @@
         }
         .meta-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
         .meta-row .label { color: var(--text-muted); font-weight: 600; }
-        .meta-row .val { font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--accent); }
+        .meta-row .val { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; color: var(--accent); }
+        .dl-progress-box {
+            background: rgba(0, 0, 0, 0.38);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 14px 16px;
+            margin-bottom: 16px;
+            text-align: left;
+        }
+        .dl-progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.84rem;
+            margin-bottom: 8px;
+        }
+        .dl-progress-track {
+            width: 100%;
+            height: 10px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 999px;
+            overflow: hidden;
+        }
+        .dl-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #38bdf8, #10b981);
+            transition: width 0.12s linear;
+        }
+        .dl-progress-meta {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
         .players-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 10px;
-            margin-bottom: 16px;
+            margin-bottom: 14px;
         }
         .btn {
             display: flex;
@@ -89,7 +121,7 @@
             justify-content: center;
             gap: 8px;
             width: 100%;
-            padding: 14px;
+            padding: 13px;
             border-radius: 14px;
             font-weight: 800;
             font-size: 0.9rem;
@@ -117,6 +149,12 @@
             background: rgba(255, 255, 255, 0.09);
             border-color: var(--accent);
             transform: translateY(-2px);
+        }
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.18);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.45);
+            margin-bottom: 10px;
         }
         .section-label {
             font-size: 0.78rem;
@@ -147,7 +185,6 @@
         }
         #toast.show { visibility: visible; opacity: 1; }
     </style>
-    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="smallcap-ui">
     <div class="card">
@@ -178,13 +215,35 @@
             </div>
         </div>
 
+        <div class="dl-progress-box">
+            <div class="dl-progress-header">
+                <strong id="dlStatusText">Status: Idle (Ready to stream)</strong>
+                <span id="dlProgressPct" style="color: var(--accent); font-weight: 800;">0%</span>
+            </div>
+            <div class="dl-progress-track">
+                <div id="dlProgressBar" class="dl-progress-fill"></div>
+            </div>
+            <div class="dl-progress-meta">
+                <span id="dlBytesText">0 B</span>
+                <span id="dlSpeedText">0.0 MB/s</span>
+            </div>
+        </div>
+
         <div class="players-grid">
             {% if metadata.caption %}<a href="{{ watch_url }}#captionPanel" class="btn btn-secondary">📝 sᴇᴇ ᴄᴀᴘᴛɪᴏɴ</a>{% endif %}
             {% if metadata.audio_track != 'Default Audio' or metadata.audio_tracks %}<a href="{{ watch_url }}#audioPanel" class="btn btn-secondary">🎧 sᴇᴇ ᴀᴜᴅɪᴏ</a>{% endif %}
             {% if metadata.language != 'Undetermined' or metadata.audio_tracks or metadata.subtitle_tracks %}<a href="{{ watch_url }}#languagePanel" class="btn btn-secondary">🌐 sᴇᴇ ʟᴀɴɢᴜᴀɢᴇ</a>{% endif %}
         </div>
 
-        <a href="{{ download_url }}" class="btn btn-primary" download="{{ file_name }}">
+        <button type="button" class="btn btn-primary" onclick="streamSaveMedia()">
+            🚀 ᴢᴇʀᴏ-ʙᴜғғᴇʀ ᴄʜᴜɴᴋ sᴛʀᴇᴀᴍ ᴛᴏ ᴅɪsᴋ
+        </button>
+
+        <button type="button" id="dlCancelBtn" class="btn btn-danger" onclick="cancelDlStream()" style="display: none;">
+            🛑 ᴄᴀɴᴄᴇʟ ᴀᴄᴛɪᴠᴇ sᴛʀᴇᴀᴍ
+        </button>
+
+        <a href="{{ download_url }}" class="btn btn-secondary" style="margin-bottom: 10px;" download="{{ file_name }}">
             ⚡ ɪɴsᴛᴀɴᴛ ᴅɪʀᴇᴄᴛ ʙʏᴛᴇ-ʀᴀɴɢᴇ ᴅᴏᴡɴʟᴏᴀᴅ
         </a>
 
@@ -212,6 +271,111 @@
     <div id="toast">Direct Download Link Copied!</div>
 
     <script>
+        let dlAbortController = null;
+        const DL_URL = "{{ download_url }}";
+        const DL_FILE_NAME = "{{ file_name }}";
+        const DL_EXPECTED_BYTES = Number("{{ file_size_bytes | default(0) }}") || 0;
+
+        function formatBytes(bytes) {
+            const v = Number(bytes) || 0;
+            if (v <= 0) return '0 B';
+            const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.min(u.length - 1, Math.floor(Math.log(v) / Math.log(1024)));
+            return (v / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 2) + ' ' + u[i];
+        }
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg || 'Direct Download Link Copied!';
+            t.className = 'show';
+            setTimeout(() => { t.className = ''; }, 2500);
+        }
+
+        function cancelDlStream() {
+            if (dlAbortController) dlAbortController.abort();
+        }
+
+        async function streamSaveMedia() {
+            if (dlAbortController) dlAbortController.abort();
+            dlAbortController = new AbortController();
+            const cancelBtn = document.getElementById('dlCancelBtn');
+            const statusEl = document.getElementById('dlStatusText');
+            const pctEl = document.getElementById('dlProgressPct');
+            const barEl = document.getElementById('dlProgressBar');
+            const bytesEl = document.getElementById('dlBytesText');
+            const speedEl = document.getElementById('dlSpeedText');
+
+            cancelBtn.style.display = 'flex';
+            statusEl.textContent = 'Status: Connecting HTTP 206 stream...';
+            const t0 = performance.now();
+            let writable = null;
+            try {
+                if (typeof window.showSaveFilePicker === 'function' && window.isSecureContext) {
+                    try {
+                        const handle = await window.showSaveFilePicker({ suggestedName: DL_FILE_NAME });
+                        writable = await handle.createWritable();
+                    } catch (pe) {
+                        if (pe && pe.name === 'AbortError') {
+                            statusEl.textContent = 'Status: Save dialog cancelled';
+                            cancelBtn.style.display = 'none';
+                            dlAbortController = null;
+                            return;
+                        }
+                    }
+                }
+                const resp = await fetch(DL_URL, { signal: dlAbortController.signal });
+                if (!resp.ok && resp.status !== 206) throw new Error('HTTP ' + resp.status);
+                const total = Number(resp.headers.get('Content-Length')) || DL_EXPECTED_BYTES;
+                const reader = resp.body.getReader();
+                const chunks = [];
+                let received = 0;
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    if (writable) await writable.write(value);
+                    else chunks.push(value);
+                    received += value.byteLength;
+                    const pct = total > 0 ? Math.min(100, (received / total) * 100) : 100;
+                    const elapsed = Math.max(0.001, (performance.now() - t0) / 1000);
+                    const speed = received / elapsed;
+                    barEl.style.width = pct.toFixed(1) + '%';
+                    pctEl.textContent = pct.toFixed(1) + '%';
+                    bytesEl.textContent = formatBytes(received) + (total > 0 ? ' / ' + formatBytes(total) : '');
+                    speedEl.textContent = formatBytes(speed) + '/s';
+                    statusEl.textContent = 'Status: Streaming chunks to disk...';
+                }
+                if (writable) {
+                    await writable.close();
+                } else {
+                    const blob = new Blob(chunks, { type: resp.headers.get('Content-Type') || 'application/octet-stream' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = DL_FILE_NAME;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 10000);
+                }
+                barEl.style.width = '100%';
+                pctEl.textContent = '100%';
+                statusEl.textContent = 'Status: Completed (' + formatBytes(received) + ')';
+                showToast('✅ Stream saved to disk!');
+            } catch (err) {
+                if (writable) { try { await writable.abort(); } catch (_) {} }
+                if (err && err.name === 'AbortError') {
+                    statusEl.textContent = 'Status: Cancelled by user';
+                    showToast('🛑 Stream cancelled');
+                } else {
+                    statusEl.textContent = 'Status: Error (' + (err.message || err) + ')';
+                    showToast('⚠️ Error: ' + (err.message || err));
+                }
+            } finally {
+                cancelBtn.style.display = 'none';
+                dlAbortController = null;
+            }
+        }
+
         function copyDirectUrl(url) {
             const fullUrl = new URL(url, window.location.origin).href;
             if (navigator.clipboard && window.isSecureContext) {
@@ -224,9 +388,7 @@
                 document.execCommand('copy');
                 ta.remove();
             }
-            const t = document.getElementById('toast');
-            t.className = 'show';
-            setTimeout(() => { t.className = ''; }, 2500);
+            showToast('Direct Download Link Copied!');
         }
 
         const PLAYER_LINKS = {

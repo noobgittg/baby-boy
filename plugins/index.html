@@ -5,17 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
     <title>⚡ MMW Ultra Max v8.0 — {{ watermark }}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preload" as="style" fetchpriority="high" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap"></noscript>
     <style>
         .smallcap-ui { font-variant: small-caps; letter-spacing: 0.015em; }
         .smallcap-ui code, .smallcap-ui input, .smallcap-ui button { font-variant: normal; }
         :root {
             --bg: #040711;
-            --card-bg: rgba(11, 18, 36, 0.82);
-            --card-border: rgba(56, 189, 248, 0.24);
+            --card-bg: rgba(11, 18, 36, 0.86);
+            --card-border: rgba(56, 189, 248, 0.25);
             --accent: #38bdf8;
             --accent-2: #a855f7;
             --accent-3: #10b981;
@@ -25,8 +21,9 @@
             --text-muted: #94a3b8;
             --badge-bg: rgba(56, 189, 248, 0.14);
             --success: #10b981;
+            --danger: #ef4444;
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
         body {
             background-color: var(--bg);
             background-image:
@@ -42,14 +39,14 @@
             padding: 28px 16px;
         }
         .container {
-            max-width: 1020px;
+            max-width: 1060px;
             width: 100%;
             background: var(--card-bg);
             backdrop-filter: blur(24px);
             -webkit-backdrop-filter: blur(24px);
             border: 1px solid var(--card-border);
             border-radius: 28px;
-            padding: 40px 32px;
+            padding: 38px 30px;
             box-shadow: 0 28px 60px -12px rgba(0, 0, 0, 0.8), 0 0 40px rgba(56, 189, 248, 0.08);
             text-align: center;
         }
@@ -65,7 +62,7 @@
             font-size: 0.82rem;
             font-weight: 800;
             letter-spacing: 0.6px;
-            margin-bottom: 20px;
+            margin-bottom: 18px;
         }
         .pulse-dot {
             width: 9px;
@@ -81,34 +78,34 @@
             100% { transform: scale(0.95); opacity: 0.8; }
         }
         h1 {
-            font-size: 2.85rem;
+            font-size: 2.65rem;
             font-weight: 800;
             line-height: 1.18;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
             background: var(--accent-gradient);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
         p.subtitle {
             color: var(--text-muted);
-            font-size: 1.02rem;
+            font-size: 1rem;
             line-height: 1.6;
-            margin-bottom: 28px;
-            max-width: 740px;
+            margin-bottom: 24px;
+            max-width: 760px;
             margin-left: auto;
             margin-right: auto;
         }
         .metrics-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 14px;
-            margin-bottom: 28px;
+            grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
         }
         .metric-card {
             background: rgba(255, 255, 255, 0.03);
             border: 1px solid var(--card-border);
             border-radius: 18px;
-            padding: 18px 14px;
+            padding: 16px 12px;
             display: flex;
             flex-direction: column;
             gap: 6px;
@@ -120,34 +117,35 @@
             box-shadow: 0 10px 24px -8px var(--accent-glow);
         }
         .metric-value {
-            font-size: 1.65rem;
+            font-size: 1.55rem;
             font-weight: 800;
-            font-family: 'JetBrains Mono', monospace;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
             color: var(--accent);
         }
         .metric-label {
-            font-size: 0.78rem;
+            font-size: 0.76rem;
             color: var(--text-muted);
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        .lookup-box {
+        .lookup-box, .streamer-studio-box {
             background: rgba(255, 255, 255, 0.025);
             border: 1px solid var(--card-border);
             border-radius: 20px;
-            padding: 22px;
-            margin-bottom: 28px;
+            padding: 20px;
+            margin-bottom: 24px;
             text-align: left;
         }
         .lookup-title {
-            font-size: 1.05rem;
+            font-size: 1.02rem;
             font-weight: 700;
             margin-bottom: 12px;
             color: var(--text-main);
             display: flex;
             align-items: center;
             justify-content: space-between;
+            flex-wrap: wrap;
             gap: 8px;
         }
         .lookup-form {
@@ -157,26 +155,24 @@
         }
         .lookup-input {
             flex: 1;
-            min-width: 240px;
+            min-width: 220px;
             background: rgba(0, 0, 0, 0.45);
             border: 1px solid rgba(255, 255, 255, 0.14);
             border-radius: 14px;
-            padding: 14px 18px;
+            padding: 13px 16px;
             color: #fff;
-            font-size: 0.95rem;
+            font-size: 0.94rem;
             outline: none;
             transition: border-color 0.2s;
         }
-        .lookup-input:focus {
-            border-color: var(--accent);
-        }
+        .lookup-input:focus { border-color: var(--accent); }
         .lookup-btn {
             background: var(--accent-gradient);
             color: #040711;
             font-weight: 800;
             border: none;
             border-radius: 14px;
-            padding: 14px 22px;
+            padding: 13px 20px;
             cursor: pointer;
             transition: all 0.2s;
         }
@@ -186,29 +182,34 @@
             border: 1px solid var(--card-border);
             font-weight: 700;
             border-radius: 14px;
-            padding: 14px 18px;
+            padding: 13px 16px;
             cursor: pointer;
             transition: all 0.2s;
         }
-        .lookup-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px -5px var(--accent-glow);
+        .lookup-btn-danger {
+            background: rgba(239, 68, 68, 0.18);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.45);
+            font-weight: 800;
+            border-radius: 14px;
+            padding: 13px 16px;
+            cursor: pointer;
+            transition: all 0.2s;
         }
-        .lookup-btn-sec:hover {
-            background: rgba(255, 255, 255, 0.12);
-            border-color: var(--accent);
-        }
+        .lookup-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px -5px var(--accent-glow); }
+        .lookup-btn-sec:hover { background: rgba(255, 255, 255, 0.12); border-color: var(--accent); }
+        .lookup-btn-danger:hover { background: rgba(239, 68, 68, 0.3); }
         #lookup-result {
-            margin-top: 16px;
-            padding: 16px 20px;
+            margin-top: 14px;
+            padding: 14px 18px;
             border-radius: 16px;
             background: rgba(0, 0, 0, 0.4);
             border: 1px solid rgba(255, 255, 255, 0.09);
             display: none;
-            font-size: 0.94rem;
+            font-size: 0.92rem;
         }
         .result-item {
-            padding: 12px 0;
+            padding: 10px 0;
             border-bottom: 1px solid rgba(255, 255, 255, 0.06);
             display: flex;
             justify-content: space-between;
@@ -216,14 +217,79 @@
             flex-wrap: wrap;
             gap: 10px;
         }
-        .result-item:last-child {
-            border-bottom: none;
+        .result-item:last-child { border-bottom: none; }
+        .api-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        .api-badge {
+            font-size: 0.74rem;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: rgba(16, 185, 129, 0.14);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            font-weight: 700;
+        }
+        .api-badge.warn {
+            background: rgba(245, 158, 11, 0.14);
+            color: #fbbf24;
+            border-color: rgba(245, 158, 11, 0.3);
+        }
+        .progress-panel {
+            margin-top: 14px;
+            background: rgba(0, 0, 0, 0.38);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 14px;
+            padding: 14px 16px;
+        }
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            font-size: 0.85rem;
+            margin-bottom: 8px;
+        }
+        .progress-track {
+            width: 100%;
+            height: 10px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 999px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #38bdf8, #10b981);
+            transition: width 0.12s linear;
+        }
+        .progress-stats {
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
+        .studio-preview-player {
+            width: 100%;
+            max-height: 320px;
+            margin-top: 12px;
+            border-radius: 14px;
+            background: #000;
+            display: none;
         }
         .features-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
             gap: 12px;
-            margin-bottom: 28px;
+            margin-bottom: 24px;
             text-align: left;
         }
         .feature-box {
@@ -249,14 +315,14 @@
             flex-wrap: wrap;
             gap: 10px;
             justify-content: center;
-            margin-bottom: 22px;
+            margin-bottom: 20px;
         }
         .btn {
             display: inline-flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
-            padding: 13px 20px;
+            padding: 12px 18px;
             border-radius: 14px;
             font-weight: 700;
             font-size: 0.9rem;
@@ -314,17 +380,13 @@
             opacity: 0;
             transition: opacity 0.25s, visibility 0.25s;
         }
-        #toast.show {
-            visibility: visible;
-            opacity: 1;
-        }
+        #toast.show { visibility: visible; opacity: 1; }
         @media (max-width: 640px) {
-            h1 { font-size: 2.05rem; }
-            .container { padding: 26px 16px; }
+            h1 { font-size: 2rem; }
+            .container { padding: 24px 14px; }
             .btn { width: 100%; }
         }
     </style>
-    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="smallcap-ui">
     <div class="container">
@@ -338,7 +400,6 @@
             Ultra-Fast Asynchronous Telegram Media, Fault-Tolerant FFmpeg Compressor, Persistent Task Recovery, Auto-Renamer & HTTP 206 4-Player Stream Engine.
         </p>
 
-        <!-- Live Telemetry Grid -->
         <div class="metrics-grid">
             <div class="metric-card">
                 <span class="metric-value" id="val-users">{{ users_count }}</span>
@@ -366,24 +427,52 @@
             </div>
         </div>
 
-        <!-- Interactive File / Stream Inspector & Search -->
         <div class="lookup-box">
             <div class="lookup-title">
                 <div><span>🔍</span> <span>Ultra Stream & File Search Inspector (Press / to focus)</span></div>
-                <button onclick="clearInspector()" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.85rem;">Clear ✕</button>
+                <button type="button" onclick="clearInspector()" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.85rem;">Clear ✕</button>
             </div>
             <div class="lookup-form">
                 <input type="text" id="lookup-input" class="lookup-input" placeholder="Enter File ID or Search Keyword (e.g. movie.mp4)..." onkeydown="if(event.key==='Enter') smartInspect()" />
-                <button class="lookup-btn" onclick="smartInspect()">⚡ Inspect / Search</button>
-                <button class="lookup-btn-sec" onclick="searchFiles()">📂 Search Vault</button>
+                <button type="button" class="lookup-btn" onclick="smartInspect()">⚡ Inspect / Search</button>
+                <button type="button" class="lookup-btn-sec" onclick="searchFiles()">📂 Search Vault</button>
             </div>
             <div id="lookup-result"></div>
         </div>
 
-        <!-- Features Showcase -->
+        <div class="streamer-studio-box">
+            <div class="lookup-title">
+                <div><span>🚀</span> <span>Zero-Buffer Chunk Streamer & Direct Disk Saver</span></div>
+                <span id="stream-mode-badge" style="font-size: 0.78rem; color: var(--accent);">Ready</span>
+            </div>
+            <div class="api-badges" id="api-feature-badges"></div>
+            <div class="lookup-form">
+                <input type="text" id="stream-url-input" class="lookup-input" placeholder="Enter /stream/{file_id} URL or File ID for chunked disk stream..." />
+                <button type="button" class="lookup-btn" onclick="startChunkedNetworkDownload()">⬇️ Stream to Disk</button>
+                <button type="button" class="lookup-btn-sec" onclick="triggerLocalFilePicker()">📁 Stream Local File</button>
+                <button type="button" id="cancel-stream-btn" class="lookup-btn-danger" onclick="cancelActiveStream()" style="display: none;">🛑 Cancel</button>
+                <input type="file" id="local-file-input" style="display: none;" onchange="handleLocalFileSelected(event)" />
+            </div>
+            <div class="progress-panel">
+                <div class="progress-header">
+                    <strong id="stream-status-msg">Status: Idle (Ready for zero-lag chunk streaming)</strong>
+                    <span id="stream-progress-pct" style="font-weight: 800; color: var(--accent);">0%</span>
+                </div>
+                <div class="progress-track">
+                    <div id="stream-progress-bar" class="progress-fill"></div>
+                </div>
+                <div class="progress-stats">
+                    <span id="stream-bytes-info">0 B / 0 B</span>
+                    <span id="stream-speed-info">0.0 MB/s</span>
+                    <span id="stream-eta-info">ETA: --</span>
+                </div>
+            </div>
+            <video id="studio-preview-video" class="studio-preview-player" controls playsinline></video>
+        </div>
+
         <div class="features-grid">
             <div class="feature-box"><span class="feature-icon">✏️</span><span>Ultra Renamer & Templates</span></div>
-            <div class="feature-box"><span class="feature-icon">🗜️</span><span>5-Min Turbo FFmpeg H.264/HEVC</span></div>
+            <div class="feature-box"><span class="feature-icon">🗜️</span><span>Turbo FFmpeg H.264/HEVC</span></div>
             <div class="feature-box"><span class="feature-icon">♻️</span><span>Persistent Task Recovery</span></div>
             <div class="feature-box"><span class="feature-icon">⚡</span><span>HTTP 206 4-Player Stream</span></div>
             <div class="feature-box"><span class="feature-icon">🎛️</span><span>File Pro Audio/Sub Muxer</span></div>
@@ -392,15 +481,14 @@
             <div class="feature-box"><span class="feature-icon">🌐</span><span>24/7 Uptime & KeepAlive</span></div>
         </div>
 
-        <!-- Working Action Buttons -->
         <div class="action-row">
             <a href="{{ watermark_url }}" class="btn btn-primary" target="_blank" rel="noopener">
                 📢 Official Channel
             </a>
-            <button class="btn btn-outline" onclick="copyText('{{ watermark_url }}', 'Channel Link Copied!')">
+            <button type="button" class="btn btn-outline" onclick="copyText('{{ watermark_url }}', 'Channel Link Copied!')">
                 📋 Copy Channel Link
             </button>
-            <button class="btn btn-outline" onclick="fetchLiveMetrics(true)">
+            <button type="button" class="btn btn-outline" onclick="fetchLiveMetrics(true)">
                 🔄 Refresh Telemetry
             </button>
             <a href="/api/tasks/report" class="btn btn-outline" target="_blank" rel="noopener">
@@ -419,6 +507,265 @@
     <div id="toast">Copied to clipboard!</div>
 
     <script>
+        let activeAbortController = null;
+        let activeObjectUrl = null;
+
+        function formatBytes(bytes) {
+            const val = Number(bytes) || 0;
+            if (val <= 0) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const idx = Math.min(units.length - 1, Math.floor(Math.log(val) / Math.log(1024)));
+            return (val / Math.pow(1024, idx)).toFixed(idx === 0 ? 0 : 2) + ' ' + units[idx];
+        }
+
+        function formatSeconds(sec) {
+            if (!Number.isFinite(sec) || sec <= 0) return '0s';
+            const s = Math.round(sec);
+            if (s < 60) return s + 's';
+            const m = Math.floor(s / 60);
+            return m + 'm ' + (s % 60) + 's';
+        }
+
+        function detectStreamingCapabilities() {
+            const box = document.getElementById('api-feature-badges');
+            if (!box) return;
+            const caps = [
+                ['ReadableStream', typeof window.ReadableStream !== 'undefined'],
+                ['WritableStream', typeof window.WritableStream !== 'undefined'],
+                ['Direct Disk Save (showSaveFilePicker)', typeof window.showSaveFilePicker === 'function'],
+                ['MediaSource (MSE)', typeof window.MediaSource !== 'undefined'],
+                ['AbortController', typeof window.AbortController !== 'undefined']
+            ];
+            box.replaceChildren();
+            caps.forEach(([name, ok]) => {
+                const span = document.createElement('span');
+                span.className = 'api-badge' + (ok ? '' : ' warn');
+                span.textContent = (ok ? '✅ ' : '⚠️ ') + name + (ok ? '' : ' (Fallback Active)');
+                box.appendChild(span);
+            });
+            if (location.protocol === 'file:') {
+                const modeEl = document.getElementById('stream-mode-badge');
+                if (modeEl) modeEl.textContent = 'Local file:// Mode Active';
+            }
+        }
+
+        function updateStreamProgress(received, total, startTime, statusText) {
+            const bar = document.getElementById('stream-progress-bar');
+            const pctEl = document.getElementById('stream-progress-pct');
+            const bytesEl = document.getElementById('stream-bytes-info');
+            const speedEl = document.getElementById('stream-speed-info');
+            const etaEl = document.getElementById('stream-eta-info');
+            const statusEl = document.getElementById('stream-status-msg');
+
+            const pct = total > 0 ? Math.min(100, (received / total) * 100) : (received > 0 ? 100 : 0);
+            const elapsed = Math.max(0.001, (performance.now() - startTime) / 1000);
+            const speedBps = received / elapsed;
+            const remainingSec = (total > received && speedBps > 0) ? ((total - received) / speedBps) : 0;
+
+            if (bar) bar.style.width = pct.toFixed(1) + '%';
+            if (pctEl) pctEl.textContent = pct.toFixed(1) + '%';
+            if (bytesEl) bytesEl.textContent = formatBytes(received) + (total > 0 ? ' / ' + formatBytes(total) : '');
+            if (speedEl) speedEl.textContent = formatBytes(speedBps) + '/s';
+            if (etaEl) etaEl.textContent = 'ETA: ' + (total > received ? formatSeconds(remainingSec) : '0s');
+            if (statusEl && statusText) statusEl.textContent = 'Status: ' + statusText;
+        }
+
+        function cancelActiveStream() {
+            if (activeAbortController) {
+                activeAbortController.abort();
+            }
+        }
+
+        function resolveStreamInputUrl(raw) {
+            const trimmed = String(raw || '').trim();
+            if (!trimmed) return '';
+            if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('/')) {
+                return trimmed;
+            }
+            return '/download/' + encodeURIComponent(trimmed);
+        }
+
+        async function startChunkedNetworkDownload(customUrl, customFileName) {
+            const rawInput = customUrl || document.getElementById('stream-url-input').value.trim();
+            const targetUrl = resolveStreamInputUrl(rawInput);
+            if (!targetUrl) {
+                showToast('Please enter a File ID or Stream URL');
+                return;
+            }
+            if (activeAbortController) {
+                activeAbortController.abort();
+            }
+            activeAbortController = new AbortController();
+            const cancelBtn = document.getElementById('cancel-stream-btn');
+            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+            const suggestedName = customFileName || targetUrl.split('/').pop() || 'stream_download.bin';
+            const t0 = performance.now();
+            updateStreamProgress(0, 0, t0, 'Initializing stream connection...');
+
+            let writable = null;
+            try {
+                if (typeof window.showSaveFilePicker === 'function' && window.isSecureContext) {
+                    try {
+                        const fileHandle = await window.showSaveFilePicker({ suggestedName });
+                        writable = await fileHandle.createWritable();
+                    } catch (pickerErr) {
+                        if (pickerErr && pickerErr.name === 'AbortError') {
+                            updateStreamProgress(0, 0, t0, 'Cancelled file save dialog');
+                            if (cancelBtn) cancelBtn.style.display = 'none';
+                            activeAbortController = null;
+                            return;
+                        }
+                    }
+                }
+
+                const response = await fetch(targetUrl, { signal: activeAbortController.signal });
+                if (!response.ok && response.status !== 206) {
+                    throw new Error('HTTP ' + response.status);
+                }
+                const totalBytes = Number(response.headers.get('Content-Length')) || 0;
+                if (!response.body || typeof response.body.getReader !== 'function') {
+                    throw new Error('ReadableStream not supported by this browser');
+                }
+
+                const reader = response.body.getReader();
+                const fallbackChunks = [];
+                let receivedBytes = 0;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    if (writable) {
+                        await writable.write(value);
+                    } else {
+                        fallbackChunks.push(value);
+                    }
+                    receivedBytes += value.byteLength;
+                    updateStreamProgress(receivedBytes, totalBytes, t0, 'Streaming chunks to disk...');
+                }
+
+                if (writable) {
+                    await writable.close();
+                } else {
+                    const blob = new Blob(fallbackChunks, { type: response.headers.get('Content-Type') || 'application/octet-stream' });
+                    const dlUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = dlUrl;
+                    a.download = suggestedName;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    setTimeout(() => URL.revokeObjectURL(dlUrl), 10000);
+                }
+
+                updateStreamProgress(receivedBytes, receivedBytes || totalBytes, t0, 'Completed (' + formatBytes(receivedBytes) + ' saved without lag)');
+                showToast('✅ Stream saved to disk!');
+            } catch (err) {
+                if (writable) {
+                    try { await writable.abort(); } catch (_) {}
+                }
+                if (err && err.name === 'AbortError') {
+                    document.getElementById('stream-status-msg').textContent = 'Status: Stream cancelled by user';
+                    showToast('🛑 Stream cancelled');
+                } else {
+                    document.getElementById('stream-status-msg').textContent = 'Status: Error (' + (err.message || err) + ')';
+                    showToast('⚠️ Stream error: ' + (err.message || err));
+                }
+            } finally {
+                if (cancelBtn) cancelBtn.style.display = 'none';
+                activeAbortController = null;
+            }
+        }
+
+        function triggerLocalFilePicker() {
+            const input = document.getElementById('local-file-input');
+            if (input) input.click();
+        }
+
+        async function handleLocalFileSelected(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            if (activeAbortController) activeAbortController.abort();
+            activeAbortController = new AbortController();
+            const signal = activeAbortController.signal;
+
+            const cancelBtn = document.getElementById('cancel-stream-btn');
+            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+
+            const videoEl = document.getElementById('studio-preview-video');
+            if (activeObjectUrl) {
+                URL.revokeObjectURL(activeObjectUrl);
+                activeObjectUrl = null;
+            }
+
+            if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
+                videoEl.style.display = 'block';
+                if (window.MediaSource && MediaSource.isTypeSupported(file.type)) {
+                    const ms = new MediaSource();
+                    activeObjectUrl = URL.createObjectURL(ms);
+                    videoEl.src = activeObjectUrl;
+                    ms.addEventListener('sourceopen', async () => {
+                        try {
+                            const sb = ms.addSourceBuffer(file.type);
+                            const stream = file.stream();
+                            const reader = stream.getReader();
+                            while (true) {
+                                if (signal.aborted) break;
+                                const { done, value } = await reader.read();
+                                if (done) {
+                                    if (ms.readyState === 'open' && !sb.updating) ms.endOfStream();
+                                    break;
+                                }
+                                await new Promise((resolve, reject) => {
+                                    sb.addEventListener('updateend', resolve, { once: true });
+                                    sb.addEventListener('error', reject, { once: true });
+                                    sb.appendBuffer(value);
+                                });
+                            }
+                        } catch (_) {}
+                    }, { once: true });
+                } else {
+                    activeObjectUrl = URL.createObjectURL(file);
+                    videoEl.src = activeObjectUrl;
+                }
+                videoEl.play().catch(() => {});
+            } else {
+                videoEl.style.display = 'none';
+            }
+
+            const t0 = performance.now();
+            const total = file.size;
+            let processed = 0;
+            updateStreamProgress(0, total, t0, 'Streaming local file (' + file.name + ')...');
+
+            try {
+                const stream = file.stream ? file.stream() : new Response(file).body;
+                const reader = stream.getReader();
+                while (true) {
+                    if (signal.aborted) {
+                        await reader.cancel();
+                        throw new DOMException('Aborted', 'AbortError');
+                    }
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    processed += value.byteLength;
+                    updateStreamProgress(processed, total, t0, 'Streaming local chunks (' + file.name + ')...');
+                }
+                updateStreamProgress(processed, total, t0, 'Completed local chunk stream (' + file.name + ')');
+                showToast('⚡ Local file streamed: ' + file.name);
+            } catch (err) {
+                if (err && err.name === 'AbortError') {
+                    document.getElementById('stream-status-msg').textContent = 'Status: Local stream cancelled';
+                } else {
+                    document.getElementById('stream-status-msg').textContent = 'Status: Local stream error (' + err + ')';
+                }
+            } finally {
+                if (cancelBtn) cancelBtn.style.display = 'none';
+                activeAbortController = null;
+                event.target.value = '';
+            }
+        }
+
         function showToast(msg) {
             const toast = document.getElementById('toast');
             toast.textContent = msg || 'Copied to clipboard!';
@@ -448,7 +795,7 @@
         }
 
         document.addEventListener('keydown', (e) => {
-            if (e.key === '/' && document.activeElement !== document.getElementById('lookup-input')) {
+            if (e.key === '/' && document.activeElement !== document.getElementById('lookup-input') && document.activeElement !== document.getElementById('stream-url-input')) {
                 e.preventDefault();
                 document.getElementById('lookup-input').focus();
             }
@@ -498,10 +845,23 @@
 
         function makeCopyButton(value) {
             const button = document.createElement('button');
+            button.type = 'button';
             button.className = 'btn btn-outline';
-            button.style.cssText = 'padding: 8px 16px; font-size: 0.85rem;';
+            button.style.padding = '8px 16px';
+            button.style.fontSize = '0.85rem';
             button.textContent = '📋 Copy Stream';
             button.addEventListener('click', () => copyText(String(value || ''), 'Stream URL Copied!'));
+            return button;
+        }
+
+        function makeDiskStreamButton(url, fileName) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn btn-outline';
+            button.style.padding = '8px 16px';
+            button.style.fontSize = '0.85rem';
+            button.textContent = '🚀 Stream to Disk';
+            button.addEventListener('click', () => startChunkedNetworkDownload(url, fileName));
             return button;
         }
 
@@ -522,7 +882,9 @@
                 }
                 const data = await resp.json();
                 const wrapper = document.createElement('div');
-                wrapper.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+                wrapper.style.display = 'flex';
+                wrapper.style.flexDirection = 'column';
+                wrapper.style.gap = '8px';
                 const fields = [
                     ['📁 Name:', data.file_name || 'Media'],
                     ['📦 Size:', data.file_size_formatted || data.file_size || 'N/A'],
@@ -537,10 +899,14 @@
                     wrapper.append(row);
                 });
                 const actions = document.createElement('div');
-                actions.style.cssText = 'display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;';
+                actions.style.display = 'flex';
+                actions.style.gap = '10px';
+                actions.style.marginTop = '8px';
+                actions.style.flexWrap = 'wrap';
                 actions.append(
                     makeResultLink('🎬 Watch Online (4 Players)', data.watch_url, 'btn btn-primary'),
                     makeResultLink('⬇️ Direct Download', data.direct_download_url || data.download_url, 'btn btn-outline'),
+                    makeDiskStreamButton(data.direct_download_url || data.download_url, data.file_name || 'Media'),
                     makeCopyButton(data.stream_url)
                 );
                 wrapper.append(actions);
@@ -574,7 +940,9 @@
                 }
                 const wrapper = document.createElement('div');
                 const heading = document.createElement('div');
-                heading.style.cssText = 'margin-bottom:8px;font-weight:700;color:var(--accent);';
+                heading.style.marginBottom = '8px';
+                heading.style.fontWeight = '700';
+                heading.style.color = 'var(--accent)';
                 heading.textContent = `Found ${data.count} result(s) for "${input}":`;
                 wrapper.append(heading);
                 data.results.forEach((item, idx) => {
@@ -584,14 +952,19 @@
                     const title = document.createElement('strong');
                     title.textContent = `${idx + 1}. 📁 ${item.file_name || 'Media'}`;
                     const meta = document.createElement('div');
-                    meta.style.cssText = 'font-size:0.82rem;color:var(--text-muted);margin-top:2px;';
+                    meta.style.fontSize = '0.82rem';
+                    meta.style.color = 'var(--text-muted)';
+                    meta.style.marginTop = '2px';
                     meta.textContent = `📦 ${item.file_size_formatted || 'N/A'} • 🏷️ ${item.mime_type || 'unknown'}`;
                     details.append(title, meta);
                     const actions = document.createElement('div');
-                    actions.style.cssText = 'display:flex;gap:8px;';
+                    actions.style.display = 'flex';
+                    actions.style.gap = '8px';
+                    actions.style.flexWrap = 'wrap';
                     actions.append(
                         makeResultLink('🎬 Watch', item.watch_url, 'btn btn-primary'),
-                        makeResultLink('⬇️ Download', item.direct_download_url || item.download_url, 'btn btn-outline')
+                        makeResultLink('⬇️ Download', item.direct_download_url || item.download_url, 'btn btn-outline'),
+                        makeDiskStreamButton(item.direct_download_url || item.download_url, item.file_name || 'Media')
                     );
                     row.append(details, actions);
                     wrapper.append(row);
@@ -603,6 +976,10 @@
         }
 
         async function fetchLiveMetrics(manual = false) {
+            if (location.protocol === 'file:') {
+                if (manual) showToast('⚡ Running in standalone file:// mode');
+                return;
+            }
             const t0 = performance.now();
             try {
                 const [res, taskRes] = await Promise.all([
@@ -633,6 +1010,8 @@
                 console.debug('Polling error:', e);
             }
         }
+
+        detectStreamingCapabilities();
         fetchLiveMetrics();
         setInterval(fetchLiveMetrics, 6000);
     </script>

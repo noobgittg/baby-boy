@@ -6,7 +6,6 @@
     <meta name="color-scheme" content="dark light">
     <title>{{ file_name | default("Watch Media") }} — MMW Ultra Max Stream</title>
     <link rel="preconnect" href="https://cdn.tailwindcss.com">
-    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
     <script defer src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -22,22 +21,19 @@
             }
         };
     </script>
-    <link rel="preload" as="style" fetchpriority="high" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"></noscript>
     {% if metadata.media_kind in ['audio', 'video'] %}
-    <link rel="preload" as="style" fetchpriority="high" href="https://cdn.jsdelivr.net/npm/plyr@3.7.8/dist/plyr.css" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/plyr@3.7.8/dist/plyr.css"></noscript>
     <script defer src="https://cdn.jsdelivr.net/npm/plyr@3.7.8/dist/plyr.polyfilled.js"></script>
     {% endif %}
     <style>
-        /* Self-contained Ultra Glassmorphism CSS fallback so UI stays crisp even before/without external CDN */
         :root {
             --ultra-bg: #040711;
-            --ultra-card: rgba(15, 23, 42, 0.85);
-            --ultra-border: rgba(56, 189, 248, 0.22);
+            --ultra-card: rgba(15, 23, 42, 0.88);
+            --ultra-border: rgba(56, 189, 248, 0.24);
             --ultra-accent: #38bdf8;
+            --plyr-color-main: #0ea5e9;
         }
-        .smallcap-ui { font-variant: small-caps; letter-spacing: 0.015em; font-family: system-ui, -apple-system, sans-serif; }
+        * { box-sizing: border-box; }
+        .smallcap-ui { font-variant: small-caps; letter-spacing: 0.015em; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
         .smallcap-ui code, .smallcap-ui input, .smallcap-ui button, .smallcap-ui select { font-variant: normal; }
         html.dark body {
             background-color: var(--ultra-bg);
@@ -45,6 +41,10 @@
                 radial-gradient(at 10% 10%, rgba(56, 189, 248, 0.14) 0px, transparent 50%),
                 radial-gradient(at 90% 85%, rgba(168, 85, 247, 0.12) 0px, transparent 50%);
             color: #f8fafc;
+        }
+        html:not(.dark) body {
+            background-color: #f8fafc;
+            color: #0f172a;
         }
         .ultra-card {
             background: var(--ultra-card);
@@ -54,10 +54,15 @@
             border-radius: 20px;
             box-shadow: 0 20px 45px -12px rgba(0, 0, 0, 0.7);
         }
+        html:not(.dark) .ultra-card {
+            background: rgba(255, 255, 255, 0.92);
+            border-color: rgba(14, 165, 233, 0.25);
+            box-shadow: 0 12px 30px -10px rgba(15, 23, 42, 0.12);
+        }
         .ultra-pill-btn {
             cursor: pointer;
             transition: all 0.18s ease;
-            border: 1px solid rgba(56, 189, 248, 0.2);
+            border: 1px solid rgba(56, 189, 248, 0.22);
         }
         .ultra-pill-btn:hover {
             transform: translateY(-2px);
@@ -65,6 +70,25 @@
         }
         .theatre-active {
             max-width: 100% !important;
+        }
+        .stream-progress-track {
+            width: 100%;
+            height: 9px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 999px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+        .stream-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #38bdf8, #10b981);
+            transition: width 0.12s linear;
+        }
+        video, audio {
+            width: 100%;
+            max-height: 78vh;
+            outline: none;
         }
     </style>
     <script>
@@ -77,15 +101,13 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="smallcap-ui bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 min-h-screen flex flex-col transition-colors duration-200">
 
-    <!-- Header / Navbar -->
     <header class="w-full border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between bg-white/85 dark:bg-slate-900/85 backdrop-blur-md sticky top-0 z-50">
         <div class="flex items-center space-x-3 overflow-hidden">
             <a href="/" class="bg-brand-500 text-white p-2 rounded-xl text-sm shadow-lg shadow-brand-500/30 flex items-center justify-center w-9 h-9" title="Back to Dashboard">
-                <i class="fa-solid fa-bolt"></i>
+                <span>⚡</span>
             </a>
             <div>
                 <h1 class="font-bold text-sm sm:text-base truncate max-w-xs md:max-w-xl" title="{{ file_name }}">{{ file_name | default("Streaming Media") }}</h1>
@@ -97,21 +119,23 @@
             </div>
         </div>
         <div class="flex items-center space-x-2">
-            <button id="themeToggle" class="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition text-slate-600 dark:text-slate-300" aria-label="Toggle Theme">
-                <i class="fa-solid fa-moon dark:hidden"></i>
-                <i class="fa-solid fa-sun hidden dark:inline"></i>
+            <button type="button" id="themeToggle" class="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition text-slate-600 dark:text-slate-300" aria-label="Toggle Theme">
+                <span class="dark:hidden">🌙</span>
+                <span class="hidden dark:inline">☀️</span>
+            </button>
+            <button type="button" onclick="streamSaveToDisk()" class="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-sm font-bold transition shadow-lg">
+                <span>🚀</span>
+                <span class="hidden sm:inline">Stream to Disk</span>
             </button>
             <a href="{{ download_url }}" class="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-bold transition shadow-lg shadow-brand-500/25">
-                <i class="fa-solid fa-download"></i>
+                <span>⬇️</span>
                 <span class="hidden sm:inline">Fast Download</span>
             </a>
         </div>
     </header>
 
-    <!-- Main Content -->
     <main id="mainContainer" class="flex-1 flex flex-col items-center justify-start p-3 sm:p-6 max-w-5xl mx-auto w-full gap-6 transition-all duration-200">
         
-        <!-- Video Player Box -->
         <div id="playerContainer" class="relative w-full {% if metadata.media_kind == 'audio' %}min-h-56{% else %}aspect-video{% endif %} bg-black rounded-2xl overflow-hidden shadow-2xl group border border-slate-200 dark:border-slate-800">
             {% if metadata.media_kind == 'audio' %}
             <audio id="mediaPlayer" class="w-full" playsinline crossorigin="anonymous" preload="metadata" controls>
@@ -124,25 +148,7 @@
             </video>
             {% elif metadata.media_kind == 'code' %}
             <div class="h-full min-h-56 flex flex-col items-center justify-center gap-3 p-8 text-center text-white">
-                <i class="fa-solid fa-code text-4xl text-brand-400"></i>
-                <p class="font-semibold">⚡ ᴄᴏᴅᴇ ғɪʟᴇ ʀᴇᴀᴅʏ ғᴏʀ ʟɪᴠᴇ ɪɴsᴘᴇᴄᴛɪᴏɴ & ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ ({{ file_name }})</p>
-                <div class="flex flex-wrap justify-center gap-3">
-                    <a href="/code/{{ file_id }}" class="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-bold">💻 ᴏᴘᴇɴ ʟɪᴠᴇ ᴄᴏᴅᴇ ᴠɪᴇᴡᴇʀ</a>
-                    <a href="{{ download_url }}" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold border border-sky-500/30">⬇️ ғᴀsᴛ ᴅᴏᴡɴʟᴏᴀᴅ</a>
-                </div>
-            </div>
-            {% elif metadata.media_kind == 'code' %}
-            <div class="h-full min-h-56 flex flex-col items-center justify-center gap-3 p-8 text-center text-white">
-                <i class="fa-solid fa-code text-4xl text-brand-400"></i>
-                <p class="font-semibold">⚡ ᴄᴏᴅᴇ ғɪʟᴇ ʀᴇᴀᴅʏ ғᴏʀ ʟɪᴠᴇ ɪɴsᴘᴇᴄᴛɪᴏɴ & ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ ({{ file_name }})</p>
-                <div class="flex flex-wrap justify-center gap-3">
-                    <a href="/code/{{ file_id }}" class="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-bold">💻 ᴏᴘᴇɴ ʟɪᴠᴇ ᴄᴏᴅᴇ ᴠɪᴇᴡᴇʀ</a>
-                    <a href="{{ download_url }}" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold border border-sky-500/30">⬇️ ғᴀsᴛ ᴅᴏᴡɴʟᴏᴀᴅ</a>
-                </div>
-            </div>
-            {% elif metadata.media_kind == 'code' %}
-            <div class="h-full min-h-56 flex flex-col items-center justify-center gap-3 p-8 text-center text-white">
-                <i class="fa-solid fa-code text-4xl text-brand-400"></i>
+                <span class="text-4xl text-brand-400">💻</span>
                 <p class="font-semibold">⚡ ᴄᴏᴅᴇ ғɪʟᴇ ʀᴇᴀᴅʏ ғᴏʀ ʟɪᴠᴇ ɪɴsᴘᴇᴄᴛɪᴏɴ & ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ ({{ file_name }})</p>
                 <div class="flex flex-wrap justify-center gap-3">
                     <a href="/code/{{ file_id }}" class="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-bold">💻 ᴏᴘᴇɴ ʟɪᴠᴇ ᴄᴏᴅᴇ ᴠɪᴇᴡᴇʀ</a>
@@ -151,7 +157,7 @@
             </div>
             {% else %}
             <div class="h-full min-h-56 flex flex-col items-center justify-center gap-3 p-8 text-center text-white">
-                <i class="fa-solid fa-file-circle-question text-4xl text-brand-400"></i>
+                <span class="text-4xl text-brand-400">🎬</span>
                 <p class="font-semibold">ᴛʜɪs ғɪʟᴇ ɪs ᴏᴘᴛɪᴍɪᴢᴇᴅ ғᴏʀ ᴇxᴛᴇʀɴᴀʟ ʜᴡ+ ᴘʟᴀʏᴇʀs (ᴍᴋᴠ / ʜᴇᴠᴄ / ᴅᴜᴀʟ ᴀᴜᴅɪᴏ)</p>
                 <a href="{{ download_url }}" class="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-bold">⬇️ ᴅᴏᴡɴʟᴏᴀᴅ ᴏʀ ᴏᴘᴇɴ ɪɴ ᴘʟᴀʏɪᴛ / ᴍx / ᴠʟᴄ / s ᴘʟᴀʏᴇʀ</a>
             </div>
@@ -159,7 +165,6 @@
             <div id="playerStatus" class="absolute left-3 right-3 bottom-3 hidden rounded-xl bg-slate-950/85 px-3 py-2 text-xs text-white border border-sky-500/30" role="status" aria-live="polite"></div>
         </div>
 
-        <!-- Ultra Studio Controls & Metadata -->
         <section class="ultra-card w-full bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xl">
             <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
                 <h2 class="text-base sm:text-lg font-bold">🎛️ ᴜʟᴛʀᴀ ᴘʟᴀʏʙᴀᴄᴋ & ᴍᴇᴅɪᴀ ᴍᴇᴛᴀᴅᴀᴛᴀ</h2>
@@ -187,12 +192,23 @@
                 <span id="networkState" class="px-3 py-2 text-slate-500 dark:text-slate-400">ᴄʜᴇᴄᴋɪɴɢ ɴᴇᴛᴡᴏʀᴋ…</span>
             </div>
             {% endif %}
+            <div class="mt-4 p-3.5 rounded-xl bg-slate-100/80 dark:bg-slate-950/65 border border-sky-500/20 text-xs">
+                <div class="flex items-center justify-between flex-wrap gap-2">
+                    <span id="watchStreamStatus" class="font-bold text-sky-400">⚡ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ɪᴅʟᴇ (ʀᴇᴀᴅʏ)</span>
+                    <div class="flex items-center gap-2">
+                        <span id="watchStreamStats" class="font-mono text-slate-400">0% • 0 B/s</span>
+                        <button type="button" id="cancelWatchStreamBtn" onclick="cancelWatchStream()" class="hidden px-2.5 py-1 rounded-lg bg-red-500/20 text-red-400 border border-red-500/40 font-bold">🛑 ᴄᴀɴᴄᴇʟ</button>
+                    </div>
+                </div>
+                <div class="stream-progress-track">
+                    <div id="watchStreamBar" class="stream-progress-fill"></div>
+                </div>
+            </div>
             {% if metadata.caption %}<div id="captionPanel" class="hidden mt-3 p-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-sm whitespace-pre-wrap">{{ metadata.caption }}</div>{% endif %}
             {% if metadata.audio_track != 'Default Audio' or metadata.audio_tracks %}<div id="audioPanel" class="hidden mt-3 p-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-sm"><strong>🎧 ᴀᴜᴅɪᴏ:</strong> {{ metadata.audio_track }}{% for track in metadata.audio_tracks %}<div class="mt-1">• {{ track.title | default('Track ' ~ loop.index) }} · {{ track.language | default(track.lang | default('Undetermined')) }} · {{ track.codec | default('unknown') }} · {{ track.channels | default('') }}ch</div>{% endfor %}</div>{% endif %}
             {% if metadata.language != 'Undetermined' or metadata.audio_tracks or metadata.subtitle_tracks %}<div id="languagePanel" class="hidden mt-3 p-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-sm"><strong>🌐 ʟᴀɴɢᴜᴀɢᴇ:</strong> {{ metadata.language }}{% for track in metadata.subtitle_tracks %}<div class="mt-1">• ᴄᴀᴘᴛɪᴏɴ / sᴜʙᴛɪᴛʟᴇ: {{ track.title | default('Subtitle ' ~ loop.index) }} · {{ track.language | default(track.lang | default('Undetermined')) }}</div>{% endfor %}</div>{% endif %}
         </section>
 
-        <!-- 4 External Players ONLY Section (PLAYit, MX Player, VLC, S Player) -->
         <section class="ultra-card w-full bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xl">
             <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
                 <div>
@@ -209,9 +225,7 @@
                 </span>
             </div>
 
-            <!-- Strict 4 External Player Buttons Grid -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <!-- 1. PLAYit -->
                 <a href="{{ player_links.playit if player_links else ('playit://playerv2/video?url=' ~ stream_url) }}" onclick="return openExternalPlayer(event, 'playit')"
                    class="flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-amber-500/15 to-orange-500/15 hover:from-amber-500/25 hover:to-orange-500/25 border border-amber-500/30 transition group">
                     <div class="flex items-center space-x-3">
@@ -223,10 +237,9 @@
                             <div class="text-[11px] text-amber-400 font-medium">⚡ ʀᴀɴɢᴇ ᴘʟᴀʏᴇʀ</div>
                         </div>
                     </div>
-                    <i class="fa-solid fa-arrow-up-right-from-square text-xs text-amber-400 group-hover:translate-x-0.5 transition"></i>
+                    <span class="text-xs text-amber-400 group-hover:translate-x-0.5 transition">↗</span>
                 </a>
 
-                <!-- 2. MX Player -->
                 <a href="{{ player_links.mxplayer if player_links else '#' }}" onclick="return openExternalPlayer(event, 'mxplayer')"
                    class="flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-blue-500/15 to-indigo-500/15 hover:from-blue-500/25 hover:to-indigo-500/25 border border-blue-500/30 transition group">
                     <div class="flex items-center space-x-3">
@@ -238,10 +251,9 @@
                             <div class="text-[11px] text-blue-400 font-medium">🎬 ʜᴡ+ ᴅᴇᴄᴏᴅᴇʀ</div>
                         </div>
                     </div>
-                    <i class="fa-solid fa-arrow-up-right-from-square text-xs text-blue-400 group-hover:translate-x-0.5 transition"></i>
+                    <span class="text-xs text-blue-400 group-hover:translate-x-0.5 transition">↗</span>
                 </a>
 
-                <!-- 3. VLC Player -->
                 <a href="{{ player_links.vlc_intent if player_links else '#' }}" onclick="return openExternalPlayer(event, 'vlc')"
                    class="flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-orange-500/15 to-red-500/15 hover:from-orange-500/25 hover:to-red-500/25 border border-orange-500/30 transition group">
                     <div class="flex items-center space-x-3">
@@ -253,10 +265,9 @@
                             <div class="text-[11px] text-orange-400 font-medium">🔊 ᴀʟʟ ᴀᴜᴅɪᴏ / sᴜʙs</div>
                         </div>
                     </div>
-                    <i class="fa-solid fa-arrow-up-right-from-square text-xs text-orange-400 group-hover:translate-x-0.5 transition"></i>
+                    <span class="text-xs text-orange-400 group-hover:translate-x-0.5 transition">↗</span>
                 </a>
 
-                <!-- 4. S Player -->
                 <a href="{{ player_links.splayer if player_links else '#' }}" onclick="return openExternalPlayer(event, 'splayer')"
                    class="flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-purple-500/15 to-pink-500/15 hover:from-purple-500/25 hover:to-pink-500/25 border border-purple-500/30 transition group">
                     <div class="flex items-center space-x-3">
@@ -268,23 +279,22 @@
                             <div class="text-[11px] text-purple-400 font-medium">🚀 ᴜʟᴛʀᴀ sᴍᴏᴏᴛʜ</div>
                         </div>
                     </div>
-                    <i class="fa-solid fa-arrow-up-right-from-square text-xs text-purple-400 group-hover:translate-x-0.5 transition"></i>
+                    <span class="text-xs text-purple-400 group-hover:translate-x-0.5 transition">↗</span>
                 </a>
             </div>
 
-            <!-- Direct Actions Row -->
             <div class="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
                 <div class="flex flex-wrap gap-2">
+                    <button type="button" onclick="streamSaveToDisk()" class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-xs font-bold transition flex items-center gap-2">
+                        <span>🚀 sᴛʀᴇᴀᴍ sᴀᴠᴇ ᴛᴏ ᴅɪsᴋ</span>
+                    </button>
                     <a href="{{ download_url }}" class="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold transition flex items-center gap-2">
-                        <i class="fa-solid fa-download"></i>
                         <span>⬇️ ᴅɪʀᴇᴄᴛ ʀᴀɴɢᴇ ᴅᴏᴡɴʟᴏᴀᴅ</span>
                     </a>
-                    <button onclick="copyStreamUrl('{{ stream_url }}')" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold transition flex items-center gap-2">
-                        <i class="fa-solid fa-copy"></i>
+                    <button type="button" onclick="copyStreamUrl('{{ stream_url }}')" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold transition flex items-center gap-2">
                         <span id="copyBtnText">📋 ᴄᴏᴘʏ sᴛʀᴇᴀᴍ ᴜʀʟ</span>
                     </button>
                     <a href="{{ dl_page_url | default(download_url) }}" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold transition flex items-center gap-2">
-                        <i class="fa-solid fa-box-open"></i>
                         <span>📦 ᴅᴏᴡɴʟᴏᴀᴅ ʜᴜʙ</span>
                     </a>
                 </div>
@@ -301,12 +311,29 @@
             const media = document.getElementById('mediaPlayer');
             const status = document.getElementById('playerStatus');
             const network = document.getElementById('networkState');
+            const watchStreamStatus = document.getElementById('watchStreamStatus');
+            const watchStreamStats = document.getElementById('watchStreamStats');
+            const watchStreamBar = document.getElementById('watchStreamBar');
+            const cancelWatchStreamBtn = document.getElementById('cancelWatchStreamBtn');
             const storageKey = `mmw-playback:${location.pathname}`;
             const speeds = [0.75, 1.0, 1.25, 1.5, 2.0];
+            const STREAM_URL = "{{ stream_url }}";
+            const DOWNLOAD_URL = "{{ download_url }}";
+            const FILE_NAME = "{{ file_name | default('stream_media.mp4') }}";
+            const EXPECTED_BYTES = Number("{{ file_size_bytes | default(0) }}") || 0;
             let speedIdx = 1;
             let player = null;
             let sleepTimer = null;
             let statusTimer = null;
+            let watchAbortController = null;
+
+            function formatBytes(bytes) {
+                const v = Number(bytes) || 0;
+                if (v <= 0) return '0 B';
+                const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+                const i = Math.min(u.length - 1, Math.floor(Math.log(v) / Math.log(1024)));
+                return (v / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 2) + ' ' + u[i];
+            }
 
             function notify(message, persistent = false) {
                 if (!status) return;
@@ -315,6 +342,80 @@
                 clearTimeout(statusTimer);
                 if (!persistent) statusTimer = setTimeout(() => status.classList.add('hidden'), 2600);
             }
+
+            window.cancelWatchStream = () => {
+                if (watchAbortController) watchAbortController.abort();
+            };
+
+            window.streamSaveToDisk = async () => {
+                if (watchAbortController) watchAbortController.abort();
+                watchAbortController = new AbortController();
+                if (cancelWatchStreamBtn) cancelWatchStreamBtn.classList.remove('hidden');
+                const t0 = performance.now();
+                let writable = null;
+                try {
+                    if (typeof window.showSaveFilePicker === 'function' && window.isSecureContext) {
+                        try {
+                            const handle = await window.showSaveFilePicker({ suggestedName: FILE_NAME });
+                            writable = await handle.createWritable();
+                        } catch (pe) {
+                            if (pe && pe.name === 'AbortError') {
+                                if (cancelWatchStreamBtn) cancelWatchStreamBtn.classList.add('hidden');
+                                watchAbortController = null;
+                                return;
+                            }
+                        }
+                    }
+                    if (watchStreamStatus) watchStreamStatus.textContent = '⚡ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴄᴏɴɴᴇᴄᴛɪɴɢ ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ…';
+                    const resp = await fetch(DOWNLOAD_URL || STREAM_URL, { signal: watchAbortController.signal });
+                    if (!resp.ok && resp.status !== 206) throw new Error('HTTP ' + resp.status);
+                    const total = Number(resp.headers.get('Content-Length')) || EXPECTED_BYTES;
+                    const reader = resp.body.getReader();
+                    const chunks = [];
+                    let received = 0;
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        if (writable) await writable.write(value);
+                        else chunks.push(value);
+                        received += value.byteLength;
+                        const pct = total > 0 ? Math.min(100, (received / total) * 100) : 100;
+                        const elapsed = Math.max(0.001, (performance.now() - t0) / 1000);
+                        const speed = received / elapsed;
+                        if (watchStreamBar) watchStreamBar.style.width = pct.toFixed(1) + '%';
+                        if (watchStreamStats) watchStreamStats.textContent = `${pct.toFixed(1)}% • ${formatBytes(received)} • ${formatBytes(speed)}/s`;
+                        if (watchStreamStatus) watchStreamStatus.textContent = '⚡ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: sᴛʀᴇᴀᴍɪɴɢ ᴄʜᴜɴᴋs ᴛᴏ ᴅɪsᴋ…';
+                    }
+                    if (writable) {
+                        await writable.close();
+                    } else {
+                        const blob = new Blob(chunks, { type: resp.headers.get('Content-Type') || 'application/octet-stream' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = FILE_NAME;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        setTimeout(() => URL.revokeObjectURL(url), 10000);
+                    }
+                    if (watchStreamBar) watchStreamBar.style.width = '100%';
+                    if (watchStreamStatus) watchStreamStatus.textContent = `✅ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴄᴏᴍᴘʟᴇᴛᴇᴅ (${formatBytes(received)})`;
+                    notify('✅ sᴛʀᴇᴀᴍ sᴀᴠᴇᴅ ᴛᴏ ᴅɪsᴋ!');
+                } catch (err) {
+                    if (writable) { try { await writable.abort(); } catch (_) {} }
+                    if (err && err.name === 'AbortError') {
+                        if (watchStreamStatus) watchStreamStatus.textContent = '🛑 sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴄᴀɴᴄᴇʟʟᴇᴅ';
+                        notify('🛑 sᴛʀᴇᴀᴍ ᴄᴀɴᴄᴇʟʟᴇᴅ');
+                    } else {
+                        if (watchStreamStatus) watchStreamStatus.textContent = '⚠️ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴇʀʀᴏʀ';
+                        notify('⚠️ sᴛʀᴇᴀᴍ ᴇʀʀᴏʀ: ' + (err.message || err));
+                    }
+                } finally {
+                    if (cancelWatchStreamBtn) cancelWatchStreamBtn.classList.add('hidden');
+                    watchAbortController = null;
+                }
+            };
 
             window.toggleMetadata = (id) => {
                 const panel = document.getElementById(id);
@@ -410,6 +511,11 @@
             function saveState() {
                 if (!media) return;
                 try { localStorage.setItem(storageKey, JSON.stringify({ position: media.currentTime || 0, volume: media.volume })); } catch (_) {}
+                if (media.duration > 0) {
+                    const pct = Math.min(100, (media.currentTime / media.duration) * 100);
+                    if (watchStreamBar && !watchAbortController) watchStreamBar.style.width = pct.toFixed(1) + '%';
+                    if (watchStreamStats && !watchAbortController) watchStreamStats.textContent = `${pct.toFixed(1)}% • ${Math.round(media.currentTime)}s / ${Math.round(media.duration)}s`;
+                }
             }
 
             function initPlayer() {
@@ -427,10 +533,28 @@
                 } else { player = media; }
                 media.addEventListener('timeupdate', saveState, { passive: true });
                 media.addEventListener('volumechange', saveState, { passive: true });
-                media.addEventListener('waiting', () => notify('⏳ ʙᴜғғᴇʀɪɴɢ…', true));
-                media.addEventListener('playing', () => { if (status) status.classList.add('hidden'); });
-                media.addEventListener('error', () => notify('⚠️ ᴛʜɪs ᴍᴇᴅɪᴀ ᴄᴏᴜʟᴅ ɴᴏᴛ ʙᴇ ᴘʟᴀʏᴇᴅ ɪɴ ʙʀᴏᴡsᴇʀ — ᴜsᴇ ᴘʟᴀʏɪᴛ / ᴍx / ᴠʟᴄ / s ᴘʟᴀʏᴇʀ ʙᴇʟᴏᴡ', true));
-                media.addEventListener('loadedmetadata', () => notify('✅ ᴜʟᴛʀᴀ ʀᴀɴɢᴇ sᴛʀᴇᴀᴍ ʀᴇᴀᴅʏ'));
+                media.addEventListener('waiting', () => {
+                    notify('⏳ ʙᴜғғᴇʀɪɴɢ…', true);
+                    if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '⏳ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ʙᴜғғᴇʀɪɴɢ ʀᴀɴɢᴇ…';
+                });
+                media.addEventListener('playing', () => {
+                    if (status) status.classList.add('hidden');
+                    if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '🟢 sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: sᴛʀᴇᴀᴍɪɴɢ ʟɪᴠᴇ';
+                });
+                media.addEventListener('pause', () => {
+                    if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '⏸️ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴘᴀᴜsᴇᴅ';
+                });
+                media.addEventListener('ended', () => {
+                    if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '✅ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴘʟᴀʏʙᴀᴄᴋ ᴄᴏᴍᴘʟᴇᴛᴇᴅ';
+                });
+                media.addEventListener('error', () => {
+                    notify('⚠️ ᴛʜɪs ᴍᴇᴅɪᴀ ᴄᴏᴜʟᴅ ɴᴏᴛ ʙᴇ ᴘʟᴀʏᴇᴅ ɪɴ ʙʀᴏᴡsᴇʀ — ᴜsᴇ ᴘʟᴀʏɪᴛ / ᴍx / ᴠʟᴄ / s ᴘʟᴀʏᴇʀ ʙᴇʟᴏᴡ', true);
+                    if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '⚠️ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴜsᴇ ᴇxᴛᴇʀɴᴀʟ ᴘʟᴀʏᴇʀ';
+                });
+                media.addEventListener('loadedmetadata', () => {
+                    notify('✅ ᴜʟᴛʀᴀ ʀᴀɴɢᴇ sᴛʀᴇᴀᴍ ʀᴇᴀᴅʏ');
+                    if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '✅ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ʀᴀɴɢᴇ ʀᴇᴀᴅʏ';
+                });
             }
 
             window.toggleLoop = () => { if (!media) return; media.loop = !media.loop; notify(media.loop ? '🔁 ʟᴏᴏᴘ ᴇɴᴀʙʟᴇᴅ' : '⏹️ ʟᴏᴏᴘ ᴅɪsᴀʙʟᴇᴅ'); };

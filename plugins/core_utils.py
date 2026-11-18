@@ -873,6 +873,10 @@ async def safe_edit_text(message: Any, text: Any = "", **kwargs: Any) -> Any:
     is_progress = ("▰" in str(text) or "▱" in str(text))
     is_final_progress = is_progress and ("100.0%" in str(text) or "100%" in str(text))
     is_optional_progress = is_progress and not is_final_progress
+    if not is_progress:
+        stale_prog = _ACTIVE_PROGRESS_TASKS.pop((chat_id, msg_id), None)
+        if stale_prog is not None and not stale_prog.done() and stale_prog is not asyncio.current_task():
+            stale_prog.cancel()
 
     if is_optional_progress:
         if now < _PROGRESS_EDIT_BLOCK_UNTIL or rate_limit_manager.is_in_cooldown(chat_id):
@@ -1237,9 +1241,13 @@ async def progress_for_pyrogram(
         _PROGRESS_THROTTLE.clear()
         _PROGRESS_STEP.clear()
     msg_pair = (chat_id, msg_id)
+    is_done = total > 0 and current >= total
     prev_task = _ACTIVE_PROGRESS_TASKS.get(msg_pair)
     if prev_task is not None and not prev_task.done():
-        return
+        if is_done:
+            prev_task.cancel()
+        else:
+            return
 
     now_ts = get_current_timestamp()
     start_ts = now_ts
@@ -1255,11 +1263,10 @@ async def progress_for_pyrogram(
             start_ts = float(start_time)
 
     msg_key = (chat_id, msg_id, str(ud_type))
-    percentage = (current * 100.0 / total) if total > 0 else 0.0
+    percentage = min(100.0, max(0.0, (current * 100.0 / total))) if total > 0 else 0.0
     active_jobs = max(1, task_manager.active_count)
     step_granularity = 5 if active_jobs <= 2 else min(20, 5 * active_jobs)
     pct_step = min(100, max(0, int(percentage // step_granularity) * step_granularity))
-    is_done = total > 0 and current >= total
     last_edit = _PROGRESS_THROTTLE.get(msg_key, 0.0)
     last_step = _PROGRESS_STEP.get(msg_key, -step_granularity)
 
@@ -1269,7 +1276,7 @@ async def progress_for_pyrogram(
     )
 
     if not is_done:
-        step_ready = pct_step >= last_step + step_granularity and (now_ts - last_edit) >= min_time_gap
+        step_ready = total > 0 and pct_step >= last_step + step_granularity and (now_ts - last_edit) >= min_time_gap
         time_ready = (now_ts - last_edit) >= (min_time_gap * 1.8)
         if not (step_ready or time_ready):
             return
@@ -1284,23 +1291,32 @@ async def progress_for_pyrogram(
         _PROGRESS_STEP.pop(msg_key, None)
 
     diff = max(0.001, now_ts - start_ts)
+    elapsed_ms = max(0, round(diff * 1000))
     speed = (current / diff) if diff > 0 else 0
-    time_to_completion = round((total - current) / speed) * 1000 if (speed > 0 and not is_done) else 0
+    time_to_completion = round((total - current) / speed) * 1000 if (total > 0 and speed > 0 and not is_done) else 0
 
-    filled_blocks = min(10, max(0, math.floor(percentage / 10)))
-    progress = "[{0}{1}] `{2}%`\n".format(
-        "".join(["▰" for _ in range(filled_blocks)]),
-        "".join(["▱" for _ in range(10 - filled_blocks)]),
-        round(percentage, 1)
-    )
+    if total > 0:
+        filled_blocks = min(10, max(0, math.floor(percentage / 10)))
+        progress = "[{0}{1}] `{2}%`\n".format(
+            "".join(["▰" for _ in range(filled_blocks)]),
+            "".join(["▱" for _ in range(10 - filled_blocks)]),
+            round(percentage, 1)
+        )
+        done_line = f"📦 **{to_smallcaps('done')}** : `{humanbytes(current)} / {humanbytes(total)}`\n"
+        eta_line = f"⏳ **{to_smallcaps('eta')}** : `{time_formatter(milliseconds=time_to_completion)}`\n"
+    else:
+        progress = "[▰▰▰▰▰▱▱▱▱▱] `sᴛʀᴇᴀᴍɪɴɢ`\n"
+        done_line = f"📦 **{to_smallcaps('transferred')}** : `{humanbytes(current)}`\n"
+        eta_line = ""
 
     tmp = (
         f"⚡ **{to_smallcaps(ud_type)}**...\n\n"
         f"{progress}"
         f"🚀 **{to_smallcaps('speed')}** : `{humanbytes(speed)}/s`\n"
-        f"📦 **{to_smallcaps('done')}** : `{humanbytes(current)} / {humanbytes(total)}`\n"
-        f"⏳ **{to_smallcaps('eta')}** : `{time_formatter(milliseconds=time_to_completion)}`"
-        f"{format_watermark()}"
+        f"{done_line}"
+        f"⏱️ **{to_smallcaps('elapsed')}** : `{time_formatter(milliseconds=elapsed_ms)}`\n"
+        f"{eta_line}".rstrip("\n")
+        + f"{format_watermark()}"
     )
 
     async def _do_edit():
