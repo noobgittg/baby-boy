@@ -132,3 +132,36 @@ def browser_media_supported(value: str | None, file_name: str | None = None) -> 
     return mime.startswith(("audio/", "video/")) or mime in {
         "application/ogg", "application/vnd.apple.mpegurl", "application/dash+xml", "text/html"
     }
+
+
+def extract_message_media(message):
+    """Extract the primary media object and normalized metadata defaults from any Pyrogram message."""
+    if not message:
+        return None, "unknown.bin", 0, "application/octet-stream", 0
+
+    for attr, default_name, default_mime in (
+        ("document", "document.bin", "application/octet-stream"),
+        ("video", "video.mp4", "video/mp4"),
+        ("audio", "audio.mp3", "audio/mpeg"),
+        ("animation", "animation.mp4", "video/mp4"),
+        ("voice", "voice.ogg", "audio/ogg"),
+        ("video_note", "video_note.mp4", "video/mp4"),
+        ("sticker", "sticker.webp", "image/webp"),
+    ):
+        obj = getattr(message, attr, None)
+        if obj is not None:
+            fname = getattr(obj, "file_name", None) or default_name
+            fsize = int(getattr(obj, "file_size", 0) or 0)
+            mime = getattr(obj, "mime_type", None) or default_mime
+            dur = int(getattr(obj, "duration", 0) or 0)
+            return obj, fname, fsize, mime, dur
+
+    photo = getattr(message, "photo", None)
+    if photo is not None:
+        if isinstance(photo, list) and photo:
+            photo = photo[-1]
+        fname = f"photo_{getattr(message, 'id', 0)}.jpg"
+        fsize = int(getattr(photo, "file_size", 0) or 0)
+        return photo, fname, fsize, "image/jpeg", 0
+
+    return None, "unknown.bin", 0, "application/octet-stream", 0

@@ -50,13 +50,21 @@ except ImportError:
     aiofiles = None
 
 def telegram_media_metadata(media: Any, message: Any = None) -> Dict[str, Any]:
-    mime_type = normalize_mime(getattr(media, "mime_type", "") or "application/octet-stream")
-    if getattr(message, "video", None) or is_video_mime(mime_type):
+    raw_mime = getattr(media, "mime_type", "") or (
+        "image/jpeg" if getattr(message, "photo", None)
+        else "audio/ogg" if getattr(message, "voice", None)
+        else "video/mp4" if (getattr(message, "video_note", None) or getattr(message, "animation", None))
+        else "application/octet-stream"
+    )
+    mime_type = normalize_mime(raw_mime)
+    if getattr(message, "video", None) or getattr(message, "animation", None) or getattr(message, "video_note", None) or is_video_mime(mime_type):
         kind = "video"
-    elif getattr(message, "audio", None) or is_audio_mime(mime_type):
+    elif getattr(message, "audio", None) or getattr(message, "voice", None) or is_audio_mime(mime_type):
         kind = "audio"
     elif mime_type.startswith("image/") or getattr(message, "photo", None):
         kind = "image"
+    elif is_code_file(getattr(media, "file_name", None), mime_type):
+        kind = "code"
     else:
         kind = "document"
 
@@ -2422,3 +2430,120 @@ async def compress_file_to_zip(input_path: str, output_zip_path: str, arcname: s
         return await asyncio.to_thread(compress_file_to_zip_sync, input_path, output_zip_path, arcname)
     finally:
         cache.auto_clear_after_response_sync(preserve_workflows=True)
+
+
+async def probe_stream_url_mediainfo(stream_url: str, timeout: float = 8.0) -> Dict[str, Any]:
+    if not stream_url or not has_ffprobe():
+        return {}
+    cmd = [
+        FFPROBE_BIN,
+        "-v", "quiet",
+        "-analyzeduration", "3000000",
+        "-probesize", "3145728",
+        "-print_format", "json",
+        "-show_format",
+        "-show_streams",
+        stream_url,
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if proc.returncode != 0 or not stdout:
+            return {}
+        data = json.loads(stdout.decode("utf-8", errors="ignore") or "{}")
+    except Exception:
+        return {}
+
+    fmt = data.get("format", {})
+    streams = data.get("streams", [])
+    duration = 0
+    try:
+        duration = max(0, int(float(fmt.get("duration") or 0)))
+    except (ValueError, TypeError):
+        duration = 0
+
+    video_streams = []
+    audio_streams = []
+    subtitle_streams = []
+
+    for s in streams:
+        ctype = s.get("codec_type")
+        if ctype == "video":
+            video_streams.append({
+                "codec": str(s.get("codec_name", "unknown")).upper(),
+                "width": int(s.get("width") or 0),
+                "height": int(s.get("height") or 0),
+            })
+        elif ctype == "audio":
+            tags = s.get("tags") or {}
+            raw_lang = tags.get("language") or "und"
+            lang_full = resolve_lang_name(raw_lang)
+            audio_streams.append({
+                "index": len(audio_streams) + 1,
+                "stream_index": s.get("index", 0),
+                "codec": str(s.get("codec_name", "unknown")).upper(),
+                "channels": int(s.get("channels") or 2),
+                "channel_layout": s.get("channel_layout") or "stereo",
+                "lang": lang_full,
+                "language": lang_full,
+                "lang_code": str(raw_lang).lower(),
+                "title": tags.get("title") or f"Audio {len(audio_streams) + 1}",
+            })
+        elif ctype == "subtitle":
+            tags = s.get("tags") or {}
+            raw_lang = tags.get("language") or "und"
+            lang_full = resolve_lang_name(raw_lang)
+            subtitle_streams.append({
+                "index": len(subtitle_streams) + 1,
+                "stream_index": s.get("index", 0),
+                "codec": str(s.get("codec_name", "unknown")).upper(),
+                "lang": lang_full,
+                "language": lang_full,
+                "lang_code": str(raw_lang).lower(),
+                "title": tags.get("title") or f"Subtitle {len(subtitle_streams) + 1}",
+            })
+
+    langs = [a["language"] for a in audio_streams if a.get("language") and a["language"] != "Undetermined"]
+    language_str = ", ".join(dict.fromkeys(langs)) if langs else "Undetermined"
+    auds = [f"{a['codec']} {a['channels']}ch" for a in audio_streams]
+    audio_track_str = ", ".join(auds) if auds else "Default Audio"
+
+    return {
+        "duration": duration,
+        "width": video_streams[0]["width"] if video_streams else 0,
+        "height": video_streams[0]["height"] if video_streams else 0,
+        "video_streams": video_streams,
+        "audio_streams": audio_streams,
+        "subtitle_streams": subtitle_streams,
+        "language": language_str,
+        "audio_track": audio_track_str,
+    }
+
+
+async def extract_webvtt_subtitle(source: str, sub_index: int = 0, timeout: float = 15.0) -> str:
+    if not source or not has_ffmpeg():
+        return ""
+    cmd = [
+        FFMPEG_BIN,
+        "-y",
+        "-i", source,
+        "-map", f"0:s:{max(0, int(sub_index))}",
+        "-f", "webvtt",
+        "pipe:1",
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if proc.returncode == 0 and stdout:
+            return stdout.decode("utf-8", errors="replace")
+    except Exception:
+        pass
+    return ""

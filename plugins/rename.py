@@ -50,6 +50,7 @@ from plugins.media_types import (
     is_code_file,
     detect_code_language,
     normalize_mime,
+    extract_message_media,
 )
 
 MAX_BOT_FILE_SIZE = int(getattr(Config, "LARGE_FILE_THRESHOLD_BYTES", 2 * 1024 * 1024 * 1024))
@@ -64,10 +65,10 @@ async def resolve_target_media_message(client: Client, message: Message, user_id
 
     rep = getattr(message, "reply_to_message", None)
     if rep:
-        if getattr(rep, "video", None) or getattr(rep, "document", None) or getattr(rep, "audio", None):
+        if extract_message_media(rep)[0] is not None:
             return rep
         rep_parent = getattr(rep, "reply_to_message", None)
-        if rep_parent and (getattr(rep_parent, "video", None) or getattr(rep_parent, "document", None) or getattr(rep_parent, "audio", None)):
+        if rep_parent and extract_message_media(rep_parent)[0] is not None:
             return rep_parent
         markup = getattr(rep, "reply_markup", None)
         rows = getattr(markup, "inline_keyboard", None) if markup else None
@@ -79,7 +80,7 @@ async def resolve_target_media_message(client: Client, message: Message, user_id
                     if m and client and chat_id:
                         try:
                             fetched = await client.get_messages(chat_id, int(m.group(1)))
-                            if fetched and (fetched.video or fetched.document or fetched.audio):
+                            if fetched and extract_message_media(fetched)[0] is not None:
                                 return fetched
                         except Exception:
                             pass
@@ -91,7 +92,7 @@ async def resolve_target_media_message(client: Client, message: Message, user_id
                 mid = int(cached_id.get("msg_id") if isinstance(cached_id, dict) else cached_id)
                 if mid > 0:
                     fetched = await client.get_messages(chat_id, mid)
-                    if fetched and (fetched.video or fetched.document or fetched.audio):
+                    if fetched and extract_message_media(fetched)[0] is not None:
                         return fetched
             except Exception:
                 pass
@@ -277,7 +278,7 @@ async def rename_restricted_alert_cb(client: Client, query: CallbackQuery):
     )
 
 
-@Client.on_message(filters.private & (filters.document | filters.video | filters.audio))
+@Client.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.animation | filters.voice | filters.video_note | filters.photo))
 async def incoming_file_entry(client: Client, message: Message):
     user = message.from_user
     uid = user.id if user else 0
@@ -318,14 +319,13 @@ async def _process_incoming_file(client: Client, message: Message, user):
         await cache.set(f"last_media_{uid}", int(message.id), ttl=3600)
 
     u = await user_repo.get_or_create(user.id, user.first_name, user.username) if user else {}
-    media = message.document or message.video or message.audio
-    raw_file_name = getattr(media, "file_name", None) or "Unknown_File.mp4"
-    file_size_bytes = int(getattr(media, "file_size", 0) or 0)
-    mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
+    media, raw_file_name, file_size_bytes, mime_type, _dur = extract_message_media(message)
+    if media is None:
+        return
     normalized_mime = normalize_mime(mime_type)
-    is_video = bool(message.video or is_video_mime(normalized_mime))
-    is_audio = bool(message.audio or is_audio_mime(normalized_mime))
-    is_compressible = is_video or is_audio or is_code_file(raw_file_name, normalized_mime)
+    is_video = bool(message.video or message.animation or message.video_note or is_video_mime(normalized_mime))
+    is_audio = bool(message.audio or message.voice or is_audio_mime(normalized_mime))
+    is_compressible = True
 
     logger.info(
         "📥 ɪɴᴄᴏᴍɪɴɢ ᴍᴇᴅɪᴀ › ᴜsᴇʀ=%s ᴍsɢ=%s ɴᴀᴍᴇ='%s' sɪᴢᴇ=%s (%s) ᴍɪᴍᴇ=%s",

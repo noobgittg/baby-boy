@@ -10,7 +10,7 @@ from config import Config
 from info import COMMAND_PREFIXES
 from plugins.core_db import file_repo, user_repo
 from plugins.core_utils import cache, to_smallcaps, format_watermark, humanbytes, time_formatter, logger, safe_forward_message, safe_edit_text, safe_reply_text, execute_with_floodwait
-from plugins.media_types import is_code_file, detect_code_language
+from plugins.media_types import is_code_file, detect_code_language, extract_message_media
 from plugins.core_web import build_4_external_player_links
 from plugins.core_services import telegram_media_metadata
 
@@ -77,12 +77,8 @@ async def generate_stream_response(client: Client, media_msg: Message, target_re
         logger.warning("⚠️ sᴛʀᴇᴀᴍ ᴀʀᴄʜɪᴠᴇ ғᴏʀᴡᴀʀᴅ ғᴀɪʟᴇᴅ; ᴜsɪɴɢ ᴏʀɪɢɪɴᴀʟ ᴍᴇᴅɪᴀ ᴍᴇssᴀɢᴇ")
         log_msg = media_msg
 
-    media = media_msg.document or media_msg.video or media_msg.audio
-    raw_name = getattr(media, "file_name", None) or "stream_media.mp4"
+    media, raw_name, file_size, mime_type, duration_val = extract_message_media(media_msg)
     file_name = raw_name.replace("`", "'")
-    file_size = getattr(media, "file_size", 0)
-    mime_type = getattr(media, "mime_type", "video/mp4")
-    duration_val = getattr(media, "duration", 0)
     duration = time_formatter(seconds=duration_val) if duration_val > 0 else "N/A"
     tg_file_id = getattr(media, "file_id", None)
 

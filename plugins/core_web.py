@@ -28,7 +28,7 @@ from plugins.media_types import media_kind, normalize_mime, browser_media_suppor
 
 
 CHUNK_SIZE = 1024 * 1024
-FIRST_FRAME_SLICE = 256 * 1024
+FIRST_FRAME_SLICE = 64 * 1024
 PREFETCH_QUEUE_SIZE = max(16, int(getattr(Config, "STREAM_BUFFER_CHUNKS", 64)))
 LOCAL_READ_CHUNK = max(CHUNK_SIZE, int(getattr(Config, "STREAM_CHUNK_SIZE", 4 * 1024 * 1024)))
 MAX_CONCURRENT_STREAMS = max(8, min(64, int(getattr(Config, "WORKERS", 32))))
@@ -116,6 +116,34 @@ def _safe_metadata_int(value: Any) -> int:
 def media_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize stored metadata for templates and JSON clients."""
     raw = dict(file_doc.get("metadata") or {})
+    file_id = str(file_doc.get("file_id", ""))
+    audio_tracks = list(raw.get("audio_tracks") or raw.get("audio_streams") or [])
+    subtitle_tracks = []
+    for idx, sub in enumerate(raw.get("subtitle_tracks") or raw.get("subtitle_streams") or []):
+        item = dict(sub)
+        if file_id and not item.get("url"):
+            item["url"] = f"/api/subtitles/{file_id}/{idx}.vtt"
+        subtitle_tracks.append(item)
+
+    language = raw.get("language") or "Undetermined"
+    if (not language or language == "Undetermined") and audio_tracks:
+        langs = [
+            str(a.get("language") or a.get("lang") or "").strip()
+            for a in audio_tracks
+            if str(a.get("language") or a.get("lang") or "").strip() not in ("", "Undetermined", "und")
+        ]
+        if langs:
+            language = ", ".join(dict.fromkeys(langs))
+
+    audio_track = raw.get("audio_track") or "Default Audio"
+    if (not audio_track or audio_track == "Default Audio") and audio_tracks:
+        auds = [
+            f"{str(a.get('codec', 'AUDIO')).upper()} {int(a.get('channels', 2) or 2)}ch".strip()
+            for a in audio_tracks
+        ]
+        if auds:
+            audio_track = ", ".join(auds)
+
     return {
         "media_kind": raw.get("media_kind") or media_kind(file_doc.get("mime_type") or raw.get("mime_type"), file_doc.get("file_name")),
         "mime_type": normalize_mime(file_doc.get("mime_type") or raw.get("mime_type")),
@@ -123,10 +151,10 @@ def media_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
         "duration": _safe_metadata_int(raw.get("duration")),
         "width": _safe_metadata_int(raw.get("width")),
         "height": _safe_metadata_int(raw.get("height")),
-        "language": raw.get("language") or "Undetermined",
-        "audio_track": raw.get("audio_track") or "Default Audio",
-        "audio_tracks": raw.get("audio_tracks") or raw.get("audio_streams") or [],
-        "subtitle_tracks": raw.get("subtitle_tracks") or raw.get("subtitle_streams") or [],
+        "language": language,
+        "audio_track": audio_track,
+        "audio_tracks": audio_tracks,
+        "subtitle_tracks": subtitle_tracks,
         "caption": raw.get("caption") or "",
     }
 
@@ -234,14 +262,25 @@ async def iter_12mbps_file_stream(
         last_part_cut = (end % CHUNK_SIZE) + 1
         part_count = math.ceil((end + 1) / CHUNK_SIZE) - offset_chunks
 
-        if part_count == 1 and offset_chunks in (0, last_chunk_index):
-            chunk_cache_key = f"chunk_{file_id}_{offset_chunks}"
-            cached_raw = await cache.get(chunk_cache_key)
-            if cached_raw is not None:
-                sliced = _slice_chunk(cached_raw, 1, 1, first_part_cut, last_part_cut)
-                for idx in range(0, len(sliced), FIRST_FRAME_SLICE):
-                    yield sliced[idx : idx + FIRST_FRAME_SLICE]
-                return
+        current_part_start = 1
+        remaining_bytes = content_length
+        while current_part_start <= part_count:
+            abs_idx = offset_chunks + current_part_start - 1
+            cached_raw = await cache.get(f"chunk_{file_id}_{abs_idx}")
+            if cached_raw is None:
+                break
+            sliced = _slice_chunk(cached_raw, current_part_start, part_count, first_part_cut, last_part_cut)
+            if len(sliced) > remaining_bytes:
+                sliced = sliced[:remaining_bytes]
+            for idx in range(0, len(sliced), FIRST_FRAME_SLICE):
+                if request is not None and await request.is_disconnected():
+                    return
+                yield sliced[idx : idx + FIRST_FRAME_SLICE]
+            remaining_bytes -= len(sliced)
+            current_part_start += 1
+
+        if current_part_start > part_count or remaining_bytes <= 0:
+            return
 
         msg = await resolve_telegram_message(bot, file_doc)
         if not msg:
@@ -254,18 +293,19 @@ async def iter_12mbps_file_stream(
             active_msg = msg
             retried_refresh = False
             try:
-                current_part = 1
-                while True:
+                current_part = current_part_start
+                while current_part <= part_count:
                     try:
                         async for chunk in bot.stream_media(active_msg, offset=offset_chunks + current_part - 1, limit=part_count - current_part + 1):
                             if not chunk:
                                 break
                             abs_chunk_idx = offset_chunks + current_part - 1
-                            if abs_chunk_idx in (0, last_chunk_index) and len(chunk) <= CHUNK_SIZE:
-                                await cache.set(f"chunk_{file_id}_{abs_chunk_idx}", chunk, ttl=900)
+                            if len(chunk) <= CHUNK_SIZE:
+                                is_boundary = abs_chunk_idx in (0, 1, max(0, last_chunk_index - 1), last_chunk_index)
+                                await cache.set(f"chunk_{file_id}_{abs_chunk_idx}", chunk, ttl=900 if is_boundary else 300)
 
                             sliced = _slice_chunk(chunk, current_part, part_count, first_part_cut, last_part_cut)
-                            if current_part == 1 and len(sliced) > FIRST_FRAME_SLICE:
+                            if current_part == current_part_start and len(sliced) > FIRST_FRAME_SLICE:
                                 for sub_i in range(0, len(sliced), FIRST_FRAME_SLICE):
                                     await queue.put(sliced[sub_i : sub_i + FIRST_FRAME_SLICE])
                             else:
@@ -294,7 +334,7 @@ async def iter_12mbps_file_stream(
                 await queue.put(None)
 
         producer_task = asyncio.create_task(_producer())
-        remaining = content_length
+        remaining = remaining_bytes
         try:
             while remaining > 0:
                 if request is not None and await request.is_disconnected():
@@ -727,16 +767,24 @@ async def watch_page(request: Request, file_id: str):
     mime_type = file_doc.get("mime_type") or "video/mp4"
     file_path = file_doc.get("file_path")
     raw_meta = file_doc.get("metadata") or {}
-    if getattr(request.app.state, "bot", None) is not None and file_path and os.path.exists(file_path) and not raw_meta.get("duration") and not raw_meta.get("audio_streams") and not raw_meta.get("audio_tracks"):
-        async def _bg_probe_update(fid: str, fpath: str, meta_base: dict):
+    bot = getattr(request.app.state, "bot", None)
+    if bot is not None and (not raw_meta.get("duration") or (not raw_meta.get("audio_streams") and not raw_meta.get("audio_tracks"))):
+        async def _bg_probe_update(fid: str, fpath: Optional[str], meta_base: dict):
             try:
-                from plugins.core_services import get_detailed_mediainfo
-                probed = await get_detailed_mediainfo(fpath)
+                from plugins.core_services import get_detailed_mediainfo, probe_stream_url_mediainfo
+                probed = None
+                if fpath and os.path.exists(fpath):
+                    probed = await get_detailed_mediainfo(fpath)
+                else:
+                    local_stream = f"http://127.0.0.1:{Config.PORT}/stream/{fid}"
+                    probed = await probe_stream_url_mediainfo(local_stream, timeout=8.0)
                 if probed:
                     meta_base.update({
                         "duration": probed.get("duration") or meta_base.get("duration", 0),
-                        "audio_tracks": probed.get("audio_streams", []),
-                        "subtitle_tracks": probed.get("subtitle_streams", []),
+                        "audio_tracks": probed.get("audio_streams") or meta_base.get("audio_tracks", []),
+                        "subtitle_tracks": probed.get("subtitle_streams") or meta_base.get("subtitle_tracks", []),
+                        "language": probed.get("language") or meta_base.get("language", "Undetermined"),
+                        "audio_track": probed.get("audio_track") or meta_base.get("audio_track", "Default Audio"),
                     })
                     if probed.get("video_streams"):
                         meta_base["width"] = probed["video_streams"][0].get("width", meta_base.get("width", 0))
@@ -744,7 +792,9 @@ async def watch_page(request: Request, file_id: str):
                     await file_repo.update_file(fid, {"metadata": meta_base})
             except Exception:
                 pass
-        asyncio.create_task(_bg_probe_update(file_id, file_path, dict(raw_meta)))
+        if not await cache.get(f"probe_lock_{file_id}"):
+            await cache.set(f"probe_lock_{file_id}", True, ttl=30)
+            asyncio.create_task(_bg_probe_update(file_id, file_path, dict(raw_meta)))
     metadata = media_metadata_view(file_doc)
 
     base_url = str(request.base_url).rstrip("/")
@@ -1073,6 +1123,25 @@ async def api_ratelimit_status():
     from plugins.core_utils import rate_limit_manager
     return rate_limit_manager.get_stats()
 
+
+
+@api_router.get("/subtitles/{file_id}/{sub_idx}.vtt")
+async def api_subtitle_vtt(file_id: str, sub_idx: int):
+    cache_key = f"sub_vtt_{file_id}_{sub_idx}"
+    cached_vtt = await cache.get(cache_key)
+    if cached_vtt is not None:
+        return Response(content=cached_vtt, media_type="text/vtt; charset=utf-8")
+    file_doc = await FileRepository.get_file_by_id(file_id)
+    if not file_doc:
+        raise HTTPException(status_code=404, detail="Subtitle source not found")
+    fpath = file_doc.get("file_path")
+    source = fpath if (fpath and os.path.exists(fpath)) else f"http://127.0.0.1:{Config.PORT}/stream/{file_id}"
+    from plugins.core_services import extract_webvtt_subtitle
+    vtt = await extract_webvtt_subtitle(source, sub_index=sub_idx, timeout=15.0)
+    if not vtt:
+        vtt = "WEBVTT\n\n"
+    await cache.set(cache_key, vtt, ttl=900)
+    return Response(content=vtt, media_type="text/vtt; charset=utf-8")
 
 @api_router.get("/search")
 async def api_search_files(q: str = ""):

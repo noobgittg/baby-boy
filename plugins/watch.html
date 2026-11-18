@@ -4,80 +4,304 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark light">
-    <title>{{ file_name | default("Watch Media") }} — MMW Ultra Max Stream</title>
-    <link rel="preconnect" href="https://cdn.tailwindcss.com">
-    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-    <script defer src="https://cdn.tailwindcss.com"></script>
-    <script>
-        window.tailwind = window.tailwind || {};
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        brand: { 400: '#38bdf8', 500: '#0ea5e9', 600: '#0284c7' }
-                    }
-                }
-            }
-        };
-    </script>
-    {% if metadata.media_kind in ['audio', 'video'] %}
-    <script defer src="https://cdn.jsdelivr.net/npm/plyr@3.7.8/dist/plyr.polyfilled.js"></script>
-    {% endif %}
+    <title>{{ file_name | default("Watch Media") }} — MMW Sonic Ultra Stream</title>
     <style>
         :root {
-            --ultra-bg: #040711;
-            --ultra-card: rgba(15, 23, 42, 0.88);
-            --ultra-border: rgba(56, 189, 248, 0.24);
-            --ultra-accent: #38bdf8;
-            --plyr-color-main: #0ea5e9;
+            --bg: #040711;
+            --surface: rgba(13, 20, 40, 0.9);
+            --surface-2: rgba(20, 30, 56, 0.85);
+            --border: rgba(56, 189, 248, 0.24);
+            --accent: #38bdf8;
+            --accent-2: #818cf8;
+            --emerald: #10b981;
+            --amber: #f59e0b;
+            --danger: #ef4444;
+            --text: #f8fafc;
+            --muted: #94a3b8;
+            --header-bg: rgba(8, 13, 28, 0.92);
         }
-        * { box-sizing: border-box; }
-        .smallcap-ui { font-variant: small-caps; letter-spacing: 0.015em; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
-        .smallcap-ui code, .smallcap-ui input, .smallcap-ui button, .smallcap-ui select { font-variant: normal; }
-        html.dark body {
-            background-color: var(--ultra-bg);
+        html:not(.dark) {
+            --bg: #f1f5f9;
+            --surface: rgba(255, 255, 255, 0.95);
+            --surface-2: rgba(241, 245, 249, 0.95);
+            --border: rgba(14, 165, 233, 0.28);
+            --text: #0f172a;
+            --muted: #475569;
+            --header-bg: rgba(255, 255, 255, 0.94);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: var(--bg);
             background-image:
                 radial-gradient(at 10% 10%, rgba(56, 189, 248, 0.14) 0px, transparent 50%),
                 radial-gradient(at 90% 85%, rgba(168, 85, 247, 0.12) 0px, transparent 50%);
+            color: var(--text);
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            line-height: 1.45;
+        }
+        .smallcap-ui { font-variant: small-caps; letter-spacing: 0.015em; }
+        .smallcap-ui code, .smallcap-ui input, .smallcap-ui button, .smallcap-ui select { font-variant: normal; }
+        .hidden { display: none !important; }
+        .select-none { user-select: none; -webkit-user-select: none; }
+
+        .topbar {
+            width: 100%;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            background: var(--header-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .brand-wrap {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 0;
+            flex: 1;
+        }
+        .brand-logo {
+            width: 38px;
+            height: 38px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+            color: #040711;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            font-weight: 800;
+            font-size: 1.1rem;
+            flex-shrink: 0;
+            box-shadow: 0 6px 18px rgba(56, 189, 248, 0.35);
+        }
+        .title-wrap { min-width: 0; }
+        .file-title {
+            font-size: 0.96rem;
+            font-weight: 800;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .file-sub {
+            font-size: 0.75rem;
+            color: var(--emerald);
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .topbar-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .main-container {
+            width: 100%;
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 18px 14px 36px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            transition: max-width 0.2s ease;
+        }
+        .main-container.theatre-active { max-width: 100%; padding-left: 20px; padding-right: 20px; }
+
+        .player-box {
+            position: relative;
+            width: 100%;
+            background: #000;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 24px 50px -12px rgba(0, 0, 0, 0.8);
+        }
+        .player-box.is-video { aspect-ratio: 16 / 9; }
+        .player-box.is-audio { min-height: 120px; display: flex; align-items: center; padding: 24px 16px; }
+        .player-box video {
+            width: 100%;
+            height: 100%;
+            display: block;
+            object-fit: contain;
+            background: #000;
+        }
+        .player-box audio { width: 100%; }
+        .player-status-toast {
+            position: absolute;
+            left: 14px;
+            right: 14px;
+            bottom: 58px;
+            background: rgba(4, 7, 17, 0.9);
+            color: #f8fafc;
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            border-radius: 12px;
+            padding: 8px 14px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            pointer-events: none;
+            z-index: 20;
+        }
+        .fallback-box {
+            min-height: 220px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            padding: 28px 18px;
+            text-align: center;
             color: #f8fafc;
         }
-        html:not(.dark) body {
-            background-color: #f8fafc;
-            color: #0f172a;
-        }
+
         .ultra-card {
-            background: var(--ultra-card);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid var(--ultra-border);
+            background: var(--surface);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            border: 1px solid var(--border);
             border-radius: 20px;
-            box-shadow: 0 20px 45px -12px rgba(0, 0, 0, 0.7);
+            padding: 18px;
+            box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.55);
         }
-        html:not(.dark) .ultra-card {
-            background: rgba(255, 255, 255, 0.92);
-            border-color: rgba(14, 165, 233, 0.25);
-            box-shadow: 0 12px 30px -10px rgba(15, 23, 42, 0.12);
+        .card-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 14px;
         }
-        .ultra-pill-btn {
+        .card-title { font-size: 1rem; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+        .card-sub { font-size: 0.78rem; color: var(--muted); }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 9px 14px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-decoration: none;
             cursor: pointer;
-            transition: all 0.18s ease;
-            border: 1px solid rgba(56, 189, 248, 0.22);
+            border: 1px solid var(--border);
+            background: var(--surface-2);
+            color: var(--text);
+            transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
         }
-        .ultra-pill-btn:hover {
-            transform: translateY(-2px);
-            border-color: var(--ultra-accent);
+        .btn:hover { transform: translateY(-1px); border-color: var(--accent); }
+        .btn-primary {
+            background: linear-gradient(135deg, #38bdf8, #818cf8);
+            color: #040711;
+            border-color: transparent;
+            font-weight: 800;
         }
-        .theatre-active {
-            max-width: 100% !important;
+        .btn-emerald {
+            background: linear-gradient(135deg, #10b981, #34d399);
+            color: #040711;
+            border-color: transparent;
+            font-weight: 800;
+        }
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.18);
+            color: #fca5a5;
+            border-color: rgba(239, 68, 68, 0.45);
+        }
+        .btn-pill {
+            padding: 7px 11px;
+            font-size: 0.76rem;
+            border-radius: 10px;
+        }
+        .btn-pill.active {
+            background: rgba(56, 189, 248, 0.2);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .track-select {
+            background: var(--surface-2);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 7px 10px;
+            font-size: 0.76rem;
+            font-weight: 700;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .meta-pills {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .meta-item {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 10px 12px;
+            font-size: 0.78rem;
+        }
+        html:not(.dark) .meta-item { background: rgba(15, 23, 42, 0.04); border-color: rgba(15, 23, 42, 0.08); }
+        .meta-item .k { color: var(--muted); font-weight: 700; display: block; font-size: 0.7rem; }
+        .meta-item .v { color: var(--accent); font-weight: 800; word-break: break-word; }
+
+        .panel-box {
+            margin-top: 12px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: rgba(0, 0, 0, 0.28);
+            border: 1px solid rgba(56, 189, 248, 0.18);
+            font-size: 0.82rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        html:not(.dark) .panel-box { background: rgba(15, 23, 42, 0.04); }
+
+        .stream-progress-box {
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: rgba(0, 0, 0, 0.34);
+            border: 1px solid var(--border);
+            font-size: 0.78rem;
+        }
+        html:not(.dark) .stream-progress-box { background: rgba(15, 23, 42, 0.05); }
+        .progress-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
         }
         .stream-progress-track {
             width: 100%;
-            height: 9px;
+            height: 8px;
             background: rgba(255, 255, 255, 0.1);
             border-radius: 999px;
             overflow: hidden;
-            margin: 8px 0;
+            margin-top: 8px;
         }
         .stream-progress-fill {
             height: 100%;
@@ -85,10 +309,73 @@
             background: linear-gradient(90deg, #38bdf8, #10b981);
             transition: width 0.12s linear;
         }
-        video, audio {
-            width: 100%;
-            max-height: 78vh;
-            outline: none;
+
+        .players-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+        .player-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            text-decoration: none;
+            color: var(--text);
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.03);
+            transition: transform 0.15s ease, border-color 0.15s ease;
+        }
+        .player-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+        .player-card-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .player-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 11px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 0.85rem;
+            flex-shrink: 0;
+        }
+        .icon-playit { background: #f59e0b; color: #040711; }
+        .icon-mx { background: #3b82f6; color: #fff; }
+        .icon-vlc { background: #f97316; color: #fff; }
+        .icon-sp { background: #a855f7; color: #fff; }
+        .player-name { font-weight: 800; font-size: 0.86rem; }
+        .player-tag { font-size: 0.7rem; color: var(--muted); font-weight: 700; }
+
+        .footer-actions {
+            margin-top: 16px;
+            padding-top: 14px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .badge-pill {
+            padding: 5px 12px;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 800;
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--emerald);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+        }
+
+        @media (max-width: 900px) {
+            .players-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 560px) {
+            .players-grid { grid-template-columns: 1fr; }
+            .hide-sm { display: none; }
+            .topbar { padding: 10px 12px; }
+            .ultra-card { padding: 14px; }
         }
     </style>
     <script>
@@ -102,203 +389,219 @@
         })();
     </script>
 </head>
-<body class="smallcap-ui bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 min-h-screen flex flex-col transition-colors duration-200">
+<body class="smallcap-ui">
 
-    <header class="w-full border-b border-slate-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between bg-white/85 dark:bg-slate-900/85 backdrop-blur-md sticky top-0 z-50">
-        <div class="flex items-center space-x-3 overflow-hidden">
-            <a href="/" class="bg-brand-500 text-white p-2 rounded-xl text-sm shadow-lg shadow-brand-500/30 flex items-center justify-center w-9 h-9" title="Back to Dashboard">
-                <span>⚡</span>
-            </a>
-            <div>
-                <h1 class="font-bold text-sm sm:text-base truncate max-w-xs md:max-w-xl" title="{{ file_name }}">{{ file_name | default("Streaming Media") }}</h1>
-                <div class="flex items-center space-x-2 text-xs text-emerald-400 font-semibold">
-                    <span>⚡ ᴍᴍᴡ ᴜʟᴛʀᴀ ʜᴛᴛᴘ 206 ʀᴀɴɢᴇ sᴛʀᴇᴀᴍ</span>
+    <header class="topbar">
+        <div class="brand-wrap">
+            <a href="/" class="brand-logo" title="Back to Dashboard">⚡</a>
+            <div class="title-wrap">
+                <h1 class="file-title" title="{{ file_name }}">{{ file_name | default("Streaming Media") }}</h1>
+                <div class="file-sub">
+                    <span>⚡ ᴍᴍᴡ sᴏɴɪᴄ ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ</span>
                     <span>•</span>
                     <span>{{ file_size | default("") }}</span>
                 </div>
             </div>
         </div>
-        <div class="flex items-center space-x-2">
-            <button type="button" id="themeToggle" class="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition text-slate-600 dark:text-slate-300" aria-label="Toggle Theme">
+        <div class="topbar-actions">
+            <button type="button" id="themeToggle" class="btn btn-pill" aria-label="Toggle Theme">
                 <span class="dark:hidden">🌙</span>
                 <span class="hidden dark:inline">☀️</span>
             </button>
-            <button type="button" onclick="streamSaveToDisk()" class="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-sm font-bold transition shadow-lg">
+            <button type="button" onclick="streamSaveToDisk()" class="btn btn-emerald">
                 <span>🚀</span>
-                <span class="hidden sm:inline">Stream to Disk</span>
+                <span class="hide-sm">Stream to Disk</span>
             </button>
-            <a href="{{ download_url }}" class="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-bold transition shadow-lg shadow-brand-500/25">
+            <a href="{{ download_url }}" class="btn btn-primary">
                 <span>⬇️</span>
-                <span class="hidden sm:inline">Fast Download</span>
+                <span class="hide-sm">Fast Download</span>
             </a>
         </div>
     </header>
 
-    <main id="mainContainer" class="flex-1 flex flex-col items-center justify-start p-3 sm:p-6 max-w-5xl mx-auto w-full gap-6 transition-all duration-200">
-        
-        <div id="playerContainer" class="relative w-full {% if metadata.media_kind == 'audio' %}min-h-56{% else %}aspect-video{% endif %} bg-black rounded-2xl overflow-hidden shadow-2xl group border border-slate-200 dark:border-slate-800">
+    <main id="mainContainer" class="main-container">
+        <div id="playerContainer" class="player-box {% if metadata.media_kind == 'audio' %}is-audio{% elif metadata.media_kind == 'video' and metadata.browser_supported %}is-video{% endif %}">
             {% if metadata.media_kind == 'audio' %}
-            <audio id="mediaPlayer" class="w-full" playsinline crossorigin="anonymous" preload="metadata" controls>
+            <audio id="mediaPlayer" playsinline crossorigin="anonymous" preload="auto" controls>
                 <source src="{{ stream_url }}" type="{{ mime_type | default('audio/mpeg') }}">
             </audio>
             {% elif metadata.media_kind == 'video' and metadata.browser_supported %}
-            <video id="mediaPlayer" class="w-full h-full object-contain" playsinline crossorigin="anonymous" preload="metadata" fetchpriority="high" controls>
+            <video id="mediaPlayer" playsinline crossorigin="anonymous" preload="auto" fetchpriority="high" controls>
                 <source src="{{ stream_url }}" type="{{ mime_type | default('video/mp4') }}">
                 {% for track in metadata.subtitle_tracks %}{% if track.url %}<track kind="subtitles" src="{{ track.url }}" srclang="{{ track.lang_code | default('und') }}" label="{{ track.language | default('Subtitle ' ~ loop.index) }}">{% endif %}{% endfor %}
             </video>
             {% elif metadata.media_kind == 'code' %}
-            <div class="h-full min-h-56 flex flex-col items-center justify-center gap-3 p-8 text-center text-white">
-                <span class="text-4xl text-brand-400">💻</span>
-                <p class="font-semibold">⚡ ᴄᴏᴅᴇ ғɪʟᴇ ʀᴇᴀᴅʏ ғᴏʀ ʟɪᴠᴇ ɪɴsᴘᴇᴄᴛɪᴏɴ & ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ ({{ file_name }})</p>
-                <div class="flex flex-wrap justify-center gap-3">
-                    <a href="/code/{{ file_id }}" class="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-bold">💻 ᴏᴘᴇɴ ʟɪᴠᴇ ᴄᴏᴅᴇ ᴠɪᴇᴡᴇʀ</a>
-                    <a href="{{ download_url }}" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-sm font-bold border border-sky-500/30">⬇️ ғᴀsᴛ ᴅᴏᴡɴʟᴏᴀᴅ</a>
+            <div class="fallback-box">
+                <span style="font-size: 2.6rem;">💻</span>
+                <p style="font-weight: 700;">⚡ ᴄᴏᴅᴇ ғɪʟᴇ ʀᴇᴀᴅʏ ғᴏʀ ʟɪᴠᴇ ɪɴsᴘᴇᴄᴛɪᴏɴ & ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ ({{ file_name }})</p>
+                <div class="controls-row" style="justify-content: center;">
+                    <a href="/code/{{ file_id }}" class="btn btn-primary">💻 ᴏᴘᴇɴ ʟɪᴠᴇ ᴄᴏᴅᴇ ᴠɪᴇᴡᴇʀ</a>
+                    <a href="{{ download_url }}" class="btn">⬇️ ғᴀsᴛ ᴅᴏᴡɴʟᴏᴀᴅ</a>
                 </div>
             </div>
             {% else %}
-            <div class="h-full min-h-56 flex flex-col items-center justify-center gap-3 p-8 text-center text-white">
-                <span class="text-4xl text-brand-400">🎬</span>
-                <p class="font-semibold">ᴛʜɪs ғɪʟᴇ ɪs ᴏᴘᴛɪᴍɪᴢᴇᴅ ғᴏʀ ᴇxᴛᴇʀɴᴀʟ ʜᴡ+ ᴘʟᴀʏᴇʀs (ᴍᴋᴠ / ʜᴇᴠᴄ / ᴅᴜᴀʟ ᴀᴜᴅɪᴏ)</p>
-                <a href="{{ download_url }}" class="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-sm font-bold">⬇️ ᴅᴏᴡɴʟᴏᴀᴅ ᴏʀ ᴏᴘᴇɴ ɪɴ ᴘʟᴀʏɪᴛ / ᴍx / ᴠʟᴄ / s ᴘʟᴀʏᴇʀ</a>
+            <div class="fallback-box">
+                <span style="font-size: 2.6rem;">🎬</span>
+                <p style="font-weight: 700;">ᴛʜɪs ғɪʟᴇ ɪs ᴏᴘᴛɪᴍɪᴢᴇᴅ ғᴏʀ ᴇxᴛᴇʀɴᴀʟ ʜᴡ+ ᴘʟᴀʏᴇʀs (ᴍᴋᴠ / ʜᴇᴠᴄ / ᴅᴜᴀʟ ᴀᴜᴅɪᴏ)</p>
+                <a href="{{ download_url }}" class="btn btn-primary">⬇️ ᴅᴏᴡɴʟᴏᴀᴅ ᴏʀ ᴏᴘᴇɴ ɪɴ ᴘʟᴀʏɪᴛ / ᴍx / ᴠʟᴄ / s ᴘʟᴀʏᴇʀ</a>
             </div>
             {% endif %}
-            <div id="playerStatus" class="absolute left-3 right-3 bottom-3 hidden rounded-xl bg-slate-950/85 px-3 py-2 text-xs text-white border border-sky-500/30" role="status" aria-live="polite"></div>
+            <div id="playerStatus" class="player-status-toast hidden" role="status" aria-live="polite"></div>
         </div>
 
-        <section class="ultra-card w-full bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xl">
-            <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
-                <h2 class="text-base sm:text-lg font-bold">🎛️ ᴜʟᴛʀᴀ ᴘʟᴀʏʙᴀᴄᴋ & ᴍᴇᴅɪᴀ ᴍᴇᴛᴀᴅᴀᴛᴀ</h2>
-                <span class="text-xs text-slate-500 dark:text-slate-400">{{ metadata.media_kind | default('document') }} · {{ metadata.mime_type | default(mime_type) }}</span>
+        <section class="ultra-card">
+            <div class="card-head">
+                <h2 class="card-title">🎛️ <span>sᴏɴɪᴄ ᴜʟᴛʀᴀ ᴘʟᴀʏᴇʀ & ᴍᴇᴅɪᴀ ᴍᴇᴛᴀᴅᴀᴛᴀ</span></h2>
+                <span class="card-sub">{{ metadata.media_kind | default('document') }} · {{ metadata.mime_type | default(mime_type) }}</span>
             </div>
-            <div class="flex flex-wrap gap-2">
-                {% if metadata.caption %}<button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-brand-500/15 text-brand-400 border border-brand-500/30 text-xs font-bold" onclick="toggleMetadata('captionPanel')">📝 ᴇɴᴀʙʟᴇ / sᴇᴇ ᴄᴀᴘᴛɪᴏɴ</button>{% endif %}
-                {% if metadata.audio_track != 'Default Audio' or metadata.audio_tracks %}<button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-xs font-bold" onclick="toggleMetadata('audioPanel')">🎧 ᴇɴᴀʙʟᴇ / sᴇᴇ ᴀᴜᴅɪᴏ</button>{% endif %}
-                {% if metadata.language != 'Undetermined' or metadata.audio_tracks or metadata.subtitle_tracks %}<button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-violet-500/15 text-violet-400 border border-violet-500/30 text-xs font-bold" onclick="toggleMetadata('languagePanel')">🌐 ᴇɴᴀʙʟᴇ / sᴇᴇ ʟᴀɴɢᴜᴀɢᴇ</button>{% endif %}
+
+            <div class="meta-pills">
+                <div class="meta-item">
+                    <span class="k">🌐 ʟᴀɴɢᴜᴀɢᴇ</span>
+                    <span class="v" id="metaLanguage">{{ metadata.language | default('Undetermined') }}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="k">🎧 ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋ</span>
+                    <span class="v" id="metaAudioTrack">{{ metadata.audio_track | default('Default Audio') }}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="k">⏱️ ᴅᴜʀᴀᴛɪᴏɴ</span>
+                    <span class="v" id="metaDuration">{{ metadata.duration | default(0) }}s</span>
+                </div>
+                <div class="meta-item">
+                    <span class="k">💬 sᴜʙᴛɪᴛʟᴇs</span>
+                    <span class="v" id="metaSubsCount">{{ metadata.subtitle_tracks | length }} ᴛʀᴀᴄᴋ(s)</span>
+                </div>
             </div>
+
+            <div class="controls-row">
+                <button type="button" class="btn btn-pill" onclick="toggleMetadata('captionPanel')" id="btnCaptionToggle">📝 ᴄᴀᴘᴛɪᴏɴ</button>
+                <button type="button" class="btn btn-pill" onclick="toggleMetadata('audioPanel')" id="btnAudioToggle">🎧 ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋs</button>
+                <button type="button" class="btn btn-pill" onclick="toggleMetadata('languagePanel')" id="btnLangToggle">🌐 ʟᴀɴɢᴜᴀɢᴇ & sᴜʙs</button>
+                <select id="audioTrackSelect" class="track-select" onchange="switchAudioTrack(this.value)" title="Select Audio Track">
+                    <option value="">🎧 ᴀᴜᴅɪᴏ: {{ metadata.audio_track | default('Default') }}</option>
+                    {% for track in metadata.audio_tracks %}
+                    <option value="{{ loop.index0 }}">🎧 {{ track.language | default(track.lang | default('Track ' ~ loop.index)) }} ({{ track.codec | default('AUDIO') }} {{ track.channels | default(2) }}ch)</option>
+                    {% endfor %}
+                </select>
+                <select id="subtitleSelect" class="track-select" onchange="switchSubtitleTrack(this.value)" title="Select Subtitle Track">
+                    <option value="-1">💬 sᴜʙᴛɪᴛʟᴇs: ᴏғғ</option>
+                    {% for track in metadata.subtitle_tracks %}
+                    <option value="{{ loop.index0 }}">💬 {{ track.language | default(track.lang | default('Subtitle ' ~ loop.index)) }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
             {% if metadata.media_kind in ['audio', 'video'] %}
-            <div class="mt-4 flex flex-wrap items-center gap-2 text-xs">
-                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleLoop()">🔁 ʟᴏᴏᴘ</button>
-                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="cycleSpeed()" id="speedBtn">⏩ 1.0x</button>
-                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleTheatre()">🖥️ ᴛʜᴇᴀᴛʀᴇ</button>
-                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="captureFrame()">📸 ғʀᴀᴍᴇ</button>
-                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="togglePiP()">⛶ ᴘɪᴘ</button>
-                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleSleepTimer()">⏱️ sʟᴇᴇᴘ</button>
-                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="setABPoint()">⤴️ ᴀ–ʙ</button>
-                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="retryMedia()">↻ ʀᴇᴛʀʏ</button>
-                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleFit()">▣ ғɪᴛ</button>
-                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleMirror()">↔ ᴍɪʀʀᴏʀ</button>
-                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleWakeLock()">☀ ᴡᴀᴋᴇ</button>
-                <button type="button" class="ultra-pill-btn px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800" onclick="toggleScreenLock()">⌧ ʟᴏᴄᴋ</button>
-                <span id="networkState" class="px-3 py-2 text-slate-500 dark:text-slate-400">ᴄʜᴇᴄᴋɪɴɢ ɴᴇᴛᴡᴏʀᴋ…</span>
+            <div class="controls-row">
+                <button type="button" class="btn btn-pill" onclick="togglePlayPause()" id="playPauseBtn">⏯️ ᴘʟᴀʏ / ᴘᴀᴜsᴇ</button>
+                <button type="button" class="btn btn-pill" onclick="seekBy(-10)">⏪ -10s</button>
+                <button type="button" class="btn btn-pill" onclick="seekBy(10)">⏩ +10s</button>
+                <button type="button" class="btn btn-pill" onclick="seekBy(30)">⏭️ +30s</button>
+                <button type="button" class="btn btn-pill" onclick="cycleSpeed()" id="speedBtn">⚡ 1.0x</button>
+                <button type="button" class="btn btn-pill" onclick="cycleAudioBoost()" id="boostBtn">🔊 100%</button>
+                <button type="button" class="btn btn-pill" onclick="toggleSubtitlesQuick()" id="ccBtn">💬 ᴄᴄ</button>
+                <button type="button" class="btn btn-pill" onclick="toggleLoop()" id="loopBtn">🔁 ʟᴏᴏᴘ</button>
+                <button type="button" class="btn btn-pill" onclick="setABPoint()" id="abBtn">⤴️ ᴀ–ʙ</button>
+                <button type="button" class="btn btn-pill" onclick="toggleTheatre()" id="theatreBtn">🖥️ ᴛʜᴇᴀᴛʀᴇ</button>
+                <button type="button" class="btn btn-pill" onclick="toggleFit()" id="fitBtn">▣ ғɪᴛ</button>
+                <button type="button" class="btn btn-pill" onclick="toggleMirror()" id="mirrorBtn">↔ ᴍɪʀʀᴏʀ</button>
+                <button type="button" class="btn btn-pill" onclick="captureFrame()">📸 ғʀᴀᴍᴇ</button>
+                <button type="button" class="btn btn-pill" onclick="togglePiP()">⛶ ᴘɪᴘ</button>
+                <button type="button" class="btn btn-pill" onclick="toggleSleepTimer()">⏱️ sʟᴇᴇᴘ</button>
+                <button type="button" class="btn btn-pill" onclick="toggleWakeLock()">☀ ᴡᴀᴋᴇ</button>
+                <button type="button" class="btn btn-pill" onclick="toggleScreenLock()">⌧ ʟᴏᴄᴋ</button>
+                <button type="button" class="btn btn-pill" onclick="retryMedia()">↻ ʀᴇᴛʀʏ</button>
+                <span id="networkState" class="card-sub" style="padding: 4px 8px;">🟢 ᴏɴʟɪɴᴇ</span>
             </div>
             {% endif %}
-            <div class="mt-4 p-3.5 rounded-xl bg-slate-100/80 dark:bg-slate-950/65 border border-sky-500/20 text-xs">
-                <div class="flex items-center justify-between flex-wrap gap-2">
-                    <span id="watchStreamStatus" class="font-bold text-sky-400">⚡ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ɪᴅʟᴇ (ʀᴇᴀᴅʏ)</span>
-                    <div class="flex items-center gap-2">
-                        <span id="watchStreamStats" class="font-mono text-slate-400">0% • 0 B/s</span>
-                        <button type="button" id="cancelWatchStreamBtn" onclick="cancelWatchStream()" class="hidden px-2.5 py-1 rounded-lg bg-red-500/20 text-red-400 border border-red-500/40 font-bold">🛑 ᴄᴀɴᴄᴇʟ</button>
+
+            <div class="stream-progress-box">
+                <div class="progress-top">
+                    <span id="watchStreamStatus" style="font-weight: 800; color: var(--accent);">⚡ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ɪᴅʟᴇ (sᴏɴɪᴄ ʜᴛᴛᴘ 206 ʀᴇᴀᴅʏ)</span>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span id="watchStreamStats" style="font-family: ui-monospace, monospace; color: var(--muted);">0% • 0 B/s</span>
+                        <button type="button" id="cancelWatchStreamBtn" onclick="cancelWatchStream()" class="btn btn-pill btn-danger hidden">🛑 ᴄᴀɴᴄᴇʟ</button>
                     </div>
                 </div>
                 <div class="stream-progress-track">
                     <div id="watchStreamBar" class="stream-progress-fill"></div>
                 </div>
             </div>
-            {% if metadata.caption %}<div id="captionPanel" class="hidden mt-3 p-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-sm whitespace-pre-wrap">{{ metadata.caption }}</div>{% endif %}
-            {% if metadata.audio_track != 'Default Audio' or metadata.audio_tracks %}<div id="audioPanel" class="hidden mt-3 p-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-sm"><strong>🎧 ᴀᴜᴅɪᴏ:</strong> {{ metadata.audio_track }}{% for track in metadata.audio_tracks %}<div class="mt-1">• {{ track.title | default('Track ' ~ loop.index) }} · {{ track.language | default(track.lang | default('Undetermined')) }} · {{ track.codec | default('unknown') }} · {{ track.channels | default('') }}ch</div>{% endfor %}</div>{% endif %}
-            {% if metadata.language != 'Undetermined' or metadata.audio_tracks or metadata.subtitle_tracks %}<div id="languagePanel" class="hidden mt-3 p-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-sm"><strong>🌐 ʟᴀɴɢᴜᴀɢᴇ:</strong> {{ metadata.language }}{% for track in metadata.subtitle_tracks %}<div class="mt-1">• ᴄᴀᴘᴛɪᴏɴ / sᴜʙᴛɪᴛʟᴇ: {{ track.title | default('Subtitle ' ~ loop.index) }} · {{ track.language | default(track.lang | default('Undetermined')) }}</div>{% endfor %}</div>{% endif %}
+
+            <div id="captionPanel" class="panel-box hidden">{{ metadata.caption | default('No custom caption attached to this media.') }}</div>
+            <div id="audioPanel" class="panel-box hidden"><strong>🎧 ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋs ({{ metadata.audio_track }}):</strong>{% if metadata.audio_tracks %}{% for track in metadata.audio_tracks %}
+• Track {{ loop.index }}: {{ track.language | default(track.lang | default('Undetermined')) }} · {{ track.codec | default('AUDIO') }} · {{ track.channels | default(2) }}ch ({{ track.channel_layout | default('stereo') }}){% endfor %}{% else %}
+• Default Audio Stream{% endif %}</div>
+            <div id="languagePanel" class="panel-box hidden"><strong>🌐 ʟᴀɴɢᴜᴀɢᴇ:</strong> {{ metadata.language }}
+<strong>💬 sᴜʙᴛɪᴛʟᴇs:</strong>{% if metadata.subtitle_tracks %}{% for track in metadata.subtitle_tracks %}
+• Subtitle {{ loop.index }}: {{ track.language | default(track.lang | default('Undetermined')) }} ({{ track.codec | default('SUB') }}){% endfor %}{% else %}
+• No embedded subtitle tracks detected{% endif %}</div>
         </section>
 
-        <section class="ultra-card w-full bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xl">
-            <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <section class="ultra-card">
+            <div class="card-head">
                 <div>
-                    <h2 class="text-base sm:text-lg font-bold flex items-center gap-2">
-                        <span>📱</span>
-                        <span>ᴘʟᴀʏ ɪɴ 4 ᴇxᴛᴇʀɴᴀʟ ᴘʟᴀʏᴇʀs ᴏɴʟʏ</span>
-                    </h2>
-                    <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        ⚡ ᴅɪʀᴇᴄᴛ ʜᴛᴛᴘ 206 ʀᴀɴɢᴇ sᴛʀᴇᴀᴍɪɴɢ — ᴍᴋᴠ / ᴍᴘ4 / ʜᴇᴠᴄ / ᴅᴜᴀʟ ᴀᴜᴅɪᴏ
-                    </p>
+                    <h2 class="card-title">📱 <span>ᴘʟᴀʏ ɪɴ 4 ᴇxᴛᴇʀɴᴀʟ ᴘʟᴀʏᴇʀs ᴏɴʟʏ</span></h2>
+                    <p class="card-sub">⚡ ᴅɪʀᴇᴄᴛ ʜᴛᴛᴘ 206 ʀᴀɴɢᴇ sᴛʀᴇᴀᴍɪɴɢ — ᴍᴋᴠ / ᴍᴘ4 / ʜᴇᴠᴄ / ᴅᴜᴀʟ ᴀᴜᴅɪᴏ</p>
                 </div>
-                <span class="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                    🚀 ᴜʟᴛʀᴀ ʀᴀɴɢᴇ ʀᴇᴀᴅʏ
-                </span>
+                <span class="badge-pill">🚀 ᴜʟᴛʀᴀ ʀᴀɴɢᴇ ʀᴇᴀᴅʏ</span>
             </div>
 
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <a href="{{ player_links.playit if player_links else ('playit://playerv2/video?url=' ~ stream_url) }}" onclick="return openExternalPlayer(event, 'playit')"
-                   class="flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-amber-500/15 to-orange-500/15 hover:from-amber-500/25 hover:to-orange-500/25 border border-amber-500/30 transition group">
-                    <div class="flex items-center space-x-3">
-                        <span class="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-extrabold text-lg shadow">
-                            ▶
-                        </span>
+            <div class="players-grid">
+                <a href="{{ player_links.playit if player_links else ('playit://playerv2/video?url=' ~ stream_url) }}" onclick="return openExternalPlayer(event, 'playit')" class="player-card">
+                    <div class="player-card-left">
+                        <span class="player-icon icon-playit">▶</span>
                         <div>
-                            <div class="font-bold text-sm">1. PLAYit</div>
-                            <div class="text-[11px] text-amber-400 font-medium">⚡ ʀᴀɴɢᴇ ᴘʟᴀʏᴇʀ</div>
+                            <div class="player-name">1. PLAYit</div>
+                            <div class="player-tag">⚡ ʀᴀɴɢᴇ ᴘʟᴀʏᴇʀ</div>
                         </div>
                     </div>
-                    <span class="text-xs text-amber-400 group-hover:translate-x-0.5 transition">↗</span>
+                    <span>↗</span>
                 </a>
 
-                <a href="{{ player_links.mxplayer if player_links else '#' }}" onclick="return openExternalPlayer(event, 'mxplayer')"
-                   class="flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-blue-500/15 to-indigo-500/15 hover:from-blue-500/25 hover:to-indigo-500/25 border border-blue-500/30 transition group">
-                    <div class="flex items-center space-x-3">
-                        <span class="w-10 h-10 rounded-xl bg-blue-500 text-white flex items-center justify-center font-extrabold text-sm shadow">
-                            MX
-                        </span>
+                <a href="{{ player_links.mxplayer if player_links else '#' }}" onclick="return openExternalPlayer(event, 'mxplayer')" class="player-card">
+                    <div class="player-card-left">
+                        <span class="player-icon icon-mx">MX</span>
                         <div>
-                            <div class="font-bold text-sm">2. MX Player</div>
-                            <div class="text-[11px] text-blue-400 font-medium">🎬 ʜᴡ+ ᴅᴇᴄᴏᴅᴇʀ</div>
+                            <div class="player-name">2. MX Player</div>
+                            <div class="player-tag">🎬 ʜᴡ+ ᴅᴇᴄᴏᴅᴇʀ</div>
                         </div>
                     </div>
-                    <span class="text-xs text-blue-400 group-hover:translate-x-0.5 transition">↗</span>
+                    <span>↗</span>
                 </a>
 
-                <a href="{{ player_links.vlc_intent if player_links else '#' }}" onclick="return openExternalPlayer(event, 'vlc')"
-                   class="flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-orange-500/15 to-red-500/15 hover:from-orange-500/25 hover:to-red-500/25 border border-orange-500/30 transition group">
-                    <div class="flex items-center space-x-3">
-                        <span class="w-10 h-10 rounded-xl bg-orange-500 text-white flex items-center justify-center font-extrabold text-sm shadow">
-                            VLC
-                        </span>
+                <a href="{{ player_links.vlc_intent if player_links else '#' }}" onclick="return openExternalPlayer(event, 'vlc')" class="player-card">
+                    <div class="player-card-left">
+                        <span class="player-icon icon-vlc">VLC</span>
                         <div>
-                            <div class="font-bold text-sm">3. VLC Player</div>
-                            <div class="text-[11px] text-orange-400 font-medium">🔊 ᴀʟʟ ᴀᴜᴅɪᴏ / sᴜʙs</div>
+                            <div class="player-name">3. VLC Player</div>
+                            <div class="player-tag">🔊 ᴀʟʟ ᴀᴜᴅɪᴏ / sᴜʙs</div>
                         </div>
                     </div>
-                    <span class="text-xs text-orange-400 group-hover:translate-x-0.5 transition">↗</span>
+                    <span>↗</span>
                 </a>
 
-                <a href="{{ player_links.splayer if player_links else '#' }}" onclick="return openExternalPlayer(event, 'splayer')"
-                   class="flex items-center justify-between p-3.5 rounded-xl bg-gradient-to-r from-purple-500/15 to-pink-500/15 hover:from-purple-500/25 hover:to-pink-500/25 border border-purple-500/30 transition group">
-                    <div class="flex items-center space-x-3">
-                        <span class="w-10 h-10 rounded-xl bg-purple-500 text-white flex items-center justify-center font-extrabold text-sm shadow">
-                            SP
-                        </span>
+                <a href="{{ player_links.splayer if player_links else '#' }}" onclick="return openExternalPlayer(event, 'splayer')" class="player-card">
+                    <div class="player-card-left">
+                        <span class="player-icon icon-sp">SP</span>
                         <div>
-                            <div class="font-bold text-sm">4. S Player</div>
-                            <div class="text-[11px] text-purple-400 font-medium">🚀 ᴜʟᴛʀᴀ sᴍᴏᴏᴛʜ</div>
+                            <div class="player-name">4. S Player</div>
+                            <div class="player-tag">🚀 ᴜʟᴛʀᴀ sᴍᴏᴏᴛʜ</div>
                         </div>
                     </div>
-                    <span class="text-xs text-purple-400 group-hover:translate-x-0.5 transition">↗</span>
+                    <span>↗</span>
                 </a>
             </div>
 
-            <div class="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
-                <div class="flex flex-wrap gap-2">
-                    <button type="button" onclick="streamSaveToDisk()" class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-xs font-bold transition flex items-center gap-2">
-                        <span>🚀 sᴛʀᴇᴀᴍ sᴀᴠᴇ ᴛᴏ ᴅɪsᴋ</span>
-                    </button>
-                    <a href="{{ download_url }}" class="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold transition flex items-center gap-2">
-                        <span>⬇️ ᴅɪʀᴇᴄᴛ ʀᴀɴɢᴇ ᴅᴏᴡɴʟᴏᴀᴅ</span>
-                    </a>
-                    <button type="button" onclick="copyStreamUrl('{{ stream_url }}')" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold transition flex items-center gap-2">
-                        <span id="copyBtnText">📋 ᴄᴏᴘʏ sᴛʀᴇᴀᴍ ᴜʀʟ</span>
-                    </button>
-                    <a href="{{ dl_page_url | default(download_url) }}" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold transition flex items-center gap-2">
-                        <span>📦 ᴅᴏᴡɴʟᴏᴀᴅ ʜᴜʙ</span>
-                    </a>
+            <div class="footer-actions">
+                <div class="controls-row" style="margin-top: 0;">
+                    <button type="button" onclick="streamSaveToDisk()" class="btn btn-emerald">🚀 sᴛʀᴇᴀᴍ sᴀᴠᴇ ᴛᴏ ᴅɪsᴋ</button>
+                    <a href="{{ download_url }}" class="btn btn-primary">⬇️ ᴅɪʀᴇᴄᴛ ʀᴀɴɢᴇ ᴅᴏᴡɴʟᴏᴀᴅ</a>
+                    <button type="button" onclick="copyStreamUrl('{{ stream_url }}')" class="btn"><span id="copyBtnText">📋 ᴄᴏᴘʏ sᴛʀᴇᴀᴍ ᴜʀʟ</span></button>
+                    <a href="{{ dl_page_url | default(download_url) }}" class="btn">📦 ᴅᴏᴡɴʟᴏᴀᴅ ʜᴜʙ</a>
                 </div>
-                <a href="{{ watermark_url | default('https://t.me/mallumovieworldmain2') }}" target="_blank" class="text-xs text-brand-400 hover:underline font-semibold">
+                <a href="{{ watermark_url | default('https://t.me/mallumovieworldmain2') }}" target="_blank" style="color: var(--accent); font-size: 0.78rem; font-weight: 700; text-decoration: none;">
                     📢 {{ watermark | default('t.me/mallumovieworldmain2') }}
                 </a>
             </div>
@@ -316,16 +619,25 @@
             const watchStreamBar = document.getElementById('watchStreamBar');
             const cancelWatchStreamBtn = document.getElementById('cancelWatchStreamBtn');
             const storageKey = `mmw-playback:${location.pathname}`;
-            const speeds = [0.75, 1.0, 1.25, 1.5, 2.0];
+            const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
+            const boosts = [1.0, 1.5, 2.0, 3.0];
+            const fits = ['contain', 'cover', 'fill'];
+            const FILE_ID = "{{ file_id | default('') }}";
             const STREAM_URL = "{{ stream_url }}";
             const DOWNLOAD_URL = "{{ download_url }}";
             const FILE_NAME = "{{ file_name | default('stream_media.mp4') }}";
             const EXPECTED_BYTES = Number("{{ file_size_bytes | default(0) }}") || 0;
-            let speedIdx = 1;
-            let player = null;
+            let speedIdx = 2;
+            let boostIdx = 0;
+            let fitIdx = 0;
+            let audioCtx = null;
+            let gainNode = null;
             let sleepTimer = null;
             let statusTimer = null;
             let watchAbortController = null;
+            let abStart = null;
+            let abEnd = null;
+            let wakeLock = null;
 
             function formatBytes(bytes) {
                 const v = Number(bytes) || 0;
@@ -342,6 +654,100 @@
                 clearTimeout(statusTimer);
                 if (!persistent) statusTimer = setTimeout(() => status.classList.add('hidden'), 2600);
             }
+
+            window.toggleMetadata = (id) => {
+                const panel = document.getElementById(id);
+                if (panel) panel.classList.toggle('hidden');
+            };
+
+            window.togglePlayPause = () => {
+                if (!media) return;
+                if (media.paused) media.play().catch(() => {});
+                else media.pause();
+            };
+
+            window.seekBy = (delta) => {
+                if (!media) return;
+                media.currentTime = Math.max(0, (media.currentTime || 0) + delta);
+                notify(`⏩ Seek: ${Math.round(media.currentTime)}s`);
+            };
+
+            window.cycleSpeed = () => {
+                if (!media) return;
+                speedIdx = (speedIdx + 1) % speeds.length;
+                const sp = speeds[speedIdx];
+                media.playbackRate = sp;
+                const btn = document.getElementById('speedBtn');
+                if (btn) btn.textContent = `⚡ ${sp}x`;
+                notify(`⚡ Speed: ${sp}x`);
+            };
+
+            window.cycleAudioBoost = () => {
+                if (!media) return;
+                boostIdx = (boostIdx + 1) % boosts.length;
+                const lvl = boosts[boostIdx];
+                try {
+                    if (!audioCtx && (window.AudioContext || window.webkitAudioContext)) {
+                        const Ctx = window.AudioContext || window.webkitAudioContext;
+                        audioCtx = new Ctx();
+                        const src = audioCtx.createMediaElementSource(media);
+                        gainNode = audioCtx.createGain();
+                        src.connect(gainNode);
+                        gainNode.connect(audioCtx.destination);
+                    }
+                    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+                    if (gainNode) gainNode.gain.value = lvl;
+                } catch (_) {}
+                const btn = document.getElementById('boostBtn');
+                if (btn) btn.textContent = `🔊 ${Math.round(lvl * 100)}%`;
+                notify(`🔊 Volume Boost: ${Math.round(lvl * 100)}%`);
+            };
+
+            window.switchAudioTrack = (val) => {
+                if (!media || val === '') return;
+                const idx = Number(val);
+                if (media.audioTracks && media.audioTracks.length > 0) {
+                    for (let i = 0; i < media.audioTracks.length; i++) {
+                        media.audioTracks[i].enabled = (i === idx);
+                    }
+                    notify(`🎧 Switched to Audio Track #${idx + 1}`);
+                } else {
+                    notify(`🎧 Track #${idx + 1} selected (Browser exposes native multi-audio in Safari/Edge or use VLC/MX Player)`);
+                }
+            };
+
+            window.switchSubtitleTrack = (val) => {
+                if (!media || !media.textTracks) return;
+                const idx = Number(val);
+                for (let i = 0; i < media.textTracks.length; i++) {
+                    media.textTracks[i].mode = (i === idx) ? 'showing' : 'disabled';
+                }
+                const ccBtn = document.getElementById('ccBtn');
+                if (ccBtn) ccBtn.classList.toggle('active', idx >= 0);
+                notify(idx >= 0 ? `💬 Subtitles ON (Track #${idx + 1})` : '💬 Subtitles OFF');
+            };
+
+            window.toggleSubtitlesQuick = () => {
+                const sel = document.getElementById('subtitleSelect');
+                if (!media || !media.textTracks || media.textTracks.length === 0) {
+                    return window.toggleMetadata('languagePanel');
+                }
+                let activeIdx = -1;
+                for (let i = 0; i < media.textTracks.length; i++) {
+                    if (media.textTracks[i].mode === 'showing') activeIdx = i;
+                }
+                const nextIdx = (activeIdx + 1 < media.textTracks.length) ? activeIdx + 1 : -1;
+                if (sel) sel.value = String(nextIdx);
+                window.switchSubtitleTrack(String(nextIdx));
+            };
+
+            window.toggleTheatre = () => {
+                const mc = document.getElementById('mainContainer');
+                if (mc) {
+                    mc.classList.toggle('theatre-active');
+                    notify(mc.classList.contains('theatre-active') ? '🖥️ Theatre Mode ON' : '🖥️ Theatre Mode OFF');
+                }
+            };
 
             window.cancelWatchStream = () => {
                 if (watchAbortController) watchAbortController.abort();
@@ -366,7 +772,7 @@
                             }
                         }
                     }
-                    if (watchStreamStatus) watchStreamStatus.textContent = '⚡ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴄᴏɴɴᴇᴄᴛɪɴɢ ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ…';
+                    if (watchStreamStatus) watchStreamStatus.textContent = '⚡ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴄᴏɴɴᴇᴄᴛɪɴɢ sᴏɴɪᴄ ʜᴛᴛᴘ 206 sᴛʀᴇᴀᴍ…';
                     const resp = await fetch(DOWNLOAD_URL || STREAM_URL, { signal: watchAbortController.signal });
                     if (!resp.ok && resp.status !== 206) throw new Error('HTTP ' + resp.status);
                     const total = Number(resp.headers.get('Content-Length')) || EXPECTED_BYTES;
@@ -417,29 +823,6 @@
                 }
             };
 
-            window.toggleMetadata = (id) => {
-                const panel = document.getElementById(id);
-                if (panel) panel.classList.toggle('hidden');
-            };
-
-            window.cycleSpeed = () => {
-                if (!media) return;
-                speedIdx = (speedIdx + 1) % speeds.length;
-                const sp = speeds[speedIdx];
-                media.playbackRate = sp;
-                const btn = document.getElementById('speedBtn');
-                if (btn) btn.textContent = `⏩ ${sp}x`;
-                notify(`⚡ Playback Speed: ${sp}x`);
-            };
-
-            window.toggleTheatre = () => {
-                const mc = document.getElementById('mainContainer');
-                if (mc) {
-                    mc.classList.toggle('theatre-active');
-                    notify(mc.classList.contains('theatre-active') ? '🖥️ Theatre Mode ON' : '🖥️ Theatre Mode OFF');
-                }
-            };
-
             const metadataHash = window.location.hash.replace('#', '');
             if (['captionPanel', 'audioPanel', 'languagePanel'].includes(metadataHash)) window.toggleMetadata(metadataHash);
 
@@ -455,7 +838,7 @@
                     else { const input = document.createElement('textarea'); input.value = value; input.style.position = 'fixed'; input.style.opacity = '0'; document.body.appendChild(input); input.select(); document.execCommand('copy'); input.remove(); }
                     const el = document.getElementById('copyBtnText');
                     if (el) { el.textContent = '✅ ᴄᴏᴘɪᴇᴅ'; setTimeout(() => { el.textContent = '📋 ᴄᴏᴘʏ sᴛʀᴇᴀᴍ ᴜʀʟ'; }, 2500); }
-                } catch (_) { notify('ᴄᴏᴘʏ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ — ᴜʀʟ ɪs ʀᴇᴀᴅʏ ᴛᴏ sᴇʟᴇᴄᴛ'); }
+                } catch (_) { notify('ᴄᴏᴘʏ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); }
             }
             window.copyStreamUrl = copyText;
 
@@ -504,7 +887,11 @@
                 try {
                     const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
                     if (Number.isFinite(saved.volume)) media.volume = Math.max(0, Math.min(1, saved.volume));
-                    if (Number.isFinite(saved.position) && saved.position > 2) media.addEventListener('loadedmetadata', () => { if (saved.position < media.duration) media.currentTime = saved.position; }, { once: true });
+                    if (Number.isFinite(saved.position) && saved.position > 2) {
+                        media.addEventListener('loadedmetadata', () => {
+                            if (saved.position < media.duration) media.currentTime = saved.position;
+                        }, { once: true });
+                    }
                 } catch (_) {}
             }
 
@@ -518,24 +905,58 @@
                 }
             }
 
-            function initPlayer() {
-                if (!media) return;
-                if (media.dataset.ready && !(window.Plyr && player === media)) return;
-                if (media.dataset.ready && window.Plyr && player === media) {
-                    try { player = new Plyr(media, { ratio: '16:9', seekTime: 10, keyboard: { focused: true, global: true }, tooltips: { controls: true }, settings: ['captions', 'quality', 'speed', 'loop'] }); } catch (_) {}
-                    return;
-                }
-                media.dataset.ready = '1';
+            async function refreshLiveMetadata() {
+                if (!FILE_ID) return;
+                try {
+                    const r = await fetch('/api/info/' + encodeURIComponent(FILE_ID), { cache: 'no-store' });
+                    if (!r.ok) return;
+                    const data = await r.json();
+                    const m = data.metadata || {};
+                    const langEl = document.getElementById('metaLanguage');
+                    const audEl = document.getElementById('metaAudioTrack');
+                    const durEl = document.getElementById('metaDuration');
+                    const subEl = document.getElementById('metaSubsCount');
+                    if (langEl && m.language && m.language !== 'Undetermined') langEl.textContent = m.language;
+                    if (audEl && m.audio_track && m.audio_track !== 'Default Audio') audEl.textContent = m.audio_track;
+                    if (durEl && m.duration > 0) durEl.textContent = m.duration + 's';
+                    if (subEl && Array.isArray(m.subtitle_tracks)) subEl.textContent = m.subtitle_tracks.length + ' ᴛʀᴀᴄᴋ(s)';
+
+                    const audSelect = document.getElementById('audioTrackSelect');
+                    if (audSelect && Array.isArray(m.audio_tracks) && m.audio_tracks.length > 0 && audSelect.options.length <= 1) {
+                        m.audio_tracks.forEach((tr, i) => {
+                            const opt = document.createElement('option');
+                            opt.value = String(i);
+                            opt.textContent = `🎧 ${tr.language || tr.lang || 'Track ' + (i + 1)} (${tr.codec || 'AUDIO'} ${tr.channels || 2}ch)`;
+                            audSelect.appendChild(opt);
+                        });
+                    }
+                    const subSelect = document.getElementById('subtitleSelect');
+                    if (subSelect && Array.isArray(m.subtitle_tracks) && m.subtitle_tracks.length > 0 && subSelect.options.length <= 1) {
+                        m.subtitle_tracks.forEach((tr, i) => {
+                            const opt = document.createElement('option');
+                            opt.value = String(i);
+                            opt.textContent = `💬 ${tr.language || tr.lang || 'Subtitle ' + (i + 1)}`;
+                            subSelect.appendChild(opt);
+                            if (media && tr.url) {
+                                const trackEl = document.createElement('track');
+                                trackEl.kind = 'subtitles';
+                                trackEl.src = tr.url;
+                                trackEl.srclang = tr.lang_code || 'und';
+                                trackEl.label = tr.language || tr.lang || ('Subtitle ' + (i + 1));
+                                media.appendChild(trackEl);
+                            }
+                        });
+                    }
+                } catch (_) {}
+            }
+
+            if (media) {
                 restoreState();
-                if (window.Plyr) {
-                    try { player = new Plyr(media, { ratio: '16:9', seekTime: 10, keyboard: { focused: true, global: true }, tooltips: { controls: true }, settings: ['captions', 'quality', 'speed', 'loop'] }); }
-                    catch (_) { player = media; notify('ᴘʟᴀʏᴇʀ ғᴀʟʟʙᴀᴄᴋ ᴇɴᴀʙʟᴇᴅ'); }
-                } else { player = media; }
                 media.addEventListener('timeupdate', saveState, { passive: true });
                 media.addEventListener('volumechange', saveState, { passive: true });
                 media.addEventListener('waiting', () => {
                     notify('⏳ ʙᴜғғᴇʀɪɴɢ…', true);
-                    if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '⏳ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ʙᴜғғᴇʀɪɴɢ ʀᴀɴɢᴇ…';
+                    if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '⏳ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ʙᴜғғᴇʀɪɴɢ sᴏɴɪᴄ ʀᴀɴɢᴇ…';
                 });
                 media.addEventListener('playing', () => {
                     if (status) status.classList.add('hidden');
@@ -548,34 +969,50 @@
                     if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '✅ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴘʟᴀʏʙᴀᴄᴋ ᴄᴏᴍᴘʟᴇᴛᴇᴅ';
                 });
                 media.addEventListener('error', () => {
-                    notify('⚠️ ᴛʜɪs ᴍᴇᴅɪᴀ ᴄᴏᴜʟᴅ ɴᴏᴛ ʙᴇ ᴘʟᴀʏᴇᴅ ɪɴ ʙʀᴏᴡsᴇʀ — ᴜsᴇ ᴘʟᴀʏɪᴛ / ᴍx / ᴠʟᴄ / s ᴘʟᴀʏᴇʀ ʙᴇʟᴏᴡ', true);
+                    notify('⚠️ ʙʀᴏᴡsᴇʀ ᴄᴏᴅᴇᴄ ᴜɴsᴜᴘᴘᴏʀᴛᴇᴅ — ᴜsᴇ ᴘʟᴀʏɪᴛ / ᴍx / ᴠʟᴄ / s ᴘʟᴀʏᴇʀ ʙᴇʟᴏᴡ', true);
                     if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '⚠️ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴜsᴇ ᴇxᴛᴇʀɴᴀʟ ᴘʟᴀʏᴇʀ';
                 });
                 media.addEventListener('loadedmetadata', () => {
-                    notify('✅ ᴜʟᴛʀᴀ ʀᴀɴɢᴇ sᴛʀᴇᴀᴍ ʀᴇᴀᴅʏ');
-                    if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '✅ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ʀᴀɴɢᴇ ʀᴇᴀᴅʏ';
+                    notify('✅ sᴏɴɪᴄ ʀᴀɴɢᴇ sᴛʀᴇᴀᴍ ʀᴇᴀᴅʏ');
+                    if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '✅ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: sᴏɴɪᴄ ʀᴀɴɢᴇ ʀᴇᴀᴅʏ';
+                    const durEl = document.getElementById('metaDuration');
+                    if (durEl && media.duration > 0) durEl.textContent = Math.round(media.duration) + 's';
+                });
+                media.addEventListener('timeupdate', () => {
+                    if (abStart !== null && abEnd !== null && media.currentTime >= abEnd) media.currentTime = abStart;
                 });
             }
 
-            window.toggleLoop = () => { if (!media) return; media.loop = !media.loop; notify(media.loop ? '🔁 ʟᴏᴏᴘ ᴇɴᴀʙʟᴇᴅ' : '⏹️ ʟᴏᴏᴘ ᴅɪsᴀʙʟᴇᴅ'); };
-            window.togglePiP = async () => { try { if (document.pictureInPictureElement) await document.exitPictureInPicture(); else if (media && document.pictureInPictureEnabled) await media.requestPictureInPicture(); else notify('ᴘɪᴘ ɴᴏᴛ sᴜᴘᴘᴏʀᴛᴇᴅ ɪɴ ᴛʜɪs ʙʀᴏᴡsᴇʀ'); } catch (_) { notify('ᴘɪᴘ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); } };
-            window.captureFrame = () => { if (!media || media.tagName !== 'VIDEO') return notify('ғʀᴀᴍᴇ ᴄᴀᴘᴛᴜʀᴇ ɪs ᴏɴʟʏ ᴀᴠᴀɪʟᴀʙʟᴇ ғᴏʀ ᴠɪᴅᴇᴏ'); try { const canvas = document.createElement('canvas'); canvas.width = media.videoWidth; canvas.height = media.videoHeight; canvas.getContext('2d').drawImage(media, 0, 0); const a = document.createElement('a'); a.href = canvas.toDataURL('image/jpeg', .9); a.download = 'mmw-frame.jpg'; a.click(); } catch (_) { notify('ғʀᴀᴍᴇ ᴄᴀᴘᴛᴜʀᴇ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); } };
+            window.toggleLoop = () => { if (!media) return; media.loop = !media.loop; notify(media.loop ? '🔁 ʟᴏᴏᴘ ᴏɴ' : '⏹️ ʟᴏᴏᴘ ᴏғғ'); };
+            window.togglePiP = async () => { try { if (document.pictureInPictureElement) await document.exitPictureInPicture(); else if (media && document.pictureInPictureEnabled) await media.requestPictureInPicture(); else notify('ᴘɪᴘ ɴᴏᴛ sᴜᴘᴘᴏʀᴛᴇᴅ'); } catch (_) { notify('ᴘɪᴘ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); } };
+            window.captureFrame = () => { if (!media || media.tagName !== 'VIDEO') return notify('ғʀᴀᴍᴇ ᴄᴀᴘᴛᴜʀᴇ ɪs ᴏɴʟʏ ғᴏʀ ᴠɪᴅᴇᴏ'); try { const canvas = document.createElement('canvas'); canvas.width = media.videoWidth; canvas.height = media.videoHeight; canvas.getContext('2d').drawImage(media, 0, 0); const a = document.createElement('a'); a.href = canvas.toDataURL('image/jpeg', 0.92); a.download = 'mmw-frame.jpg'; a.click(); } catch (_) { notify('ғʀᴀᴍᴇ ᴄᴀᴘᴛᴜʀᴇ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); } };
             window.toggleSleepTimer = () => { if (sleepTimer) { clearTimeout(sleepTimer); sleepTimer = null; return notify('⏱️ sʟᴇᴇᴘ ᴛɪᴍᴇʀ ᴄᴀɴᴄᴇʟʟᴇᴅ'); } const minutes = Number(window.prompt('Sleep timer minutes', '30')); if (Number.isFinite(minutes) && minutes > 0) { sleepTimer = setTimeout(() => { media?.pause(); notify('⏱️ sʟᴇᴇᴘ ᴛɪᴍᴇʀ ᴘᴀᴜsᴇᴅ ᴘʟᴀʏʙᴀᴄᴋ'); }, minutes * 60000); notify(`⏱️ sʟᴇᴇᴘ ɪɴ ${minutes} ᴍɪɴ`); } };
-            let abStart = null;
-            let abEnd = null;
-            let wakeLock = null;
-            window.setABPoint = () => { if (!media) return; if (abStart === null) { abStart = media.currentTime || 0; notify(`ᴀ–ʙ ᴀ sᴇᴛ: ${Math.round(abStart)}s`); } else if (abEnd === null) { abEnd = media.currentTime || 0; if (abEnd <= abStart) { abStart = null; abEnd = null; return notify('ᴀ–ʙ ʙ ᴍᴜsᴛ ʙᴇ ᴀғᴛᴇʀ ᴀ'); } notify(`ᴀ–ʙ ʟᴏᴏᴘ sᴇᴛ: ${Math.round(abStart)}s → ${Math.round(abEnd)}s`); } else { abStart = null; abEnd = null; notify('ᴀ–ʙ ʟᴏᴏᴘ ᴄʟᴇᴀʀᴇᴅ'); } };
+            window.setABPoint = () => { if (!media) return; if (abStart === null) { abStart = media.currentTime || 0; notify(`ᴀ–ʙ ᴀ sᴇᴛ: ${Math.round(abStart)}s`); } else if (abEnd === null) { abEnd = media.currentTime || 0; if (abEnd <= abStart) { abStart = null; abEnd = null; return notify('ᴀ–ʙ ʙ ᴍᴜsᴛ ʙᴇ ᴀғᴛᴇʀ ᴀ'); } notify(`ᴀ–ʙ ʟᴏᴏᴘ: ${Math.round(abStart)}s → ${Math.round(abEnd)}s`); } else { abStart = null; abEnd = null; notify('ᴀ–ʙ ʟᴏᴏᴘ ᴄʟᴇᴀʀᴇᴅ'); } };
             window.retryMedia = () => { if (!media) return; const position = media.currentTime || 0; media.load(); media.addEventListener('loadedmetadata', () => { media.currentTime = position; media.play().catch(() => {}); }, { once: true }); notify('↻ ʀᴇᴛʀʏɪɴɢ ᴍᴇᴅɪᴀ…'); };
-            window.toggleFit = () => { if (!media) return; media.classList.toggle('object-cover'); media.classList.toggle('object-contain'); notify('▣ ғɪᴛ ᴛᴏɢɢʟᴇᴅ'); };
+            window.toggleFit = () => { if (!media) return; fitIdx = (fitIdx + 1) % fits.length; media.style.objectFit = fits[fitIdx]; notify(`▣ ғɪᴛ: ${fits[fitIdx].toUpperCase()}`); };
             window.toggleMirror = () => { if (!media) return; media.style.transform = media.style.transform === 'scaleX(-1)' ? '' : 'scaleX(-1)'; notify('↔ ᴍɪʀʀᴏʀ ᴛᴏɢɢʟᴇᴅ'); };
             window.toggleWakeLock = async () => { try { if (wakeLock) { await wakeLock.release(); wakeLock = null; return notify('☀ ᴡᴀᴋᴇ ʟᴏᴄᴋ ᴏғғ'); } if (!('wakeLock' in navigator)) return notify('ᴡᴀᴋᴇ ʟᴏᴄᴋ ɴᴏᴛ sᴜᴘᴘᴏʀᴛᴇᴅ'); wakeLock = await navigator.wakeLock.request('screen'); notify('☀ ᴡᴀᴋᴇ ʟᴏᴄᴋ ᴏɴ'); } catch (_) { notify('ᴡᴀᴋᴇ ʟᴏᴄᴋ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); } };
-            window.toggleScreenLock = () => { document.body.classList.toggle('select-none'); notify(document.body.classList.contains('select-none') ? '⌧ ᴛᴏᴜᴄʜ sᴄʀᴇᴇɴ ʟᴏᴄᴋᴇᴅ' : '⌧ ᴛᴏᴜᴄʜ sᴄʀᴇᴇɴ ᴜɴʟᴏᴄᴋᴇᴅ'); };
-            if (media) media.addEventListener('timeupdate', () => { if (abStart !== null && abEnd !== null && media.currentTime >= abEnd) media.currentTime = abStart; });
-            document.addEventListener('keydown', (event) => { if (!media || ['INPUT', 'TEXTAREA', 'BUTTON'].includes(document.activeElement?.tagName)) return; if (event.code === 'Space') { event.preventDefault(); media.paused ? media.play().catch(() => {}) : media.pause(); } else if (event.key === 'ArrowRight') media.currentTime += 10; else if (event.key === 'ArrowLeft') media.currentTime = Math.max(0, media.currentTime - 10); else if (event.key.toLowerCase() === 'm') media.muted = !media.muted; else if (event.key.toLowerCase() === 'l') window.toggleLoop(); else if (event.key.toLowerCase() === 't') window.toggleTheatre(); });
+            window.toggleScreenLock = () => { document.body.classList.toggle('select-none'); notify(document.body.classList.contains('select-none') ? '⌧ ᴛᴏᴜᴄʜ ʟᴏᴄᴋᴇᴅ' : '⌧ ᴛᴏᴜᴄʜ ᴜɴʟᴏᴄᴋᴇᴅ'); };
+
+            document.addEventListener('keydown', (event) => {
+                if (!media || ['INPUT', 'TEXTAREA', 'BUTTON', 'SELECT'].includes(document.activeElement?.tagName)) return;
+                if (event.code === 'Space') { event.preventDefault(); window.togglePlayPause(); }
+                else if (event.key === 'ArrowRight') window.seekBy(10);
+                else if (event.key === 'ArrowLeft') window.seekBy(-10);
+                else if (event.key.toLowerCase() === 'm') media.muted = !media.muted;
+                else if (event.key.toLowerCase() === 'l') window.toggleLoop();
+                else if (event.key.toLowerCase() === 't') window.toggleTheatre();
+                else if (event.key.toLowerCase() === 'c') window.toggleSubtitlesQuick();
+            });
 
             function updateNetwork() { if (network) network.textContent = navigator.onLine ? '🟢 ᴏɴʟɪɴᴇ' : '🔴 ᴏғғʟɪɴᴇ'; }
-            window.addEventListener('online', updateNetwork); window.addEventListener('offline', updateNetwork); updateNetwork();
-            if (media) { initPlayer(); window.addEventListener('load', initPlayer, { once: true }); }
+            window.addEventListener('online', updateNetwork);
+            window.addEventListener('offline', updateNetwork);
+            updateNetwork();
+
+            if (Number("{{ metadata.duration | default(0) }}") === 0 || "{{ metadata.language | default('Undetermined') }}" === "Undetermined") {
+                setTimeout(refreshLiveMetadata, 2500);
+            }
         })();
     </script>
 </body>
