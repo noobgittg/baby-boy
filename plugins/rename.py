@@ -55,6 +55,7 @@ from plugins.media_types import (
 MAX_BOT_FILE_SIZE = int(getattr(Config, "LARGE_FILE_THRESHOLD_BYTES", 2 * 1024 * 1024 * 1024))
 _USER_MEDIA_LOCKS: dict[int, asyncio.Lock] = {}
 _USER_LAST_MEDIA_TS: dict[int, float] = {}
+_IN_FLIGHT_RENAME: dict[str, str] = {}
 
 
 async def resolve_target_media_message(client: Client, message: Message, user_id: int = 0) -> Optional[Message]:
@@ -129,6 +130,15 @@ async def render_media_studio_card(
     if auto_stream_active:
         media_metadata = telegram_media_metadata(media, media_msg)
         cached_fid = await cache.get(f"media_fid_{media_msg.chat.id}_{media_msg.id}")
+        if not cached_fid:
+            existing_f = await file_repo.find_existing_file(
+                media_msg.chat.id,
+                media_msg.id,
+                getattr(media, "file_id", None),
+            )
+            if existing_f and existing_f.get("file_id"):
+                cached_fid = str(existing_f["file_id"])
+                await cache.set(f"media_fid_{media_msg.chat.id}_{media_msg.id}", cached_fid, ttl=3600)
         if not cached_fid:
             cached_fid = secrets.token_urlsafe(10)
             await file_repo.save_file(
@@ -277,6 +287,9 @@ async def incoming_file_entry(client: Client, message: Message):
             f"🚫 **{to_smallcaps('you are banned from using this bot!')}**"
             f"{format_watermark()}"
         )
+    if len(_USER_MEDIA_LOCKS) > 1000:
+        _USER_MEDIA_LOCKS.clear()
+        _USER_LAST_MEDIA_TS.clear()
     lock = _USER_MEDIA_LOCKS.setdefault(uid, asyncio.Lock())
     async with lock:
         now_m = time.monotonic()
@@ -717,8 +730,7 @@ async def execute_rename_operation(client: Client, query: CallbackQuery):
 
     if not new_name:
         raw_orig = getattr(media, "file_name", None) or f"file_{target_id}.mp4"
-        u_doc = await user_repo.get_user(user_id) or {}
-        new_name = apply_rename_template(raw_orig, u_doc, media)
+        new_name = sanitize_filename(raw_orig)
         await cache.set(f"rename_name_{user_id}_{target_id}", new_name, ttl=1800)
 
     if upload_type == "auto":
@@ -767,10 +779,22 @@ async def run_rename_workflow(
         new_name = f"{name_parts[0]}{orig_ext}"
     final_name = apply_rename_template(new_name, u or {}, media)
 
+    idem_key = f"rename:{chat_id}:{target_id}:{final_name}:{upload_type}"
+    if not is_recovery and not task_id:
+        in_flight_tid = _IN_FLIGHT_RENAME.get(idem_key)
+        if in_flight_tid and task_manager.get_task(in_flight_tid):
+            task_manager.record_metric(skipped=1)
+            return await task_repo.get_task(in_flight_tid)
+        existing_completed = await task_repo.find_by_idempotency_key(idem_key)
+        if existing_completed and existing_completed.get("status") == "completed" and existing_completed.get("output_message_id"):
+            task_manager.record_metric(skipped=1)
+            return existing_completed
+
     if not task_id:
         task_id = f"ren_{user_id}_{target_id}_{secrets.token_hex(3)}"
         task_manager.record_metric(detected=1)
 
+    _IN_FLIGHT_RENAME[idem_key] = task_id
     existing_doc = await task_repo.get_task(task_id)
     if existing_doc and existing_doc.get("work_dir"):
         download_dir = existing_doc["work_dir"]
@@ -868,7 +892,10 @@ async def run_rename_workflow(
                 if early_thumb_task:
                     early_thumb_task.cancel()
                 await task_repo.record_task_error(task_id, f"Download error: {e}", stage="downloading")
-                await task_repo.update_task(task_id, {"status": "failed", "stage": "downloading"})
+                await task_repo.update_task(
+                    task_id,
+                    {"status": "failed", "stage": "downloading", "retry_count": int(Config.TASK_MAX_RETRIES)},
+                )
                 task_manager.record_metric(failed=1, error=f"Rename download failed: {e}")
                 clean_temp_files(download_path, download_dir)
                 await safe_edit_text(status_msg, f"❌ **{to_smallcaps('download failed')}** : `{e}`")
@@ -877,7 +904,10 @@ async def run_rename_workflow(
         if not os.path.exists(download_path):
             if early_thumb_task:
                 early_thumb_task.cancel()
-            await task_repo.update_task(task_id, {"status": "failed", "stage": "downloading"})
+            await task_repo.update_task(
+                task_id,
+                {"status": "failed", "stage": "downloading", "retry_count": int(Config.TASK_MAX_RETRIES)},
+            )
             task_manager.record_metric(failed=1, error="File not found after rename download")
             clean_temp_files(download_dir)
             await safe_edit_text(status_msg, f"❌ **{to_smallcaps('file not found after download!')}**")
@@ -1016,7 +1046,10 @@ async def run_rename_workflow(
                 await task_repo.record_task_error(task_id, f"Rename upload attempt {up_attempt+1} failed: {e}", stage="uploading")
                 if up_attempt >= max_retries - 1:
                     clean_temp_files(download_path, thumb_path, download_dir)
-                    await task_repo.update_task(task_id, {"status": "failed", "stage": "uploading"})
+                    await task_repo.update_task(
+                        task_id,
+                        {"status": "failed", "stage": "uploading", "retry_count": int(max_retries)},
+                    )
                     task_manager.record_metric(failed=1, error=f"Rename upload failed: {e}")
                     await safe_edit_text(status_msg, f"❌ **{to_smallcaps('upload failed')}** : `{e}`")
                     return await task_repo.get_task(task_id)
@@ -1114,6 +1147,7 @@ async def run_rename_workflow(
             await task_repo.update_task(task_id, {"status": "interrupted"})
         raise
     finally:
+        _IN_FLIGHT_RENAME.pop(idem_key, None)
         t_obj = task_manager.get_task(task_id)
         preserve_ws = bool(t_obj and not t_obj.is_cancelled and t_obj.status != "completed")
         await task_manager.cleanup_task(task_id, preserve_workspace=preserve_ws)

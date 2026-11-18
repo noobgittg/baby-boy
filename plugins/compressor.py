@@ -59,12 +59,18 @@ from plugins.media_types import is_code_file, detect_code_language, is_audio_mim
 
 MAX_BOT_FILE_SIZE = int(getattr(Config, "LARGE_FILE_THRESHOLD_BYTES", 2 * 1024 * 1024 * 1024))
 _RECOVERY_LOCK = None
+_RECOVERY_LOCK_LOOP = None
 
 
 def _get_recovery_lock() -> asyncio.Lock:
-    global _RECOVERY_LOCK
-    if _RECOVERY_LOCK is None:
+    global _RECOVERY_LOCK, _RECOVERY_LOCK_LOOP
+    try:
+        curr_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        curr_loop = None
+    if _RECOVERY_LOCK is None or _RECOVERY_LOCK_LOOP is not curr_loop:
         _RECOVERY_LOCK = asyncio.Lock()
+        _RECOVERY_LOCK_LOOP = curr_loop
     return _RECOVERY_LOCK
 _IN_FLIGHT_IDEMPOTENCY: Dict[str, str] = {}
 
@@ -1246,13 +1252,18 @@ async def perform_compression_job(
 
             await task_repo.update_task(task_id, {"status": "running", "stage": "encoded", "progress_pct": 80.0})
             task_manager.update_stage(task_id, "encoded", "running")
-            clean_temp_files(input_path)
         else:
             logger.info(f"♻️ Task {task_id} reusing validated encoded output file '{output_path}' for immediate upload.")
 
         comp_size = os.path.getsize(output_path)
-        saved_bytes = max(0, orig_size - comp_size)
-        saved_pct = round((saved_bytes / orig_size) * 100, 1) if orig_size > 0 else 0
+        size_diff = orig_size - comp_size
+        if size_diff >= 0:
+            saved_pct = round((size_diff / orig_size) * 100, 1) if orig_size > 0 else 0.0
+            size_delta_str = f"-{saved_pct}% {to_smallcaps('saved')}"
+        else:
+            inc_pct = round((abs(size_diff) / orig_size) * 100, 1) if orig_size > 0 else 0.0
+            saved_pct = -inc_pct
+            size_delta_str = f"+{inc_pct}% ({to_smallcaps('input already compressed')})"
 
         info_task = asyncio.create_task(get_detailed_mediainfo(output_path))
         thumb_task = asyncio.create_task(
@@ -1283,7 +1294,7 @@ async def perform_compression_job(
         stats_footer = (
             f"\n\n📊 **{to_smallcaps('ffmpeg compression stats')}** :\n"
             f"• 📄 `{clean_name}` ➔ `{out_name}`\n"
-            f"• 📉 `{humanbytes(orig_size)}` ➔ `{humanbytes(comp_size)}` (`-{saved_pct}%` {to_smallcaps('saved')})"
+            f"• 📉 `{humanbytes(orig_size)}` ➔ `{humanbytes(comp_size)}` (`{size_delta_str}`)"
         )
         if len(base_caption) + len(stats_footer) <= 1024:
             final_caption = base_caption + stats_footer

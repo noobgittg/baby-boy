@@ -329,6 +329,47 @@ async def root_stats_redirect(request: Request):
     return await index(request)
 
 
+@pages_router.get("/stream_bridge.php")
+@pages_router.head("/stream_bridge.php")
+async def stream_bridge_endpoint(request: Request, action: str = "status", id: str = ""):
+    from fastapi.responses import RedirectResponse
+    act = (action or "status").strip().lower()
+    clean_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(id or ""))
+    base_url = str(request.base_url).rstrip("/")
+
+    if act in ("health", "ping"):
+        return {
+            "status": "healthy",
+            "branch": "MALLU",
+            "bridge": "PHP-HTTP206-Turbo",
+            "rename_limit_gb": 2,
+            "compress_any_size": True,
+            "stream_any_size": True,
+            "timestamp": float(time.time()),
+        }
+
+    if act in ("stream", "download", "watch", "dl", "file", "code") and clean_id:
+        return RedirectResponse(url=f"{base_url}/{act}/{clean_id}", status_code=307)
+
+    if act == "info" and clean_id:
+        return RedirectResponse(url=f"{base_url}/api/info/{clean_id}", status_code=307)
+
+    return {
+        "service": "MMW All-In-One Pro Engine (MALLU Branch)",
+        "status": "operational",
+        "backend": base_url,
+        "endpoints": {
+            "health": "?action=health",
+            "stream": "?action=stream&id={file_id}",
+            "download": "?action=download&id={file_id}",
+            "watch": "?action=watch&id={file_id}",
+            "dl": "?action=dl&id={file_id}",
+            "code": "?action=code&id={file_id}",
+            "info": "?action=info&id={file_id}",
+        },
+    }
+
+
 @pages_router.get("/")
 @pages_router.head("/")
 async def index(request: Request):

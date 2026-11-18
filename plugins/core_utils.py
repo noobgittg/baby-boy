@@ -92,7 +92,8 @@ def format_watermark() -> str:
 
 
 def format_watermark_html() -> str:
-    return f"\n\n📢 <b>{to_smallcaps('join')}:</b> <a href='{Config.WATERMARK_URL}'>{Config.WATERMARK}</a>"
+    import html as _html
+    return f"\n\n📢 <b>{to_smallcaps('join')} : <a href='{Config.WATERMARK_URL}'>{_html.escape(str(Config.WATERMARK))}</a></b>"
 
 
 LOG_FILE_PATH = "TelegramBot.txt"
@@ -1106,11 +1107,20 @@ def get_current_timestamp() -> float:
 async def is_admin(*args, **kwargs) -> bool:
     user_id = kwargs.get("user_id")
     if user_id is None and args:
-        user_id = args[-1]
+        for arg in args:
+            if isinstance(arg, int) and not isinstance(arg, bool):
+                user_id = arg
+                break
+            if isinstance(arg, str) and arg.strip().lstrip("-").isdigit():
+                user_id = int(arg.strip())
+                break
+        if user_id is None:
+            user_id = args[-1]
     if not user_id:
         return False
     try:
-        return int(user_id) in Config.ADMINS
+        uid = int(user_id)
+        return uid in Config.ADMINS or str(uid) in Config.ADMINS
     except (ValueError, TypeError):
         return False
 
@@ -1175,9 +1185,16 @@ def is_valid_url(url: str) -> bool:
 def sanitize_filename(name: str) -> str:
     if not name:
         return "file.mp4"
-    name = os.path.basename(str(name))
-    cleaned = re.sub(r'[\\/*?:"<>|\x00-\x1f\x7f]', "_", str(name))
-    cleaned = cleaned.strip(". ")
+    raw = str(name).replace("\\", "/")
+    raw = os.path.basename(raw)
+    cleaned = re.sub(r'[\\/*?:"<>|\x00-\x1f\x7f]', "_", raw)
+    cleaned = re.sub(r"\.{2,}", ".", cleaned).strip(". ")
+    if not cleaned:
+        return "file.mp4"
+    if len(cleaned) > 200:
+        base, ext = os.path.splitext(cleaned)
+        ext = ext[:20]
+        cleaned = f"{base[:max(1, 200 - len(ext))]}{ext}".strip(". ")
     return cleaned or "file.mp4"
 
 
@@ -1216,6 +1233,9 @@ async def progress_for_pyrogram(
     if rate_limit_manager.is_in_cooldown(chat_id):
         return
 
+    if len(_PROGRESS_THROTTLE) > 2000:
+        _PROGRESS_THROTTLE.clear()
+        _PROGRESS_STEP.clear()
     msg_pair = (chat_id, msg_id)
     prev_task = _ACTIVE_PROGRESS_TASKS.get(msg_pair)
     if prev_task is not None and not prev_task.done():
@@ -1475,8 +1495,8 @@ class TaskManager:
 task_manager = TaskManager()
 
 _max_cfg = int(getattr(Config, "MAX_CONCURRENT_TASKS", 0) or 0)
-_ffmpeg_pool = int(getattr(Config, "FFMPEG_PARALLEL_JOBS", 32) or 32)
-MEDIA_JOB_SEMAPHORE = asyncio.Semaphore(_max_cfg if _max_cfg > 0 else max(64, _ffmpeg_pool))
+_ffmpeg_pool = int(getattr(Config, "FFMPEG_PARALLEL_JOBS", 4) or 4)
+MEDIA_JOB_SEMAPHORE = asyncio.Semaphore(_max_cfg if _max_cfg > 0 else max(2, _ffmpeg_pool))
 
 
 def bounded_media_job(func):

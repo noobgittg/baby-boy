@@ -33,6 +33,7 @@ from pyrogram.types import (
 from info import ADMINS, BOT_START_TIME, COMMAND_PREFIXES
 from utils import (
     format_uptime_short,
+    get_bot_uptime,
     is_admin_sync,
     make_progress_bar,
     safe_edit_message,
@@ -41,10 +42,6 @@ from utils import (
 from plugins.core_utils import format_watermark
 
 logger = logging.getLogger("MMWPingMonitor")
-
-
-async def get_bot_uptime() -> str:
-    return format_uptime_short(int(time.time() - BOT_START_TIME))
 
 
 def _build_ping_text(latency_ms: float, uptime: str) -> str:

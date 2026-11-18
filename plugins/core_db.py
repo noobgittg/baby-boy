@@ -15,11 +15,16 @@ except ImportError:
 
 def new_user_dict(user_id: int, first_name: str, username: Optional[str] = None) -> Dict[str, Any]:
     now_ts = float(time.time())
+    uid = int(user_id)
+    fname = first_name or "User"
     return {
-        "user_id": int(user_id),
-        "first_name": first_name or "User",
+        "user_id": uid,
+        "id": uid,
+        "first_name": fname,
+        "name": fname,
         "username": username,
         "is_banned": False,
+        "ban_status": {"is_banned": False, "ban_reason": ""},
         "thumb_id": None,
         "tham_url": None,
         "custom_caption": None,
@@ -35,16 +40,20 @@ def new_user_dict(user_id: int, first_name: str, username: Optional[str] = None)
         "auto_delete_time": int(Config.DEFAULT_AUTO_DELETE),
         "compression_preset": "superfast",
         "resolution": "720p",
+        "joined_at": now_ts,
         "created_at": now_ts,
         "updated_at": now_ts
     }
 
 def new_chat_dict(chat_id: int, title: str, chat_type: str) -> Dict[str, Any]:
     now_ts = float(time.time())
+    cid = int(chat_id)
     return {
-        "chat_id": int(chat_id),
+        "chat_id": cid,
+        "id": cid,
         "title": title or "Chat",
         "chat_type": chat_type or "channel",
+        "chat_status": {"is_disabled": False, "reason": ""},
         "auto_thumbnail": True,
         "tham_url": None,
         "auto_caption": True,
@@ -52,6 +61,7 @@ def new_chat_dict(chat_id: int, title: str, chat_type: str) -> Dict[str, Any]:
         "auto_delete_time": 0,
         "clean_service_messages": True,
         "auto_approve_joins": True,
+        "added_at": now_ts,
         "created_at": now_ts,
         "updated_at": now_ts
     }
@@ -152,13 +162,27 @@ class InMemoryCollection:
         self.key_field = key_field
         self._docs: List[Dict[str, Any]] = []
 
+    @staticmethod
+    def _get_nested(doc: Dict[str, Any], key: str) -> Any:
+        if key in doc:
+            return doc.get(key)
+        if "." in key:
+            cur: Any = doc
+            for part in key.split("."):
+                if isinstance(cur, dict) and part in cur:
+                    cur = cur[part]
+                else:
+                    return None
+            return cur
+        return None
+
     def _matches(self, doc: Dict[str, Any], query: Dict[str, Any]) -> bool:
         for k, v in query.items():
             if k == "$or" and isinstance(v, list):
                 if not any(self._matches(doc, sub_q) for sub_q in v):
                     return False
                 continue
-            val = doc.get(k)
+            val = self._get_nested(doc, k)
             if isinstance(v, dict):
                 if "$ne" in v and val == v["$ne"]:
                     return False
@@ -196,7 +220,17 @@ class InMemoryCollection:
         return None
 
     async def insert_one(self, doc: Dict[str, Any]):
-        self._docs.append(dict(doc))
+        clean = dict(doc)
+        if self.key_field and self.key_field != "_id" and self.key_field in clean:
+            kval = clean[self.key_field]
+            for existing in self._docs:
+                if existing.get(self.key_field) == kval:
+                    for k, v in clean.items():
+                        existing.setdefault(k, v)
+                    class Res:
+                        acknowledged = True
+                    return Res()
+        self._docs.append(clean)
         class Res:
             acknowledged = True
         return Res()
@@ -247,6 +281,9 @@ class InMemoryCollection:
                     lst = found.get(k, [])
                     if v in lst:
                         lst.remove(v)
+            if "$unset" in update:
+                for k in update["$unset"].keys():
+                    found.pop(k, None)
         class Res:
             acknowledged = True
         return Res()
@@ -291,6 +328,15 @@ class InMemoryCollection:
                 return self
             async def to_list(self, length: int = 100):
                 return self.items[:length]
+            def __aiter__(self):
+                self._iter_idx = 0
+                return self
+            async def __anext__(self):
+                if self._iter_idx >= len(self.items):
+                    raise StopAsyncIteration
+                item = self.items[self._iter_idx]
+                self._iter_idx += 1
+                return item
 
         return Cursor(matched)
 
@@ -387,39 +433,56 @@ class UserRepository:
     def col(self):
         return mongo.active_db.users
 
+    def _normalize_user_doc(self, doc: Dict[str, Any], user_id: int, first_name: str = "User", username: Optional[str] = None) -> Dict[str, Any]:
+        uid = int(user_id)
+        base = new_user_dict(uid, first_name or doc.get("first_name") or doc.get("name") or "User", username or doc.get("username"))
+        for k, v in doc.items():
+            if k != "_id" and v is not None:
+                base[k] = v
+        base["user_id"] = uid
+        base["id"] = uid
+        if "ban_status" in doc and isinstance(doc["ban_status"], dict) and "is_banned" not in doc:
+            base["is_banned"] = bool(doc["ban_status"].get("is_banned", False))
+        base["ban_status"] = {
+            "is_banned": bool(base.get("is_banned", False)),
+            "ban_reason": (doc.get("ban_status") or {}).get("ban_reason", "") if isinstance(doc.get("ban_status"), dict) else "",
+        }
+        return base
+
     async def create_user(self, user_id: int, first_name: str, username: Optional[str] = None) -> Dict[str, Any]:
-        user_data = new_user_dict(user_id, first_name, username)
-        await self.col.update_one({"user_id": user_id}, {"$setOnInsert": user_data}, upsert=True)
-        await cache.set(f"user_{user_id}", user_data, ttl=900)
-        await cache.delete("stats_total_users")
-        return user_data
+        return await self.get_or_create(user_id, first_name, username)
 
     async def create_data(self, *args, **kwargs) -> Dict[str, Any]:
         return await self.create_user(*args, **kwargs)
 
     async def get_or_create(self, user_id: int, first_name: str, username: Optional[str] = None) -> Dict[str, Any]:
-        cache_key = f"user_{user_id}"
+        uid = int(user_id)
+        cache_key = f"user_{uid}"
         cached = await cache.get(cache_key)
         if cached:
             return cached
-        user = await self.col.find_one({"user_id": user_id})
+        user = await self.col.find_one({"$or": [{"user_id": uid}, {"id": uid}]})
         if not user:
-            user = new_user_dict(user_id, first_name, username)
-            await self.col.insert_one(user)
+            user = new_user_dict(uid, first_name, username)
+            await self.col.update_one({"user_id": uid}, {"$setOnInsert": user}, upsert=True)
             await cache.delete("stats_total_users")
         else:
-            user.pop("_id", None)
+            needs_migration = ("user_id" not in user) or ("id" not in user) or ("first_name" not in user)
+            user = self._normalize_user_doc(user, uid, first_name, username)
+            if needs_migration:
+                await self.col.update_one({"$or": [{"user_id": uid}, {"id": uid}]}, {"$set": user})
         await cache.set(cache_key, user, ttl=900)
         return user
 
     async def get_user(self, user_id: int) -> Optional[Dict[str, Any]]:
-        cache_key = f"user_{user_id}"
+        uid = int(user_id)
+        cache_key = f"user_{uid}"
         cached = await cache.get(cache_key)
         if cached:
             return cached
-        user = await self.col.find_one({"user_id": user_id})
+        user = await self.col.find_one({"$or": [{"user_id": uid}, {"id": uid}]})
         if user:
-            user.pop("_id", None)
+            user = self._normalize_user_doc(user, uid)
             await cache.set(cache_key, user, ttl=900)
         return user
 
@@ -477,13 +540,19 @@ class UserRepository:
     async def update_data(self, user_id: int, data: Dict[str, Any]) -> bool:
         return await self.update_user(user_id, data)
 
-    async def ban_user(self, user_id: int):
-        await self.update_user(user_id, {"is_banned": True})
+    async def ban_user(self, user_id: int, ban_reason: str = "ɴᴏ ʀᴇᴀsᴏɴ"):
+        await self.update_user(
+            user_id,
+            {"is_banned": True, "ban_status": {"is_banned": True, "ban_reason": str(ban_reason or "ɴᴏ ʀᴇᴀsᴏɴ")}},
+        )
         await cache.set(f"banned_{user_id}", True, ttl=86400)
         await cache.delete("stats_banned_users")
 
     async def unban_user(self, user_id: int):
-        await self.update_user(user_id, {"is_banned": False})
+        await self.update_user(
+            user_id,
+            {"is_banned": False, "ban_status": {"is_banned": False, "ban_reason": ""}},
+        )
         await cache.set(f"banned_{user_id}", False, ttl=86400)
         await cache.delete("stats_banned_users")
 
@@ -529,27 +598,26 @@ class ChatRepository:
         return mongo.active_db.auto_delete
 
     async def create_chat(self, chat_id: int, title: str, chat_type: str) -> Dict[str, Any]:
-        chat_data = new_chat_dict(chat_id, title, chat_type)
-        await self.col.update_one({"chat_id": chat_id}, {"$setOnInsert": chat_data}, upsert=True)
-        await cache.set(f"chat_{chat_id}", chat_data, ttl=900)
-        await cache.delete("stats_total_chats")
-        return chat_data
+        return await self.get_or_create_chat(chat_id, title, chat_type)
 
     async def create_data(self, *args, **kwargs) -> Dict[str, Any]:
         return await self.create_chat(*args, **kwargs)
 
     async def get_or_create_chat(self, chat_id: int, title: str, chat_type: str) -> Dict[str, Any]:
-        cache_key = f"chat_{chat_id}"
+        cid = int(chat_id)
+        cache_key = f"chat_{cid}"
         cached = await cache.get(cache_key)
         if cached:
             return cached
-        chat = await self.col.find_one({"chat_id": chat_id})
+        chat = await self.col.find_one({"$or": [{"chat_id": cid}, {"id": cid}]})
         if not chat:
-            chat = new_chat_dict(chat_id, title, chat_type)
-            await self.col.insert_one(chat)
+            chat = new_chat_dict(cid, title, chat_type)
+            await self.col.update_one({"chat_id": cid}, {"$setOnInsert": chat}, upsert=True)
             await cache.delete("stats_total_chats")
         else:
             chat.pop("_id", None)
+            chat.setdefault("chat_id", cid)
+            chat.setdefault("id", cid)
         await cache.set(cache_key, chat, ttl=900)
         return chat
 
@@ -598,11 +666,12 @@ class ChatRepository:
         return await self.delete_chat(chat_id)
 
     async def create_auto_delete_task(self, chat_id: int, message_id: int, delete_at: float):
-        await self.auto_del_col.insert_one({
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "delete_at": float(delete_at)
-        })
+        cid, mid = int(chat_id), int(message_id)
+        await self.auto_del_col.update_one(
+            {"chat_id": cid, "message_id": mid},
+            {"$set": {"chat_id": cid, "message_id": mid, "delete_at": float(delete_at)}},
+            upsert=True,
+        )
 
     async def add_auto_delete_task(self, chat_id: int, message_id: int, delete_at: float):
         await self.create_auto_delete_task(chat_id, message_id, delete_at)
@@ -685,6 +754,21 @@ class FileRepository:
 
     async def get_data(self, file_id: str, include_revoked: bool = False) -> Optional[Dict[str, Any]]:
         return await self.get_file(file_id, include_revoked=include_revoked)
+
+    async def find_existing_file(
+        self,
+        chat_id: int,
+        message_id: int,
+        tg_file_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        query_or: List[Dict[str, Any]] = [{"chat_id": int(chat_id), "message_id": int(message_id)}]
+        if tg_file_id:
+            query_or.append({"tg_file_id": str(tg_file_id)})
+        doc = await self.col.find_one({"$or": query_or}, {"_id": 0})
+        if doc and not doc.get("is_revoked"):
+            doc.pop("_id", None)
+            return doc
+        return None
 
     async def get_total_files(self) -> int:
         cached = await cache.get("stats_total_files")

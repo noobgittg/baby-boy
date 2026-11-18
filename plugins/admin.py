@@ -30,6 +30,7 @@ from utils import (
     USER_CACHE,
     format_watermark_html,
     format_uptime_short,
+    get_bot_uptime,
     get_recent_logs_preview,
     is_admin_sync,
     make_progress_bar,
@@ -53,10 +54,6 @@ from plugins.core_utils import (
 
 logger = logging.getLogger("MMWAdminPanel")
 START_TIME = BOT_START_TIME
-
-
-async def get_bot_uptime() -> str:
-    return format_uptime_short(int(time.time() - BOT_START_TIME))
 
 
 def build_admin_dashboard_buttons() -> InlineKeyboardMarkup:

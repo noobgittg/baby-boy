@@ -426,18 +426,37 @@ async def validate_media_output(file_path: str) -> bool:
     if not file_path or not os.path.exists(file_path):
         return False
     try:
-        if os.path.getsize(file_path) < 512:
+        fsize = os.path.getsize(file_path)
+        if fsize <= 0:
             return False
     except OSError:
+        return False
+
+    low_path = file_path.lower()
+    if low_path.endswith(".zip"):
+        def _check_zip(p: str) -> bool:
+            if not zipfile.is_zipfile(p):
+                return False
+            try:
+                with zipfile.ZipFile(p, "r") as zf:
+                    return len(zf.namelist()) > 0 and zf.testzip() is None
+            except Exception:
+                return False
+        return await asyncio.to_thread(_check_zip, file_path)
+
+    if is_code_file(file_path):
+        info = await analyze_code_file(file_path)
+        return bool(info.get("syntax_ok", False) and fsize > 0)
+
+    if fsize < 256:
         return False
     data = await _probe_json_cached(file_path)
     if data:
         streams = data.get("streams") or []
         return len(streams) > 0
-    try:
-        return os.path.getsize(file_path) > 1024
-    except OSError:
+    if shutil.which(FFPROBE_BIN) or os.path.exists(FFPROBE_BIN):
         return False
+    return fsize > 1024
 
 async def generate_video_screenshots(video_path: str, output_dir: str, count: int = 4) -> List[str]:
     os.makedirs(output_dir, exist_ok=True)
@@ -621,15 +640,26 @@ async def check_media_streams(file_path: str) -> Dict[str, Any]:
         width, height = 1280, 720
         fps = 24.0
 
+        fmt_name = str((data.get("format") or {}).get("format_name") or "").lower()
+        is_image_container = any(
+            tag in fmt_name for tag in ("image2", "png_pipe", "jpeg_pipe", "jpegls_pipe", "webp_pipe", "bmp_pipe", "gif", "tiff_pipe")
+        )
+        image_codecs = {"mjpeg", "png", "webp", "bmp", "tiff", "ppm", "pgm", "pam"}
+        ext_low = os.path.splitext(str(file_path or ""))[1].lower()
+        is_image_ext = ext_low in {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
+
         streams = data.get("streams", [])
         for i, s in enumerate(streams):
             ctype = s.get("codec_type")
             disposition = s.get("disposition", {})
+            cname = str(s.get("codec_name") or "").lower()
             if ctype == "video" and not disposition.get("attached_pic", False):
+                if is_image_container or is_image_ext or cname in image_codecs:
+                    continue
                 has_video = True
                 if video_index is None:
                     video_index = i
-                    video_codec = str(s.get("codec_name") or "").lower()
+                    video_codec = cname
                     width = int(s.get("width") or 1280)
                     height = int(s.get("height") or 720)
                     parsed_fps = _parse_fps(s.get("avg_frame_rate")) or _parse_fps(s.get("r_frame_rate"))
@@ -663,20 +693,26 @@ async def check_media_streams(file_path: str) -> Dict[str, Any]:
             "fps": fps,
         }
     except Exception:
+        ext_low = os.path.splitext(str(file_path or ""))[1].lower()
+        vid_exts = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".ts", ".m4v", ".3gp", ".wmv"}
+        aud_exts = {".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wav", ".wma"}
+        ffprobe_present = bool(shutil.which(FFPROBE_BIN) or os.path.exists(FFPROBE_BIN))
+        fallback_vid = (not ffprobe_present) and (ext_low in vid_exts)
+        fallback_aud = (not ffprobe_present) and (ext_low in vid_exts or ext_low in aud_exts)
         return {
-            "has_video": True,
-            "has_audio": True,
-            "video_index": 0,
-            "audio_index": 0,
-            "stream_count": 1,
-            "video_codec": "h264",
-            "audio_codec": "aac",
+            "has_video": fallback_vid,
+            "has_audio": fallback_aud,
+            "video_index": 0 if fallback_vid else None,
+            "audio_index": 0 if fallback_aud else None,
+            "stream_count": (1 if (fallback_vid or fallback_aud) else 0),
+            "video_codec": "h264" if fallback_vid else "",
+            "audio_codec": "aac" if fallback_aud else "",
             "audio_channels": 2,
-            "audio_bitrate": 96,
+            "audio_bitrate": 96 if fallback_aud else 0,
             "duration": 0,
-            "width": 1280,
-            "height": 720,
-            "fps": 24.0,
+            "width": 1280 if fallback_vid else 0,
+            "height": 720 if fallback_vid else 0,
+            "fps": 24.0 if fallback_vid else 0.0,
         }
 
 async def get_media_attributes(file_path: str) -> MediaAttributes:
@@ -1910,15 +1946,11 @@ async def run_autodelete_sweeper(client: Any):
                     chat_buckets[item["chat_id"]].append(item["message_id"])
 
                 for chat_id, msg_ids in chat_buckets.items():
-                    delete_ok = True
                     for i in range(0, len(msg_ids), 100):
                         chunk = msg_ids[i:i+100]
-                        if not await safe_delete_messages(client, chat_id, chunk):
-                            delete_ok = False
-                            break
-                    if delete_ok:
-                        for mid in msg_ids:
-                            await chat_repo.delete_auto_delete_task(chat_id, mid)
+                        await safe_delete_messages(client, chat_id, chunk)
+                    for mid in msg_ids:
+                        await chat_repo.delete_auto_delete_task(chat_id, mid)
         except Exception:
             pass
         await asyncio.sleep(6)
@@ -2301,18 +2333,24 @@ def optimize_code_file_sync(input_path: str, output_path: str, file_name: str = 
 
     optimized = content
     if lang == "python":
-        out_lines = []
-        for idx, line in enumerate(content.splitlines()):
-            stripped = line.strip()
-            if idx == 0 and stripped.startswith("#!"):
-                out_lines.append(line.rstrip())
-                continue
-            if idx < 2 and "coding" in stripped and stripped.startswith("#"):
-                out_lines.append(line.rstrip())
-                continue
-            if stripped.startswith("#"):
-                continue
-            out_lines.append(line.rstrip())
+        import io as _io
+        import tokenize as _tokenize
+        lines = content.splitlines()
+        pure_comment_rows = set()
+        try:
+            for tok in _tokenize.generate_tokens(_io.StringIO(content).readline):
+                if tok.type == _tokenize.COMMENT:
+                    row_idx = tok.start[0] - 1
+                    col_idx = tok.start[1]
+                    if 0 <= row_idx < len(lines) and lines[row_idx][:col_idx].strip() == "":
+                        if row_idx == 0 and tok.string.startswith("#!"):
+                            continue
+                        if row_idx < 2 and "coding" in tok.string:
+                            continue
+                        pure_comment_rows.add(row_idx)
+        except Exception:
+            pure_comment_rows = set()
+        out_lines = [ln.rstrip() for idx, ln in enumerate(lines) if idx not in pure_comment_rows]
         cand = "\n".join(out_lines)
         cand = re.sub(r"\n{3,}", "\n\n", cand).strip() + "\n"
         try:
@@ -2323,7 +2361,7 @@ def optimize_code_file_sync(input_path: str, output_path: str, file_name: str = 
     elif lang == "css":
         cand = re.sub(r"/\*.*?\*/", "", content, flags=re.S)
         cand = re.sub(r"\s+", " ", cand)
-        cand = re.sub(r"\s*([{};:,>~+])\s*", r"\1", cand)
+        cand = re.sub(r"\s*([{};:,>~])\s*", r"\1", cand)
         cand = cand.replace(";}", "}").strip()
         if cand:
             optimized = cand + "\n"
@@ -2372,10 +2410,13 @@ def compress_file_to_zip_sync(input_path: str, output_zip_path: str, arcname: st
     if not os.path.exists(input_path):
         return False
     os.makedirs(os.path.dirname(os.path.abspath(output_zip_path)), exist_ok=True)
-    arc = arcname or os.path.basename(input_path)
+    arc = sanitize_filename(arcname or os.path.basename(input_path))
     try:
         with zipfile.ZipFile(output_zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
             zf.write(input_path, arcname=arc)
+        with zipfile.ZipFile(output_zip_path, "r") as zf_check:
+            if zf_check.testzip() is not None or len(zf_check.namelist()) == 0:
+                return False
         return os.path.exists(output_zip_path) and os.path.getsize(output_zip_path) > 0
     except Exception:
         return False

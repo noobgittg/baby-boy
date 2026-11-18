@@ -39,9 +39,16 @@ if ($action === 'health' || $action === 'ping') {
     exit;
 }
 
-if (($action === 'stream' || $action === 'download' || $action === 'watch') && $fileId !== '') {
+if (in_array($action, ['stream', 'download', 'watch', 'dl', 'file', 'code'], true) && $fileId !== '') {
     $targetUrl = $backendBase . '/' . $action . '/' . rawurlencode($fileId);
     header('Cache-Control: public, max-age=60');
+    header('Location: ' . $targetUrl, true, 307);
+    exit;
+}
+
+if ($action === 'info' && $fileId !== '') {
+    $targetUrl = $backendBase . '/api/info/' . rawurlencode($fileId);
+    header('Cache-Control: private, max-age=15');
     header('Location: ' . $targetUrl, true, 307);
     exit;
 }

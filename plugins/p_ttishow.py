@@ -4,7 +4,7 @@ import logging
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from pyrogram.errors import ChatAdminRequired, PeerIdInvalid
-from pyrogram.errors.exceptions.bad_request_400 import MessageTooLong
+from pyrogram.errors import MessageTooLong
 
 from info import *
 from Script import script

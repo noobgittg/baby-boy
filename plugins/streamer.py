@@ -91,19 +91,31 @@ async def generate_stream_response(client: Client, media_msg: Message, target_re
 
     user_id = media_msg.from_user.id if media_msg.from_user else (target_reply.from_user.id if target_reply.from_user else 0)
 
-    file_id = secrets.token_urlsafe(12)
-    await file_repo.save_file(
-        file_id=file_id,
-        chat_id=log_msg.chat.id,
-        message_id=log_msg.id,
-        file_name=file_name,
-        file_size=file_size,
-        mime_type=mime_type,
-        user_id=user_id,
-        metadata=metadata,
-        thumb_id=thumb_id,
-        tg_file_id=tg_file_id
-    )
+    cache_fid_key = f"media_fid_{media_msg.chat.id}_{media_msg.id}"
+    cached_fid = await cache.get(cache_fid_key)
+    existing_doc = None
+    if cached_fid:
+        existing_doc = await file_repo.get_file(str(cached_fid))
+    if not existing_doc:
+        existing_doc = await file_repo.find_existing_file(log_msg.chat.id, log_msg.id, tg_file_id)
+
+    if existing_doc and existing_doc.get("file_id"):
+        file_id = str(existing_doc["file_id"])
+    else:
+        file_id = secrets.token_urlsafe(12)
+        await file_repo.save_file(
+            file_id=file_id,
+            chat_id=log_msg.chat.id,
+            message_id=log_msg.id,
+            file_name=file_name,
+            file_size=file_size,
+            mime_type=mime_type,
+            user_id=user_id,
+            metadata=metadata,
+            thumb_id=thumb_id,
+            tg_file_id=tg_file_id
+        )
+    await cache.set(cache_fid_key, file_id, ttl=3600)
 
     watch_url = f"{Config.BASE_URL}/watch/{file_id}"
     stream_url = f"{Config.BASE_URL}/stream/{file_id}"
@@ -214,7 +226,7 @@ async def revoke_stream_by_id(message: Message, file_id: str) -> bool:
 
 
 @Client.on_message(filters.private & filters.command(["delfile", "revokestream"], prefixes=COMMAND_PREFIXES))
-async def revoke_command_handler(client: Client, message: Message):
+async def revoke_stream_command_handler(client: Client, message: Message):
     if len(message.command) < 2:
         return await message.reply_text(
             f"📝 **{to_smallcaps('usage')}** : `/revokestream [file_id]`\n\n"

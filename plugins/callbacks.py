@@ -176,9 +176,11 @@ async def render_settings_menu(target_msg: Message, user, is_edit: bool = True):
         )
 
 
-@Client.on_callback_query(filters.regex(r"^(nav_(home|help|about|status|settings)|close_data|start|rules|about)$"))
+@Client.on_callback_query(filters.regex(r"^(nav_(home|help|about|status|settings)|close_data|start|rules|about|noop)$"))
 async def navigation_callbacks(client: Client, query: CallbackQuery):
     data = query.data
+    if data == "noop":
+        return await query.answer()
     user = query.from_user
     uid = user.id if user else 0
     is_adm = is_admin_sync(uid)
