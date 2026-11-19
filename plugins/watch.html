@@ -35,7 +35,7 @@
             line-height: 1.45;
         }
         .smallcap-ui { font-variant: small-caps; letter-spacing: 0.015em; }
-        .smallcap-ui code, .smallcap-ui input, .smallcap-ui button, .smallcap-ui select { font-variant: normal; }
+        .smallcap-ui code, .smallcap-ui input, .smallcap-ui button, .smallcap-ui select, .smallcap-ui pre { font-variant: normal; }
         .hidden { display: none !important; }
         .select-none { user-select: none; -webkit-user-select: none; }
 
@@ -133,7 +133,7 @@
         }
         .player-box.is-doc {
             background: #ffffff;
-            min-height: 240px;
+            min-height: 220px;
         }
         .player-box video {
             width: 100%;
@@ -141,6 +141,7 @@
             display: block;
             object-fit: contain;
             background: #000000;
+            transition: transform 0.2s ease, filter 0.15s ease;
         }
         .player-box audio { width: 100%; }
         .player-box img.preview-image {
@@ -149,6 +150,7 @@
             object-fit: contain;
             display: block;
             background: #f8fafc;
+            transition: transform 0.2s ease;
         }
         .player-box iframe.preview-frame {
             width: 100%;
@@ -156,6 +158,24 @@
             border: none;
             display: block;
             background: #ffffff;
+        }
+        .text-preview-wrap {
+            padding: 16px;
+            background: #ffffff;
+        }
+        .text-preview-pre {
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px;
+            max-height: 55vh;
+            overflow: auto;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.84rem;
+            line-height: 1.5;
+            color: #0f172a;
+            white-space: pre-wrap;
+            word-break: break-word;
         }
         .player-status-toast {
             position: absolute;
@@ -284,10 +304,27 @@
             outline: none;
             cursor: pointer;
         }
+        .slider-box {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 5px 10px;
+            font-size: 0.74rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+        .slider-box input[type="range"] {
+            width: 90px;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
 
         .meta-pills {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
             gap: 10px;
             margin-top: 12px;
         }
@@ -446,6 +483,7 @@
             <audio id="mediaPlayer" autoplay playsinline crossorigin="anonymous" preload="auto" controls>
                 <source src="{{ stream_url }}" type="{{ metadata.mime_type | default(mime_type | default('audio/mpeg')) }}">
             </audio>
+            <button type="button" id="unmuteAutoplayBtn" onclick="unmuteAutoplay()" class="unmute-overlay-btn hidden">🔊 ᴛᴀᴘ ᴛᴏ ᴜɴᴍᴜᴛᴇ</button>
             {% elif metadata.media_kind == 'video' and metadata.browser_supported %}
             <video id="mediaPlayer" autoplay playsinline crossorigin="anonymous" preload="auto" fetchpriority="high" controls>
                 <source src="{{ stream_url }}" type="{{ metadata.mime_type | default(mime_type | default('video/mp4')) }}">
@@ -453,23 +491,34 @@
             </video>
             <button type="button" id="unmuteAutoplayBtn" onclick="unmuteAutoplay()" class="unmute-overlay-btn hidden">🔊 ᴛᴀᴘ ᴛᴏ ᴜɴᴍᴜᴛᴇ</button>
             {% elif metadata.media_kind == 'image' or (metadata.mime_type and metadata.mime_type.startswith('image/')) %}
-            <img src="{{ stream_url }}" alt="{{ file_name | default('Image Preview') }}" class="preview-image" loading="eager">
+            <img id="imagePreview" src="{{ stream_url }}" alt="{{ file_name | default('Image Preview') }}" class="preview-image" loading="eager">
+            <div class="controls-row" style="padding: 10px 14px; margin-top: 0; background: #ffffff; border-top: 1px solid var(--border-soft);">
+                <button type="button" onclick="zoomImage(0.25)" class="btn btn-pill">🔍 +</button>
+                <button type="button" onclick="zoomImage(-0.25)" class="btn btn-pill">🔍 -</button>
+                <button type="button" onclick="rotateImage()" class="btn btn-pill">⟳ ʀᴏᴛᴀᴛᴇ</button>
+                <button type="button" onclick="resetImage()" class="btn btn-pill">↺ ʀᴇsᴇᴛ</button>
+            </div>
             {% elif metadata.mime_type == 'application/pdf' %}
             <iframe src="{{ stream_url }}" title="{{ file_name | default('PDF Preview') }}" class="preview-frame"></iframe>
-            {% elif metadata.media_kind == 'code' %}
-            <div class="fallback-box">
-                <span style="font-size: 2.6rem;">💻</span>
-                <p style="font-weight: 700;">⚡ ᴄᴏᴅᴇ / ᴛᴇxᴛ ғɪʟᴇ ʀᴇᴀᴅʏ ({{ metadata.mime_type | default('text/plain') }} • {{ file_size }})</p>
-                <div class="controls-row" style="justify-content: center;">
-                    <a href="/code/{{ file_id }}" class="btn btn-primary">💻 ᴏᴘᴇɴ ʟɪᴠᴇ ᴄᴏᴅᴇ ᴠɪᴇᴡᴇʀ</a>
-                    <a href="{{ download_url }}" class="btn">⬇️ ғᴀsᴛ ᴅᴏᴡɴʟᴏᴀᴅ</a>
+            {% elif metadata.media_kind == 'code' or (metadata.mime_type and (metadata.mime_type.startswith('text/') or metadata.mime_type in ['application/json', 'application/xml', 'application/javascript'])) %}
+            <div class="text-preview-wrap">
+                <div class="controls-row" style="margin-top: 0; margin-bottom: 10px; justify-content: space-between;">
+                    <span style="font-weight: 800; font-size: 0.84rem; color: var(--accent);">💻 ʟɪᴠᴇ ᴅᴏᴄᴜᴍᴇɴᴛ / ᴄᴏᴅᴇ ᴘʀᴇᴠɪᴇᴡ ({{ metadata.mime_type }})</span>
+                    <div style="display: flex; gap: 8px;">
+                        <button type="button" onclick="copyTextPreview()" class="btn btn-pill">📋 ᴄᴏᴘʏ ᴛᴇxᴛ</button>
+                        <a href="/code/{{ file_id }}" class="btn btn-pill btn-primary">💻 ᴏᴘᴇɴ ғᴜʟʟ ᴄᴏᴅᴇ sᴛᴜᴅɪᴏ</a>
+                    </div>
                 </div>
+                <pre id="inlineTextPreview" class="text-preview-pre">Loading preview...</pre>
             </div>
             {% else %}
-            <div class="fallback-box">
+            <div id="fallbackBox" class="fallback-box">
                 <span style="font-size: 2.6rem;">{% if metadata.media_kind == 'video' %}🎬{% else %}📦{% endif %}</span>
-                <p style="font-weight: 700;">{% if metadata.media_kind == 'video' %}ᴛʜɪs ᴠɪᴅᴇᴏ ({{ metadata.mime_type }}) ɪs ᴏᴘᴛɪᴍɪᴢᴇᴅ ғᴏʀ ᴇxᴛᴇʀɴᴀʟ ʜᴡ+ ᴘʟᴀʏᴇʀs{% else %}{{ metadata.media_kind | default('document') | upper }} ғɪʟᴇ ({{ metadata.mime_type }}) ʀᴇᴀᴅʏ ғᴏʀ ᴢᴇʀᴏ-ʙᴜғғᴇʀ ᴅᴏᴡɴʟᴏᴀᴅ{% endif %}</p>
+                <p style="font-weight: 700;">{% if metadata.media_kind == 'video' %}ᴛʜɪs ᴠɪᴅᴇᴏ ({{ metadata.mime_type }}) ɪs ᴏᴘᴛɪᴍɪᴢᴇᴅ ғᴏʀ ᴇxᴛᴇʀɴᴀʟ ʜᴡ+ ᴘʟᴀʏᴇʀs (ᴘʟᴀʏɪᴛ / ᴍx / ᴠʟᴄ / s ᴘʟᴀʏᴇʀ){% else %}{{ metadata.media_kind | default('document') | upper }} ғɪʟᴇ ({{ metadata.mime_type }}) ʀᴇᴀᴅʏ ғᴏʀ ᴢᴇʀᴏ-ʙᴜғғᴇʀ ᴅᴏᴡɴʟᴏᴀᴅ{% endif %}</p>
                 <div class="controls-row" style="justify-content: center;">
+                    {% if metadata.media_kind == 'video' %}
+                    <button type="button" onclick="forceBrowserPlay()" class="btn btn-pill">▶️ ᴛʀʏ ʙʀᴏᴡsᴇʀ ᴘʟᴀʏ</button>
+                    {% endif %}
                     <button type="button" onclick="streamSaveToDisk()" class="btn btn-emerald">🚀 sᴛʀᴇᴀᴍ sᴀᴠᴇ ᴛᴏ ᴅɪsᴋ</button>
                     <a href="{{ download_url }}" class="btn btn-primary">⬇️ ғᴀsᴛ ᴅᴏᴡɴʟᴏᴀᴅ</a>
                 </div>
@@ -502,8 +551,8 @@
                     <span class="v" id="metaSubsCount">{{ metadata.subtitle_tracks | length }} ᴛʀᴀᴄᴋ(s)</span>
                 </div>
                 <div class="meta-item">
-                    <span class="k">📄 ᴍɪᴍᴇ / ᴛʏᴘᴇ</span>
-                    <span class="v" id="metaMimeType">{{ metadata.mime_type | default(mime_type) }}</span>
+                    <span class="k">📄 ᴍɪᴍᴇ / ʀᴇsᴏʟᴜᴛɪᴏɴ</span>
+                    <span class="v" id="metaMimeType">{{ metadata.mime_type | default(mime_type) }}{% if metadata.width and metadata.height %} ({{ metadata.width }}×{{ metadata.height }}){% endif %}</span>
                 </div>
             </div>
 
@@ -523,6 +572,12 @@
                     <option value="{{ loop.index0 }}">💬 {{ track.language | default(track.lang | default('Subtitle ' ~ loop.index)) }}</option>
                     {% endfor %}
                 </select>
+                {% if metadata.media_kind in ['audio', 'video'] %}
+                <label class="btn btn-pill" title="Load Local .srt or .vtt Subtitle">
+                    📂 ʟᴏᴀᴅ sᴜʙ (.srt/.vtt)
+                    <input type="file" id="localSubInput" accept=".vtt,.srt" class="hidden" onchange="loadLocalSubtitle(this)">
+                </label>
+                {% endif %}
             </div>
 
             {% if metadata.media_kind in ['audio', 'video'] %}
@@ -531,21 +586,45 @@
                 <button type="button" class="btn btn-pill" onclick="seekBy(-10)">⏪ -10s</button>
                 <button type="button" class="btn btn-pill" onclick="seekBy(10)">⏩ +10s</button>
                 <button type="button" class="btn btn-pill" onclick="seekBy(30)">⏭️ +30s</button>
+                <button type="button" class="btn btn-pill" onclick="stepFrame(-1)">◀ -1ғ</button>
+                <button type="button" class="btn btn-pill" onclick="stepFrame(1)">▶ +1ғ</button>
                 <button type="button" class="btn btn-pill" onclick="cycleSpeed()" id="speedBtn">⚡ 1.0x</button>
                 <button type="button" class="btn btn-pill" onclick="cycleAudioBoost()" id="boostBtn">🔊 100%</button>
+                <button type="button" class="btn btn-pill" onclick="toggleMute()" id="muteBtn">🔈 ᴍᴜᴛᴇ</button>
+                <select id="eqSelect" class="track-select" onchange="applyEqualizer(this.value)" title="Audio Equalizer">
+                    <option value="normal">🎛️ ᴇǫ: ɴᴏʀᴍᴀʟ</option>
+                    <option value="bass">🥁 ᴇǫ: ʙᴀss ʙᴏᴏsᴛ</option>
+                    <option value="voice">🎙️ ᴇǫ: ᴠᴏɪᴄᴇ / ᴅɪᴀʟᴏɢᴜᴇ</option>
+                    <option value="treble">✨ ᴇǫ: ᴄʟᴇᴀʀ ᴛʀᴇʙʟᴇ</option>
+                </select>
                 <button type="button" class="btn btn-pill" onclick="toggleSubtitlesQuick()" id="ccBtn">💬 ᴄᴄ</button>
                 <button type="button" class="btn btn-pill" onclick="toggleLoop()" id="loopBtn">🔁 ʟᴏᴏᴘ</button>
                 <button type="button" class="btn btn-pill" onclick="setABPoint()" id="abBtn">⤴️ ᴀ–ʙ</button>
                 <button type="button" class="btn btn-pill" onclick="toggleTheatre()" id="theatreBtn">🖥️ ᴛʜᴇᴀᴛʀᴇ</button>
+                <button type="button" class="btn btn-pill" onclick="toggleFullscreen()" id="fsBtn">⛶ ғᴜʟʟsᴄʀᴇᴇɴ</button>
                 <button type="button" class="btn btn-pill" onclick="toggleFit()" id="fitBtn">▣ ғɪᴛ</button>
+                <button type="button" class="btn btn-pill" onclick="rotateVideo()" id="rotateBtn">⟳ 0°</button>
                 <button type="button" class="btn btn-pill" onclick="toggleMirror()" id="mirrorBtn">↔ ᴍɪʀʀᴏʀ</button>
                 <button type="button" class="btn btn-pill" onclick="captureFrame()" id="frameBtn">📸 ғʀᴀᴍᴇ</button>
-                <button type="button" class="btn btn-pill" onclick="togglePiP()" id="pipBtn">⛶ ᴘɪᴘ</button>
+                <button type="button" class="btn btn-pill" onclick="togglePiP()" id="pipBtn">🗗 ᴘɪᴘ</button>
                 <button type="button" class="btn btn-pill" onclick="toggleSleepTimer()" id="sleepBtn">⏱️ sʟᴇᴇᴘ</button>
                 <button type="button" class="btn btn-pill" onclick="toggleWakeLock()" id="wakeBtn">☀ ᴡᴀᴋᴇ</button>
                 <button type="button" class="btn btn-pill" onclick="toggleScreenLock()" id="lockBtn">⌧ ʟᴏᴄᴋ</button>
                 <button type="button" class="btn btn-pill" onclick="retryMedia()" id="retryBtn">↻ ʀᴇᴛʀʏ</button>
                 <span id="networkState" class="card-sub" style="padding: 4px 8px;">🟢 ᴏɴʟɪɴᴇ</span>
+            </div>
+
+            <div class="controls-row">
+                <div class="slider-box">
+                    <span>🔊 ʙᴏᴏsᴛ (500% ᴍᴀx)</span>
+                    <input type="range" id="boostSlider" min="100" max="500" step="25" value="100" oninput="setAudioBoostPercent(this.value)">
+                    <span id="boostSliderVal">100%</span>
+                </div>
+                <div class="slider-box">
+                    <span>☀️ ʙʀɪɢʜᴛɴᴇss</span>
+                    <input type="range" id="brightnessSlider" min="50" max="150" step="5" value="100" oninput="setBrightness(this.value)">
+                    <span id="brightnessVal">100%</span>
+                </div>
             </div>
             {% endif %}
 
@@ -645,7 +724,8 @@
     <script>
         (() => {
             'use strict';
-            const media = document.getElementById('mediaPlayer');
+            let media = document.getElementById('mediaPlayer');
+            const playerContainer = document.getElementById('playerContainer');
             const status = document.getElementById('playerStatus');
             const network = document.getElementById('networkState');
             const unmuteBtn = document.getElementById('unmuteAutoplayBtn');
@@ -654,19 +734,31 @@
             const watchStreamBar = document.getElementById('watchStreamBar');
             const cancelWatchStreamBtn = document.getElementById('cancelWatchStreamBtn');
             const storageKey = `mmw-playback:${location.pathname}`;
-            const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
-            const boosts = [1.0, 1.5, 2.0, 3.0];
+            const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0];
+            const boosts = [1.0, 1.5, 2.0, 3.0, 5.0];
             const fits = ['contain', 'cover', 'fill'];
             const FILE_ID = {{ file_id | default('') | tojson }};
             const STREAM_URL = {{ stream_url | tojson }};
             const DOWNLOAD_URL = {{ download_url | tojson }};
             const FILE_NAME = {{ file_name | default('stream_media.mp4') | tojson }};
+            const MIME_TYPE = {{ (metadata.mime_type | default(mime_type | default('video/mp4'))) | tojson }};
             const EXPECTED_BYTES = Number({{ file_size_bytes | default(0) | tojson }}) || 0;
+            const memoryCache = new Map();
+
             let speedIdx = 2;
             let boostIdx = 0;
             let fitIdx = 0;
+            let rotateDeg = 0;
+            let isMirrored = false;
+            let imgScale = 1;
+            let imgRot = 0;
             let audioCtx = null;
             let gainNode = null;
+            let eqLow = null;
+            let eqMid = null;
+            let eqHigh = null;
+            let compressorNode = null;
+            let currentGain = 1.0;
             let sleepTimer = null;
             let statusTimer = null;
             let watchAbortController = null;
@@ -674,6 +766,7 @@
             let abEnd = null;
             let wakeLock = null;
             let autoplayAttempted = false;
+            let lastTapTime = 0;
 
             function formatBytes(bytes) {
                 const v = Number(bytes) || 0;
@@ -696,22 +789,51 @@
 
             function getCachedApiInfo(fileId) {
                 if (!fileId) return null;
+                const mem = memoryCache.get('info:' + fileId);
+                if (mem && mem.expires > Date.now()) return mem.data;
                 try {
                     const raw = sessionStorage.getItem('mmw-info:' + fileId);
                     if (!raw) return null;
                     const parsed = JSON.parse(raw);
-                    if (parsed && parsed.expires > Date.now()) return parsed.data;
+                    if (parsed && parsed.expires > Date.now()) {
+                        memoryCache.set('info:' + fileId, parsed);
+                        return parsed.data;
+                    }
                 } catch (_) {}
                 return null;
             }
 
             function setCachedApiInfo(fileId, data) {
                 if (!fileId || !data) return;
+                const entry = { expires: Date.now() + 60000, data: data };
+                memoryCache.set('info:' + fileId, entry);
                 try {
-                    sessionStorage.setItem('mmw-info:' + fileId, JSON.stringify({
-                        expires: Date.now() + 60000,
-                        data: data
-                    }));
+                    sessionStorage.setItem('mmw-info:' + fileId, JSON.stringify(entry));
+                } catch (_) {}
+            }
+
+            function getCachedTextPreview(fileId) {
+                if (!fileId) return null;
+                const mem = memoryCache.get('txt:' + fileId);
+                if (mem && mem.expires > Date.now()) return mem.data;
+                try {
+                    const raw = sessionStorage.getItem('mmw-txt:' + fileId);
+                    if (!raw) return null;
+                    const parsed = JSON.parse(raw);
+                    if (parsed && parsed.expires > Date.now()) {
+                        memoryCache.set('txt:' + fileId, parsed);
+                        return parsed.data;
+                    }
+                } catch (_) {}
+                return null;
+            }
+
+            function setCachedTextPreview(fileId, text) {
+                if (!fileId || typeof text !== 'string') return;
+                const entry = { expires: Date.now() + 120000, data: text };
+                memoryCache.set('txt:' + fileId, entry);
+                try {
+                    sessionStorage.setItem('mmw-txt:' + fileId, JSON.stringify(entry));
                 } catch (_) {}
             }
 
@@ -721,6 +843,100 @@
                 status.classList.remove('hidden');
                 clearTimeout(statusTimer);
                 if (!persistent) statusTimer = setTimeout(() => status.classList.add('hidden'), 2600);
+            }
+
+            function ensureAudioPipeline() {
+                if (!media) return false;
+                try {
+                    if (!audioCtx && (window.AudioContext || window.webkitAudioContext)) {
+                        const Ctx = window.AudioContext || window.webkitAudioContext;
+                        audioCtx = new Ctx();
+                        const src = audioCtx.createMediaElementSource(media);
+                        eqLow = audioCtx.createBiquadFilter();
+                        eqLow.type = 'lowshelf';
+                        eqLow.frequency.value = 180;
+                        eqMid = audioCtx.createBiquadFilter();
+                        eqMid.type = 'peaking';
+                        eqMid.frequency.value = 1500;
+                        eqHigh = audioCtx.createBiquadFilter();
+                        eqHigh.type = 'highshelf';
+                        eqHigh.frequency.value = 5000;
+                        gainNode = audioCtx.createGain();
+                        gainNode.gain.value = currentGain;
+                        compressorNode = audioCtx.createDynamicsCompressor();
+                        compressorNode.threshold.value = -6;
+                        compressorNode.knee.value = 12;
+                        compressorNode.ratio.value = 8;
+                        compressorNode.attack.value = 0.003;
+                        compressorNode.release.value = 0.15;
+                        src.connect(eqLow);
+                        eqLow.connect(eqMid);
+                        eqMid.connect(eqHigh);
+                        eqHigh.connect(gainNode);
+                        gainNode.connect(compressorNode);
+                        compressorNode.connect(audioCtx.destination);
+                    }
+                    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+                    return true;
+                } catch (_) {
+                    return false;
+                }
+            }
+
+            function applyMediaTransform() {
+                if (!media) return;
+                const parts = [];
+                if (rotateDeg !== 0) parts.push(`rotate(${rotateDeg}deg)`);
+                if (isMirrored) parts.push('scaleX(-1)');
+                media.style.transform = parts.join(' ');
+            }
+
+            window.zoomImage = (delta) => {
+                const img = document.getElementById('imagePreview');
+                if (!img) return;
+                imgScale = Math.max(0.5, Math.min(4, imgScale + delta));
+                img.style.transform = `scale(${imgScale}) rotate(${imgRot}deg)`;
+            };
+
+            window.rotateImage = () => {
+                const img = document.getElementById('imagePreview');
+                if (!img) return;
+                imgRot = (imgRot + 90) % 360;
+                img.style.transform = `scale(${imgScale}) rotate(${imgRot}deg)`;
+            };
+
+            window.resetImage = () => {
+                const img = document.getElementById('imagePreview');
+                if (!img) return;
+                imgScale = 1;
+                imgRot = 0;
+                img.style.transform = '';
+            };
+
+            window.copyTextPreview = async () => {
+                const pre = document.getElementById('inlineTextPreview');
+                if (!pre) return;
+                await copyText(pre.textContent || '');
+                notify('📋 ᴛᴇxᴛ ᴄᴏᴘɪᴇᴅ');
+            };
+
+            async function loadInlineTextPreview() {
+                const pre = document.getElementById('inlineTextPreview');
+                if (!pre) return;
+                const cached = getCachedTextPreview(FILE_ID);
+                if (cached !== null) {
+                    pre.textContent = cached;
+                    return;
+                }
+                try {
+                    const resp = await fetch(STREAM_URL, { headers: { Range: 'bytes=0-262143' } });
+                    if (!resp.ok && resp.status !== 206) throw new Error('HTTP ' + resp.status);
+                    const txt = await resp.text();
+                    setCachedTextPreview(FILE_ID, txt);
+                    pre.textContent = txt;
+                } catch (e) {
+                    pre.textContent = 'Preview unavailable: ' + e;
+                }
             }
 
             async function attemptAutoPlay() {
@@ -742,9 +958,39 @@
             window.unmuteAutoplay = () => {
                 if (!media) return;
                 media.muted = false;
+                ensureAudioPipeline();
                 if (media.paused) media.play().catch(() => {});
                 if (unmuteBtn) unmuteBtn.classList.add('hidden');
+                const mBtn = document.getElementById('muteBtn');
+                if (mBtn) {
+                    mBtn.classList.remove('active');
+                    mBtn.textContent = '🔈 ᴍᴜᴛᴇ';
+                }
                 notify('🔊 ᴀᴜᴅɪᴏ ᴜɴᴍᴜᴛᴇᴅ');
+            };
+
+            window.forceBrowserPlay = () => {
+                if (!playerContainer) return;
+                playerContainer.classList.remove('is-doc');
+                playerContainer.classList.add('is-video');
+                const fb = document.getElementById('fallbackBox');
+                if (fb) fb.remove();
+                const vid = document.createElement('video');
+                vid.id = 'mediaPlayer';
+                vid.autoplay = true;
+                vid.playsInline = true;
+                vid.crossOrigin = 'anonymous';
+                vid.preload = 'auto';
+                vid.controls = true;
+                const src = document.createElement('source');
+                src.src = STREAM_URL;
+                src.type = MIME_TYPE || 'video/mp4';
+                vid.appendChild(src);
+                playerContainer.insertBefore(vid, status);
+                media = vid;
+                autoplayAttempted = false;
+                bindMediaEvents();
+                attemptAutoPlay();
             };
 
             const panelButtonMap = {
@@ -764,14 +1010,34 @@
 
             window.togglePlayPause = () => {
                 if (!media) return;
+                ensureAudioPipeline();
                 if (media.paused) media.play().catch(() => {});
                 else media.pause();
+            };
+
+            window.toggleMute = () => {
+                if (!media) return;
+                media.muted = !media.muted;
+                const btn = document.getElementById('muteBtn');
+                if (btn) {
+                    btn.classList.toggle('active', media.muted);
+                    btn.textContent = media.muted ? '🔇 ᴍᴜᴛᴇᴅ' : '🔈 ᴍᴜᴛᴇ';
+                }
+                if (!media.muted && unmuteBtn) unmuteBtn.classList.add('hidden');
+                notify(media.muted ? '🔇 ᴍᴜᴛᴇᴅ' : '🔊 ᴜɴᴍᴜᴛᴇᴅ');
             };
 
             window.seekBy = (delta) => {
                 if (!media) return;
                 media.currentTime = Math.max(0, (media.currentTime || 0) + delta);
-                notify(`⏩ Seek: ${Math.round(media.currentTime)}s`);
+                notify(`⏩ Seek: ${formatDuration(media.currentTime)}`);
+            };
+
+            window.stepFrame = (dir) => {
+                if (!media) return;
+                if (!media.paused) media.pause();
+                media.currentTime = Math.max(0, (media.currentTime || 0) + (dir * (1 / 30)));
+                notify(dir > 0 ? '▶ +1 ғʀᴀᴍᴇ' : '◀ -1 ғʀᴀᴍᴇ');
             };
 
             window.cycleSpeed = () => {
@@ -784,25 +1050,50 @@
                 notify(`⚡ Speed: ${sp}x`);
             };
 
+            window.setAudioBoostPercent = (percentVal) => {
+                if (!media) return;
+                const pct = Math.max(100, Math.min(500, Number(percentVal) || 100));
+                currentGain = pct / 100;
+                ensureAudioPipeline();
+                if (gainNode) gainNode.gain.value = currentGain;
+                const btn = document.getElementById('boostBtn');
+                const slider = document.getElementById('boostSlider');
+                const sliderVal = document.getElementById('boostSliderVal');
+                if (btn) {
+                    btn.textContent = `🔊 ${pct}%`;
+                    btn.classList.toggle('active', pct > 100);
+                }
+                if (slider) slider.value = String(pct);
+                if (sliderVal) sliderVal.textContent = `${pct}%`;
+                notify(`🔊 Audio Boost: ${pct}%${pct >= 500 ? ' (MAX)' : ''}`);
+            };
+
             window.cycleAudioBoost = () => {
                 if (!media) return;
                 boostIdx = (boostIdx + 1) % boosts.length;
-                const lvl = boosts[boostIdx];
-                try {
-                    if (!audioCtx && (window.AudioContext || window.webkitAudioContext)) {
-                        const Ctx = window.AudioContext || window.webkitAudioContext;
-                        audioCtx = new Ctx();
-                        const src = audioCtx.createMediaElementSource(media);
-                        gainNode = audioCtx.createGain();
-                        src.connect(gainNode);
-                        gainNode.connect(audioCtx.destination);
-                    }
-                    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-                    if (gainNode) gainNode.gain.value = lvl;
-                } catch (_) {}
-                const btn = document.getElementById('boostBtn');
-                if (btn) btn.textContent = `🔊 ${Math.round(lvl * 100)}%`;
-                notify(`🔊 Volume Boost: ${Math.round(lvl * 100)}%`);
+                window.setAudioBoostPercent(Math.round(boosts[boostIdx] * 100));
+            };
+
+            window.applyEqualizer = (preset) => {
+                if (!ensureAudioPipeline() || !eqLow || !eqMid || !eqHigh) return;
+                if (preset === 'bass') {
+                    eqLow.gain.value = 8; eqMid.gain.value = 0; eqHigh.gain.value = 1;
+                } else if (preset === 'voice') {
+                    eqLow.gain.value = -4; eqMid.gain.value = 7; eqHigh.gain.value = 3;
+                } else if (preset === 'treble') {
+                    eqLow.gain.value = -2; eqMid.gain.value = 2; eqHigh.gain.value = 8;
+                } else {
+                    eqLow.gain.value = 0; eqMid.gain.value = 0; eqHigh.gain.value = 0;
+                }
+                notify(`🎛️ EQ: ${preset.toUpperCase()}`);
+            };
+
+            window.setBrightness = (val) => {
+                if (!media) return;
+                const pct = Math.max(50, Math.min(150, Number(val) || 100));
+                media.style.filter = `brightness(${pct}%)`;
+                const el = document.getElementById('brightnessVal');
+                if (el) el.textContent = `${pct}%`;
             };
 
             window.switchAudioTrack = (val) => {
@@ -814,7 +1105,7 @@
                     }
                     notify(`🎧 Switched to Audio Track #${idx + 1}`);
                 } else {
-                    notify(`🎧 Track #${idx + 1} selected (Browser exposes native multi-audio in Safari/Edge or use VLC/MX Player)`);
+                    notify(`🎧 Track #${idx + 1} selected (Use PLAYit / MX / VLC for multi-muxed audio)`);
                 }
             };
 
@@ -843,6 +1134,39 @@
                 window.switchSubtitleTrack(String(nextIdx));
             };
 
+            window.loadLocalSubtitle = async (inputEl) => {
+                if (!media || !inputEl || !inputEl.files || !inputEl.files[0]) return;
+                const file = inputEl.files[0];
+                try {
+                    let text = await file.text();
+                    if (file.name.toLowerCase().endsWith('.srt')) {
+                        text = 'WEBVTT\n\n' + text.replace(/\r+/g, '').replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+                    }
+                    const blob = new Blob([text], { type: 'text/vtt' });
+                    const url = URL.createObjectURL(blob);
+                    const track = document.createElement('track');
+                    track.kind = 'subtitles';
+                    track.label = file.name;
+                    track.srclang = 'und';
+                    track.src = url;
+                    track.default = true;
+                    media.appendChild(track);
+                    const newIdx = media.textTracks.length - 1;
+                    const sel = document.getElementById('subtitleSelect');
+                    if (sel) {
+                        const opt = document.createElement('option');
+                        opt.value = String(newIdx);
+                        opt.textContent = '💬 ' + file.name;
+                        sel.appendChild(opt);
+                        sel.value = String(newIdx);
+                    }
+                    window.switchSubtitleTrack(String(newIdx));
+                    notify('💬 Loaded subtitle: ' + file.name);
+                } catch (_) {
+                    notify('⚠️ Could not load subtitle file');
+                }
+            };
+
             window.toggleTheatre = () => {
                 const mc = document.getElementById('mainContainer');
                 const btn = document.getElementById('theatreBtn');
@@ -851,6 +1175,14 @@
                     if (btn) btn.classList.toggle('active', active);
                     notify(active ? '🖥️ Theatre Mode ON' : '🖥️ Theatre Mode OFF');
                 }
+            };
+
+            window.toggleFullscreen = async () => {
+                if (!playerContainer) return;
+                try {
+                    if (document.fullscreenElement) await document.exitFullscreen();
+                    else await playerContainer.requestFullscreen();
+                } catch (_) { notify('⛶ ғᴜʟʟsᴄʀᴇᴇɴ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); }
             };
 
             window.cancelWatchStream = () => {
@@ -1036,7 +1368,9 @@
                 if (audioPanelSum && m.audio_track) audioPanelSum.textContent = m.audio_track;
                 if (durEl && m.duration > 0) durEl.textContent = formatDuration(m.duration);
                 if (subEl && Array.isArray(m.subtitle_tracks)) subEl.textContent = m.subtitle_tracks.length + ' ᴛʀᴀᴄᴋ(s)';
-                if (mimeEl && m.mime_type) mimeEl.textContent = m.mime_type;
+                if (mimeEl && m.mime_type) {
+                    mimeEl.textContent = (m.width && m.height) ? `${m.mime_type} (${m.width}×${m.height})` : m.mime_type;
+                }
                 if (captionTextEl && m.caption) captionTextEl.textContent = m.caption;
 
                 if (audioPanelList && Array.isArray(m.audio_tracks) && m.audio_tracks.length > 0) {
@@ -1094,11 +1428,8 @@
                 } catch (_) {}
             }
 
-            const initialDur = Number({{ metadata.duration | default(0) | tojson }}) || 0;
-            const durElInit = document.getElementById('metaDuration');
-            if (durElInit && initialDur > 0) durElInit.textContent = formatDuration(initialDur);
-
-            if (media) {
+            function bindMediaEvents() {
+                if (!media) return;
                 restoreState();
                 media.addEventListener('timeupdate', saveState, { passive: true });
                 media.addEventListener('volumechange', saveState, { passive: true });
@@ -1109,6 +1440,7 @@
                 });
                 media.addEventListener('playing', () => {
                     if (status) status.classList.add('hidden');
+                    ensureAudioPipeline();
                     if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '🟢 sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: sᴛʀᴇᴀᴍɪɴɢ ʟɪᴠᴇ';
                     const playBtn = document.getElementById('playPauseBtn');
                     if (playBtn) playBtn.classList.add('active');
@@ -1135,8 +1467,35 @@
                 media.addEventListener('timeupdate', () => {
                     if (abStart !== null && abEnd !== null && media.currentTime >= abEnd) media.currentTime = abStart;
                 });
-                setTimeout(attemptAutoPlay, 150);
+                media.addEventListener('touchend', (ev) => {
+                    const now = Date.now();
+                    if (now - lastTapTime < 280 && ev.changedTouches && ev.changedTouches[0]) {
+                        const rect = media.getBoundingClientRect();
+                        const x = ev.changedTouches[0].clientX - rect.left;
+                        if (x < rect.width * 0.35) window.seekBy(-10);
+                        else if (x > rect.width * 0.65) window.seekBy(10);
+                        else window.togglePlayPause();
+                    }
+                    lastTapTime = now;
+                }, { passive: true });
             }
+
+            const initialDur = Number({{ metadata.duration | default(0) | tojson }}) || 0;
+            const durElInit = document.getElementById('metaDuration');
+            if (durElInit && initialDur > 0) durElInit.textContent = formatDuration(initialDur);
+
+            if (media) {
+                bindMediaEvents();
+                setTimeout(attemptAutoPlay, 120);
+            }
+
+            if (document.getElementById('inlineTextPreview')) {
+                loadInlineTextPreview();
+            }
+
+            document.addEventListener('pointerdown', () => {
+                if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+            }, { passive: true });
 
             window.toggleLoop = () => {
                 if (!media) return;
@@ -1154,6 +1513,7 @@
             };
             window.captureFrame = () => {
                 if (!media || media.tagName !== 'VIDEO') return notify('ғʀᴀᴍᴇ ᴄᴀᴘᴛᴜʀᴇ ɪs ᴏɴʟʏ ғᴏʀ ᴠɪᴅᴇᴏ');
+                if (!media.videoWidth || !media.videoHeight) return notify('⏳ ᴠɪᴅᴇᴏ ғʀᴀᴍᴇ ɴᴏᴛ ʀᴇᴀᴅʏ ʏᴇᴛ');
                 try {
                     const canvas = document.createElement('canvas');
                     canvas.width = media.videoWidth;
@@ -1227,13 +1587,24 @@
                 if (btn) btn.textContent = `▣ ${fits[fitIdx].toUpperCase()}`;
                 notify(`▣ ғɪᴛ: ${fits[fitIdx].toUpperCase()}`);
             };
+            window.rotateVideo = () => {
+                if (!media) return;
+                rotateDeg = (rotateDeg + 90) % 360;
+                applyMediaTransform();
+                const btn = document.getElementById('rotateBtn');
+                if (btn) {
+                    btn.textContent = `⟳ ${rotateDeg}°`;
+                    btn.classList.toggle('active', rotateDeg !== 0);
+                }
+                notify(`⟳ ʀᴏᴛᴀᴛᴇ: ${rotateDeg}°`);
+            };
             window.toggleMirror = () => {
                 if (!media) return;
-                const mirrored = media.style.transform !== 'scaleX(-1)';
-                media.style.transform = mirrored ? 'scaleX(-1)' : '';
+                isMirrored = !isMirrored;
+                applyMediaTransform();
                 const btn = document.getElementById('mirrorBtn');
-                if (btn) btn.classList.toggle('active', mirrored);
-                notify(mirrored ? '↔ ᴍɪʀʀᴏʀ ᴏɴ' : '↔ ᴍɪʀʀᴏʀ ᴏғғ');
+                if (btn) btn.classList.toggle('active', isMirrored);
+                notify(isMirrored ? '↔ ᴍɪʀʀᴏʀ ᴏɴ' : '↔ ᴍɪʀʀᴏʀ ᴏғғ');
             };
             window.toggleWakeLock = async () => {
                 const btn = document.getElementById('wakeBtn');
@@ -1262,9 +1633,10 @@
                 if (event.code === 'Space') { event.preventDefault(); window.togglePlayPause(); }
                 else if (event.key === 'ArrowRight') window.seekBy(10);
                 else if (event.key === 'ArrowLeft') window.seekBy(-10);
-                else if (event.key.toLowerCase() === 'm') media.muted = !media.muted;
+                else if (event.key.toLowerCase() === 'm') window.toggleMute();
                 else if (event.key.toLowerCase() === 'l') window.toggleLoop();
                 else if (event.key.toLowerCase() === 't') window.toggleTheatre();
+                else if (event.key.toLowerCase() === 'f') window.toggleFullscreen();
                 else if (event.key.toLowerCase() === 'c') window.toggleSubtitlesQuick();
             });
 
