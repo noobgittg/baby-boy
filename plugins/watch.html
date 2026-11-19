@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,26 +8,22 @@
     <title>{{ file_name | default("Watch Media") }} — MMW Sonic Ultra Stream</title>
     <style>
         :root {
-            --bg: #f8fafc;
+            --bg: #ffffff;
             --surface: #ffffff;
-            --surface-2: #f1f5f9;
+            --surface-2: #f8fafc;
             --border: rgba(14, 165, 233, 0.28);
             --border-soft: rgba(15, 23, 42, 0.1);
             --accent: #0284c7;
             --accent-2: #4f46e5;
             --emerald: #059669;
-            --amber: #d97706;
             --danger: #dc2626;
             --text: #0f172a;
             --muted: #475569;
-            --header-bg: rgba(255, 255, 255, 0.96);
+            --header-bg: rgba(255, 255, 255, 0.98);
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             background-color: var(--bg);
-            background-image:
-                radial-gradient(at 10% 10%, rgba(14, 165, 233, 0.1) 0px, transparent 50%),
-                radial-gradient(at 90% 85%, rgba(99, 102, 241, 0.08) 0px, transparent 50%);
             color: var(--text);
             font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
             min-height: 100vh;
@@ -38,6 +35,7 @@
         .smallcap-ui code, .smallcap-ui input, .smallcap-ui button, .smallcap-ui select, .smallcap-ui pre { font-variant: normal; }
         .hidden { display: none !important; }
         .select-none { user-select: none; -webkit-user-select: none; }
+        .touch-locked video, .touch-locked audio { pointer-events: none; }
 
         .topbar {
             width: 100%;
@@ -45,372 +43,130 @@
             top: 0;
             z-index: 50;
             background: var(--header-bg);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
             border-bottom: 1px solid var(--border);
             padding: 12px 16px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 12px;
-            box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+            box-shadow: 0 2px 12px rgba(15, 23, 42, 0.05);
         }
-        .brand-wrap {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            min-width: 0;
-            flex: 1;
-        }
+        .brand-wrap { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
         .brand-logo {
-            width: 38px;
-            height: 38px;
-            border-radius: 12px;
+            width: 38px; height: 38px; border-radius: 12px;
             background: linear-gradient(135deg, #0ea5e9, #4f46e5);
-            color: #ffffff;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            text-decoration: none;
-            font-weight: 800;
-            font-size: 1.1rem;
-            flex-shrink: 0;
-            box-shadow: 0 6px 16px rgba(14, 165, 233, 0.28);
+            color: #ffffff; display: flex; align-items: center; justify-content: center;
+            text-decoration: none; font-weight: 800; font-size: 1.1rem; flex-shrink: 0;
         }
         .title-wrap { min-width: 0; }
-        .file-title {
-            font-size: 0.96rem;
-            font-weight: 800;
-            color: var(--text);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .file-sub {
-            font-size: 0.75rem;
-            color: var(--emerald);
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            flex-wrap: wrap;
-        }
-        .topbar-actions {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-shrink: 0;
-        }
+        .file-title { font-size: 0.96rem; font-weight: 800; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .file-sub { font-size: 0.75rem; color: var(--emerald); font-weight: 700; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .topbar-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
         .main-container {
-            width: 100%;
-            max-width: 1080px;
-            margin: 0 auto;
-            padding: 18px 14px 36px;
-            display: flex;
-            flex-direction: column;
-            gap: 18px;
-            transition: max-width 0.2s ease;
+            width: 100%; max-width: 1080px; margin: 0 auto; padding: 18px 14px 36px;
+            display: flex; flex-direction: column; gap: 18px; transition: max-width 0.2s ease;
         }
         .main-container.theatre-active { max-width: 100%; padding-left: 20px; padding-right: 20px; }
 
         .player-box {
-            position: relative;
-            width: 100%;
-            background: #0f172a;
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            overflow: hidden;
-            box-shadow: 0 18px 40px -12px rgba(15, 23, 42, 0.22);
+            position: relative; width: 100%; background: #ffffff;
+            border: 1px solid var(--border); border-radius: 20px; overflow: hidden;
+            box-shadow: 0 12px 32px -12px rgba(15, 23, 42, 0.14);
         }
-        .player-box.is-video { aspect-ratio: 16 / 9; }
-        .player-box.is-audio {
-            min-height: 120px;
-            display: flex;
-            align-items: center;
-            padding: 24px 16px;
-            background: #ffffff;
-        }
-        .player-box.is-doc {
-            background: #ffffff;
-            min-height: 220px;
-        }
-        .player-box video {
-            width: 100%;
-            height: 100%;
-            display: block;
-            object-fit: contain;
-            background: #000000;
-            transition: transform 0.2s ease, filter 0.15s ease;
-        }
+        .player-box.is-video { aspect-ratio: 16 / 9; background: #f8fafc; }
+        .player-box.is-audio { min-height: 120px; display: flex; align-items: center; padding: 24px 16px; background: #ffffff; }
+        .player-box.is-doc { background: #ffffff; min-height: 220px; }
+        .player-box video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000000; transition: transform 0.2s ease, filter 0.15s ease; }
         .player-box audio { width: 100%; }
-        .player-box img.preview-image {
-            width: 100%;
-            max-height: 75vh;
-            object-fit: contain;
-            display: block;
-            background: #f8fafc;
-            transition: transform 0.2s ease;
-        }
-        .player-box iframe.preview-frame {
-            width: 100%;
-            height: 70vh;
-            border: none;
-            display: block;
-            background: #ffffff;
-        }
-        .text-preview-wrap {
-            padding: 16px;
-            background: #ffffff;
-        }
+        .player-box img.preview-image { width: 100%; max-height: 75vh; object-fit: contain; display: block; background: #ffffff; transition: transform 0.2s ease; }
+        .player-box iframe.preview-frame { width: 100%; height: 70vh; border: none; display: block; background: #ffffff; }
+        .text-preview-wrap { padding: 16px; background: #ffffff; }
         .text-preview-pre {
-            background: #f8fafc;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 14px;
-            max-height: 55vh;
-            overflow: auto;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-            font-size: 0.84rem;
-            line-height: 1.5;
-            color: #0f172a;
-            white-space: pre-wrap;
-            word-break: break-word;
+            background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+            max-height: 55vh; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.84rem; line-height: 1.5; color: #0f172a; white-space: pre-wrap; word-break: break-word;
         }
         .player-status-toast {
-            position: absolute;
-            left: 14px;
-            right: 14px;
-            bottom: 58px;
-            background: rgba(255, 255, 255, 0.96);
-            color: var(--text);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 8px 14px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            pointer-events: none;
-            z-index: 20;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+            position: absolute; left: 14px; right: 14px; bottom: 58px;
+            background: rgba(255, 255, 255, 0.98); color: var(--text); border: 1px solid var(--border);
+            border-radius: 12px; padding: 8px 14px; font-size: 0.8rem; font-weight: 700;
+            pointer-events: none; z-index: 20; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
         }
         .unmute-overlay-btn {
-            position: absolute;
-            top: 14px;
-            right: 14px;
-            z-index: 25;
-            background: #ffffff;
-            color: var(--text);
-            border: 1px solid var(--border);
-            border-radius: 999px;
-            padding: 7px 14px;
-            font-size: 0.78rem;
-            font-weight: 800;
-            cursor: pointer;
-            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.22);
+            position: absolute; top: 14px; right: 14px; z-index: 25;
+            background: #ffffff; color: var(--text); border: 1px solid var(--border);
+            border-radius: 999px; padding: 7px 14px; font-size: 0.78rem; font-weight: 800;
+            cursor: pointer; box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
         }
         .fallback-box {
-            min-height: 220px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 14px;
-            padding: 28px 18px;
-            text-align: center;
-            color: var(--text);
-            background: #ffffff;
+            min-height: 220px; display: flex; flex-direction: column; align-items: center;
+            justify-content: center; gap: 14px; padding: 28px 18px; text-align: center;
+            color: var(--text); background: #ffffff;
         }
 
         .ultra-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 18px;
-            box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.08);
+            background: var(--surface); border: 1px solid var(--border); border-radius: 20px;
+            padding: 18px; box-shadow: 0 8px 26px -10px rgba(15, 23, 42, 0.08);
         }
-        .card-head {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-bottom: 14px;
-        }
+        .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
         .card-title { font-size: 1rem; font-weight: 800; display: flex; align-items: center; gap: 8px; color: var(--text); }
         .card-sub { font-size: 0.78rem; color: var(--muted); font-weight: 600; }
 
         .btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            padding: 9px 14px;
-            border-radius: 12px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            text-decoration: none;
-            cursor: pointer;
-            border: 1px solid var(--border);
-            background: var(--surface-2);
-            color: var(--text);
+            display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            padding: 9px 14px; border-radius: 12px; font-size: 0.8rem; font-weight: 700;
+            text-decoration: none; cursor: pointer; border: 1px solid var(--border);
+            background: var(--surface-2); color: var(--text);
             transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
         }
         .btn:hover { transform: translateY(-1px); border-color: var(--accent); background: #e0f2fe; }
-        .btn-primary {
-            background: linear-gradient(135deg, #0ea5e9, #4f46e5);
-            color: #ffffff;
-            border-color: transparent;
-            font-weight: 800;
-        }
+        .btn-primary { background: linear-gradient(135deg, #0ea5e9, #4f46e5); color: #ffffff; border-color: transparent; font-weight: 800; }
         .btn-primary:hover { background: linear-gradient(135deg, #0284c7, #4338ca); color: #ffffff; }
-        .btn-emerald {
-            background: linear-gradient(135deg, #059669, #10b981);
-            color: #ffffff;
-            border-color: transparent;
-            font-weight: 800;
-        }
+        .btn-emerald { background: linear-gradient(135deg, #059669, #10b981); color: #ffffff; border-color: transparent; font-weight: 800; }
         .btn-emerald:hover { background: linear-gradient(135deg, #047857, #059669); color: #ffffff; }
-        .btn-danger {
-            background: rgba(220, 38, 38, 0.1);
-            color: var(--danger);
-            border-color: rgba(220, 38, 38, 0.35);
-        }
-        .btn-pill {
-            padding: 7px 11px;
-            font-size: 0.76rem;
-            border-radius: 10px;
-        }
-        .btn-pill.active {
-            background: #e0f2fe;
-            border-color: var(--accent);
-            color: var(--accent);
-        }
+        .btn-danger { background: rgba(220, 38, 38, 0.1); color: var(--danger); border-color: rgba(220, 38, 38, 0.35); }
+        .btn-pill { padding: 7px 11px; font-size: 0.76rem; border-radius: 10px; }
+        .btn-pill.active { background: #e0f2fe; border-color: var(--accent); color: var(--accent); }
 
-        .controls-row {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 8px;
-            margin-top: 12px;
-        }
+        .controls-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
         .track-select {
-            background: var(--surface-2);
-            color: var(--text);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 7px 10px;
-            font-size: 0.76rem;
-            font-weight: 700;
-            outline: none;
-            cursor: pointer;
+            background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
+            border-radius: 10px; padding: 7px 10px; font-size: 0.76rem; font-weight: 700; outline: none; cursor: pointer;
         }
         .slider-box {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 5px 10px;
-            font-size: 0.74rem;
-            font-weight: 700;
-            color: var(--text);
+            display: inline-flex; align-items: center; gap: 8px; background: var(--surface-2);
+            border: 1px solid var(--border); border-radius: 10px; padding: 5px 10px;
+            font-size: 0.74rem; font-weight: 700; color: var(--text);
         }
-        .slider-box input[type="range"] {
-            width: 90px;
-            accent-color: var(--accent);
-            cursor: pointer;
-        }
+        .slider-box input[type="range"] { width: 96px; accent-color: var(--accent); cursor: pointer; }
 
-        .meta-pills {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
-            gap: 10px;
-            margin-top: 12px;
-        }
-        .meta-item {
-            background: var(--surface-2);
-            border: 1px solid var(--border-soft);
-            border-radius: 12px;
-            padding: 10px 12px;
-            font-size: 0.78rem;
-        }
+        .meta-pills { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 10px; margin-top: 12px; }
+        .meta-item { background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 12px; padding: 10px 12px; font-size: 0.78rem; }
         .meta-item .k { color: var(--muted); font-weight: 700; display: block; font-size: 0.7rem; }
         .meta-item .v { color: var(--accent); font-weight: 800; word-break: break-word; }
 
         .panel-box {
-            margin-top: 12px;
-            padding: 12px 14px;
-            border-radius: 14px;
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            font-size: 0.82rem;
-            color: var(--text);
-            white-space: pre-wrap;
-            word-break: break-word;
+            margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2);
+            border: 1px solid var(--border); font-size: 0.82rem; color: var(--text);
+            white-space: pre-wrap; word-break: break-word;
         }
 
-        .stream-progress-box {
-            margin-top: 14px;
-            padding: 12px 14px;
-            border-radius: 14px;
-            background: var(--surface-2);
-            border: 1px solid var(--border);
-            font-size: 0.78rem;
-        }
-        .progress-top {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-        .stream-progress-track {
-            width: 100%;
-            height: 8px;
-            background: rgba(15, 23, 42, 0.1);
-            border-radius: 999px;
-            overflow: hidden;
-            margin-top: 8px;
-        }
-        .stream-progress-fill {
-            height: 100%;
-            width: 0%;
-            background: linear-gradient(90deg, #0ea5e9, #10b981);
-            transition: width 0.12s linear;
-        }
+        .stream-progress-box { margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); font-size: 0.78rem; }
+        .progress-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+        .stream-progress-track { width: 100%; height: 8px; background: rgba(15, 23, 42, 0.1); border-radius: 999px; overflow: hidden; margin-top: 8px; }
+        .stream-progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #0ea5e9, #10b981); transition: width 0.12s linear; }
 
-        .players-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 10px;
-        }
+        .players-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
         .player-card {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            padding: 12px 14px;
-            border-radius: 14px;
-            text-decoration: none;
-            color: var(--text);
-            border: 1px solid var(--border);
-            background: var(--surface-2);
+            display: flex; align-items: center; justify-content: space-between; gap: 10px;
+            padding: 12px 14px; border-radius: 14px; text-decoration: none; color: var(--text);
+            border: 1px solid var(--border); background: var(--surface-2);
             transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
         }
         .player-card:hover { transform: translateY(-2px); border-color: var(--accent); background: #e0f2fe; }
         .player-card-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
-        .player-icon {
-            width: 38px;
-            height: 38px;
-            border-radius: 11px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 800;
-            font-size: 0.85rem;
-            flex-shrink: 0;
-        }
+        .player-icon { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.85rem; flex-shrink: 0; }
         .icon-playit { background: #f59e0b; color: #ffffff; }
         .icon-mx { background: #2563eb; color: #ffffff; }
         .icon-vlc { background: #ea580c; color: #ffffff; }
@@ -418,29 +174,10 @@
         .player-name { font-weight: 800; font-size: 0.86rem; }
         .player-tag { font-size: 0.7rem; color: var(--muted); font-weight: 700; }
 
-        .footer-actions {
-            margin-top: 16px;
-            padding-top: 14px;
-            border-top: 1px solid var(--border-soft);
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-        }
-        .badge-pill {
-            padding: 5px 12px;
-            border-radius: 999px;
-            font-size: 0.72rem;
-            font-weight: 800;
-            background: rgba(5, 150, 105, 0.12);
-            color: var(--emerald);
-            border: 1px solid rgba(5, 150, 105, 0.3);
-        }
+        .footer-actions { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-soft); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+        .badge-pill { padding: 5px 12px; border-radius: 999px; font-size: 0.72rem; font-weight: 800; background: rgba(5, 150, 105, 0.12); color: var(--emerald); border: 1px solid rgba(5, 150, 105, 0.3); }
 
-        @media (max-width: 900px) {
-            .players-grid { grid-template-columns: repeat(2, 1fr); }
-        }
+        @media (max-width: 900px) { .players-grid { grid-template-columns: repeat(2, 1fr); } }
         @media (max-width: 560px) {
             .players-grid { grid-template-columns: 1fr; }
             .hide-sm { display: none; }
@@ -487,7 +224,7 @@
             {% elif metadata.media_kind == 'video' and metadata.browser_supported %}
             <video id="mediaPlayer" autoplay playsinline crossorigin="anonymous" preload="auto" fetchpriority="high" controls>
                 <source src="{{ stream_url }}" type="{{ metadata.mime_type | default(mime_type | default('video/mp4')) }}">
-                {% for track in metadata.subtitle_tracks %}{% if track.url %}<track kind="subtitles" src="{{ track.url }}" srclang="{{ track.lang_code | default('und') }}" label="{{ track.language | default('Subtitle ' ~ loop.index) }}">{% endif %}{% endfor %}
+                {% for track in metadata.subtitle_tracks %}{% if track.url %}<track kind="subtitles" src="{{ track.url }}" srclang="{{ track.lang_code | default('und') }}" label="{{ track.language | default('Undetermined') }}">{% endif %}{% endfor %}
             </video>
             <button type="button" id="unmuteAutoplayBtn" onclick="unmuteAutoplay()" class="unmute-overlay-btn hidden">🔊 ᴛᴀᴘ ᴛᴏ ᴜɴᴍᴜᴛᴇ</button>
             {% elif metadata.media_kind == 'image' or (metadata.mime_type and metadata.mime_type.startswith('image/')) %}
@@ -513,10 +250,10 @@
             </div>
             {% else %}
             <div id="fallbackBox" class="fallback-box">
-                <span style="font-size: 2.6rem;">{% if metadata.media_kind == 'video' %}🎬{% else %}📦{% endif %}</span>
+                <span style="font-size: 2.6rem;">{% if metadata.media_kind == 'video' %}🎬{% elif metadata.media_kind == 'audio' %}🎵{% else %}📦{% endif %}</span>
                 <p style="font-weight: 700;">{% if metadata.media_kind == 'video' %}ᴛʜɪs ᴠɪᴅᴇᴏ ({{ metadata.mime_type }}) ɪs ᴏᴘᴛɪᴍɪᴢᴇᴅ ғᴏʀ ᴇxᴛᴇʀɴᴀʟ ʜᴡ+ ᴘʟᴀʏᴇʀs (ᴘʟᴀʏɪᴛ / ᴍx / ᴠʟᴄ / s ᴘʟᴀʏᴇʀ){% else %}{{ metadata.media_kind | default('document') | upper }} ғɪʟᴇ ({{ metadata.mime_type }}) ʀᴇᴀᴅʏ ғᴏʀ ᴢᴇʀᴏ-ʙᴜғғᴇʀ ᴅᴏᴡɴʟᴏᴀᴅ{% endif %}</p>
                 <div class="controls-row" style="justify-content: center;">
-                    {% if metadata.media_kind == 'video' %}
+                    {% if metadata.media_kind in ['video', 'audio'] %}
                     <button type="button" onclick="forceBrowserPlay()" class="btn btn-pill">▶️ ᴛʀʏ ʙʀᴏᴡsᴇʀ ᴘʟᴀʏ</button>
                     {% endif %}
                     <button type="button" onclick="streamSaveToDisk()" class="btn btn-emerald">🚀 sᴛʀᴇᴀᴍ sᴀᴠᴇ ᴛᴏ ᴅɪsᴋ</button>
@@ -540,11 +277,11 @@
                 </div>
                 <div class="meta-item">
                     <span class="k">🎧 ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋ</span>
-                    <span class="v" id="metaAudioTrack">{{ metadata.audio_track | default('Default Audio') }}</span>
+                    <span class="v" id="metaAudioTrack">{{ metadata.audio_track | default('Undetermined') }}</span>
                 </div>
                 <div class="meta-item">
                     <span class="k">⏱️ ᴅᴜʀᴀᴛɪᴏɴ</span>
-                    <span class="v" id="metaDuration">{{ metadata.duration | default(0) }}s</span>
+                    <span class="v" id="metaDuration">{% if metadata.duration and metadata.duration > 0 %}{{ metadata.duration }}s{% else %}Undetermined{% endif %}</span>
                 </div>
                 <div class="meta-item">
                     <span class="k">💬 sᴜʙᴛɪᴛʟᴇs</span>
@@ -561,15 +298,15 @@
                 <button type="button" class="btn btn-pill" onclick="toggleMetadata('audioPanel')" id="btnAudioToggle">🎧 ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋs</button>
                 <button type="button" class="btn btn-pill" onclick="toggleMetadata('languagePanel')" id="btnLangToggle">🌐 ʟᴀɴɢᴜᴀɢᴇ & sᴜʙs</button>
                 <select id="audioTrackSelect" class="track-select" onchange="switchAudioTrack(this.value)" title="Select Audio Track">
-                    <option value="">🎧 ᴀᴜᴅɪᴏ: {{ metadata.audio_track | default('Default') }}</option>
+                    <option value="">🎧 ᴀᴜᴅɪᴏ: {{ metadata.audio_track | default('Undetermined') }}</option>
                     {% for track in metadata.audio_tracks %}
-                    <option value="{{ loop.index0 }}">🎧 {{ track.language | default(track.lang | default('Track ' ~ loop.index)) }} ({{ track.codec | default('AUDIO') }} {{ track.channels | default(2) }}ch)</option>
+                    <option value="{{ loop.index0 }}">🎧 {{ track.language | default('Undetermined') }} ({{ track.codec | default('Undetermined') }}{% if track.channels %} {{ track.channels }}ch{% endif %})</option>
                     {% endfor %}
                 </select>
                 <select id="subtitleSelect" class="track-select" onchange="switchSubtitleTrack(this.value)" title="Select Subtitle Track">
                     <option value="-1">💬 sᴜʙᴛɪᴛʟᴇs: ᴏғғ</option>
                     {% for track in metadata.subtitle_tracks %}
-                    <option value="{{ loop.index0 }}">💬 {{ track.language | default(track.lang | default('Subtitle ' ~ loop.index)) }}</option>
+                    <option value="{{ loop.index0 }}">💬 {{ track.language | default('Undetermined') }}</option>
                     {% endfor %}
                 </select>
                 {% if metadata.media_kind in ['audio', 'video'] %}
@@ -642,14 +379,14 @@
             </div>
 
             <div id="captionPanel" class="panel-box {% if not metadata.caption %}hidden{% endif %}"><strong>📝 ᴄᴀᴘᴛɪᴏɴ:</strong>
-<span id="captionText">{{ metadata.caption if metadata.caption else 'No custom caption attached to this media.' }}</span></div>
-            <div id="audioPanel" class="panel-box hidden"><strong>🎧 ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋs (<span id="audioPanelSummary">{{ metadata.audio_track }}</span>):</strong>
-<span id="audioPanelList">{% if metadata.audio_tracks %}{% for track in metadata.audio_tracks %}• Track {{ loop.index }}: {{ track.language | default(track.lang | default('Undetermined')) }} · {{ track.codec | default('AUDIO') }} · {{ track.channels | default(2) }}ch ({{ track.channel_layout | default('stereo') }})
-{% endfor %}{% else %}• Default Audio Stream{% endif %}</span></div>
-            <div id="languagePanel" class="panel-box hidden"><strong>🌐 ʟᴀɴɢᴜᴀɢᴇ:</strong> <span id="langPanelValue">{{ metadata.language }}</span>
+<span id="captionText">{{ metadata.caption if metadata.caption else 'Undetermined (No caption attached)' }}</span></div>
+            <div id="audioPanel" class="panel-box hidden"><strong>🎧 ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋs (<span id="audioPanelSummary">{{ metadata.audio_track | default('Undetermined') }}</span>):</strong>
+<span id="audioPanelList">{% if metadata.audio_tracks %}{% for track in metadata.audio_tracks %}• Track {{ loop.index }}: {{ track.language | default('Undetermined') }} · {{ track.codec | default('Undetermined') }}{% if track.channels %} · {{ track.channels }}ch{% endif %} ({{ track.channel_layout | default('Undetermined') }})
+{% endfor %}{% else %}• Undetermined{% endif %}</span></div>
+            <div id="languagePanel" class="panel-box hidden"><strong>🌐 ʟᴀɴɢᴜᴀɢᴇ:</strong> <span id="langPanelValue">{{ metadata.language | default('Undetermined') }}</span>
 <strong>💬 sᴜʙᴛɪᴛʟᴇs:</strong>
-<span id="subPanelList">{% if metadata.subtitle_tracks %}{% for track in metadata.subtitle_tracks %}• Subtitle {{ loop.index }}: {{ track.language | default(track.lang | default('Undetermined')) }} ({{ track.codec | default('SUB') }})
-{% endfor %}{% else %}• No embedded subtitle tracks detected{% endif %}</span></div>
+<span id="subPanelList">{% if metadata.subtitle_tracks %}{% for track in metadata.subtitle_tracks %}• Subtitle {{ loop.index }}: {{ track.language | default('Undetermined') }} ({{ track.codec | default('Undetermined') }})
+{% endfor %}{% else %}• Undetermined (No embedded subtitle tracks){% endif %}</span></div>
         </section>
 
         <section class="ultra-card">
@@ -735,13 +472,14 @@
             const cancelWatchStreamBtn = document.getElementById('cancelWatchStreamBtn');
             const storageKey = `mmw-playback:${location.pathname}`;
             const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0];
-            const boosts = [1.0, 1.5, 2.0, 3.0, 5.0];
+            const boosts = [1.0, 1.5, 2.0, 3.0, 4.0, 5.0];
             const fits = ['contain', 'cover', 'fill'];
             const FILE_ID = {{ file_id | default('') | tojson }};
             const STREAM_URL = {{ stream_url | tojson }};
             const DOWNLOAD_URL = {{ download_url | tojson }};
             const FILE_NAME = {{ file_name | default('stream_media.mp4') | tojson }};
             const MIME_TYPE = {{ (metadata.mime_type | default(mime_type | default('video/mp4'))) | tojson }};
+            const MEDIA_KIND = {{ (metadata.media_kind | default('document')) | tojson }};
             const EXPECTED_BYTES = Number({{ file_size_bytes | default(0) | tojson }}) || 0;
             const memoryCache = new Map();
 
@@ -767,6 +505,7 @@
             let wakeLock = null;
             let autoplayAttempted = false;
             let lastTapTime = 0;
+            let metadataPollCount = 0;
 
             function formatBytes(bytes) {
                 const v = Number(bytes) || 0;
@@ -778,7 +517,7 @@
 
             function formatDuration(sec) {
                 const s = Math.max(0, Math.round(Number(sec) || 0));
-                if (s <= 0) return '0s';
+                if (s <= 0) return 'Undetermined';
                 const h = Math.floor(s / 3600);
                 const m = Math.floor((s % 3600) / 60);
                 const rem = s % 60;
@@ -807,9 +546,7 @@
                 if (!fileId || !data) return;
                 const entry = { expires: Date.now() + 60000, data: data };
                 memoryCache.set('info:' + fileId, entry);
-                try {
-                    sessionStorage.setItem('mmw-info:' + fileId, JSON.stringify(entry));
-                } catch (_) {}
+                try { sessionStorage.setItem('mmw-info:' + fileId, JSON.stringify(entry)); } catch (_) {}
             }
 
             function getCachedTextPreview(fileId) {
@@ -832,9 +569,7 @@
                 if (!fileId || typeof text !== 'string') return;
                 const entry = { expires: Date.now() + 120000, data: text };
                 memoryCache.set('txt:' + fileId, entry);
-                try {
-                    sessionStorage.setItem('mmw-txt:' + fileId, JSON.stringify(entry));
-                } catch (_) {}
+                try { sessionStorage.setItem('mmw-txt:' + fileId, JSON.stringify(entry)); } catch (_) {}
             }
 
             function notify(message, persistent = false) {
@@ -864,11 +599,11 @@
                         gainNode = audioCtx.createGain();
                         gainNode.gain.value = currentGain;
                         compressorNode = audioCtx.createDynamicsCompressor();
-                        compressorNode.threshold.value = -6;
-                        compressorNode.knee.value = 12;
-                        compressorNode.ratio.value = 8;
-                        compressorNode.attack.value = 0.003;
-                        compressorNode.release.value = 0.15;
+                        compressorNode.threshold.value = -4;
+                        compressorNode.knee.value = 10;
+                        compressorNode.ratio.value = 12;
+                        compressorNode.attack.value = 0.002;
+                        compressorNode.release.value = 0.12;
                         src.connect(eqLow);
                         eqLow.connect(eqMid);
                         eqMid.connect(eqHigh);
@@ -897,14 +632,12 @@
                 imgScale = Math.max(0.5, Math.min(4, imgScale + delta));
                 img.style.transform = `scale(${imgScale}) rotate(${imgRot}deg)`;
             };
-
             window.rotateImage = () => {
                 const img = document.getElementById('imagePreview');
                 if (!img) return;
                 imgRot = (imgRot + 90) % 360;
                 img.style.transform = `scale(${imgScale}) rotate(${imgRot}deg)`;
             };
-
             window.resetImage = () => {
                 const img = document.getElementById('imagePreview');
                 if (!img) return;
@@ -912,7 +645,6 @@
                 imgRot = 0;
                 img.style.transform = '';
             };
-
             window.copyTextPreview = async () => {
                 const pre = document.getElementById('inlineTextPreview');
                 if (!pre) return;
@@ -958,7 +690,9 @@
             window.unmuteAutoplay = () => {
                 if (!media) return;
                 media.muted = false;
+                if (currentGain > 1) media.volume = 1.0;
                 ensureAudioPipeline();
+                if (gainNode) gainNode.gain.value = currentGain;
                 if (media.paused) media.play().catch(() => {});
                 if (unmuteBtn) unmuteBtn.classList.add('hidden');
                 const mBtn = document.getElementById('muteBtn');
@@ -971,40 +705,35 @@
 
             window.forceBrowserPlay = () => {
                 if (!playerContainer) return;
+                const isAud = MEDIA_KIND === 'audio';
                 playerContainer.classList.remove('is-doc');
-                playerContainer.classList.add('is-video');
+                playerContainer.classList.add(isAud ? 'is-audio' : 'is-video');
                 const fb = document.getElementById('fallbackBox');
                 if (fb) fb.remove();
-                const vid = document.createElement('video');
-                vid.id = 'mediaPlayer';
-                vid.autoplay = true;
-                vid.playsInline = true;
-                vid.crossOrigin = 'anonymous';
-                vid.preload = 'auto';
-                vid.controls = true;
+                const el = document.createElement(isAud ? 'audio' : 'video');
+                el.id = 'mediaPlayer';
+                el.autoplay = true;
+                el.playsInline = true;
+                el.crossOrigin = 'anonymous';
+                el.preload = 'auto';
+                el.controls = true;
                 const src = document.createElement('source');
                 src.src = STREAM_URL;
-                src.type = MIME_TYPE || 'video/mp4';
-                vid.appendChild(src);
-                playerContainer.insertBefore(vid, status);
-                media = vid;
+                src.type = MIME_TYPE || (isAud ? 'audio/mpeg' : 'video/mp4');
+                el.appendChild(src);
+                playerContainer.insertBefore(el, status);
+                media = el;
                 autoplayAttempted = false;
                 bindMediaEvents();
                 attemptAutoPlay();
             };
 
-            const panelButtonMap = {
-                captionPanel: 'btnCaptionToggle',
-                audioPanel: 'btnAudioToggle',
-                languagePanel: 'btnLangToggle'
-            };
-
+            const panelButtonMap = { captionPanel: 'btnCaptionToggle', audioPanel: 'btnAudioToggle', languagePanel: 'btnLangToggle' };
             window.toggleMetadata = (id) => {
                 const panel = document.getElementById(id);
                 if (!panel) return;
                 const isHidden = panel.classList.toggle('hidden');
-                const btnId = panelButtonMap[id];
-                const btn = btnId ? document.getElementById(btnId) : null;
+                const btn = panelButtonMap[id] ? document.getElementById(panelButtonMap[id]) : null;
                 if (btn) btn.classList.toggle('active', !isHidden);
             };
 
@@ -1054,8 +783,15 @@
                 if (!media) return;
                 const pct = Math.max(100, Math.min(500, Number(percentVal) || 100));
                 currentGain = pct / 100;
+                if (pct > 100) {
+                    media.muted = false;
+                    media.volume = 1.0;
+                    if (unmuteBtn) unmuteBtn.classList.add('hidden');
+                }
                 ensureAudioPipeline();
-                if (gainNode) gainNode.gain.value = currentGain;
+                if (gainNode && audioCtx) {
+                    gainNode.gain.setTargetAtTime(currentGain, audioCtx.currentTime, 0.02);
+                }
                 const btn = document.getElementById('boostBtn');
                 const slider = document.getElementById('boostSlider');
                 const sliderVal = document.getElementById('boostSliderVal');
@@ -1065,7 +801,7 @@
                 }
                 if (slider) slider.value = String(pct);
                 if (sliderVal) sliderVal.textContent = `${pct}%`;
-                notify(`🔊 Audio Boost: ${pct}%${pct >= 500 ? ' (MAX)' : ''}`);
+                notify(`🔊 Audio Boost: ${pct}%${pct >= 500 ? ' (500% MAX)' : ''}`);
             };
 
             window.cycleAudioBoost = () => {
@@ -1076,15 +812,10 @@
 
             window.applyEqualizer = (preset) => {
                 if (!ensureAudioPipeline() || !eqLow || !eqMid || !eqHigh) return;
-                if (preset === 'bass') {
-                    eqLow.gain.value = 8; eqMid.gain.value = 0; eqHigh.gain.value = 1;
-                } else if (preset === 'voice') {
-                    eqLow.gain.value = -4; eqMid.gain.value = 7; eqHigh.gain.value = 3;
-                } else if (preset === 'treble') {
-                    eqLow.gain.value = -2; eqMid.gain.value = 2; eqHigh.gain.value = 8;
-                } else {
-                    eqLow.gain.value = 0; eqMid.gain.value = 0; eqHigh.gain.value = 0;
-                }
+                if (preset === 'bass') { eqLow.gain.value = 8; eqMid.gain.value = 0; eqHigh.gain.value = 1; }
+                else if (preset === 'voice') { eqLow.gain.value = -4; eqMid.gain.value = 7; eqHigh.gain.value = 3; }
+                else if (preset === 'treble') { eqLow.gain.value = -2; eqMid.gain.value = 2; eqHigh.gain.value = 8; }
+                else { eqLow.gain.value = 0; eqMid.gain.value = 0; eqHigh.gain.value = 0; }
                 notify(`🎛️ EQ: ${preset.toUpperCase()}`);
             };
 
@@ -1103,7 +834,7 @@
                     for (let i = 0; i < media.audioTracks.length; i++) {
                         media.audioTracks[i].enabled = (i === idx);
                     }
-                    notify(`🎧 Switched to Audio Track #${idx + 1}`);
+                    notify(`🎧 Audio Track #${idx + 1} active`);
                 } else {
                     notify(`🎧 Track #${idx + 1} selected (Use PLAYit / MX / VLC for multi-muxed audio)`);
                 }
@@ -1185,9 +916,7 @@
                 } catch (_) { notify('⛶ ғᴜʟʟsᴄʀᴇᴇɴ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); }
             };
 
-            window.cancelWatchStream = () => {
-                if (watchAbortController) watchAbortController.abort();
-            };
+            window.cancelWatchStream = () => { if (watchAbortController) watchAbortController.abort(); };
 
             window.streamSaveToDisk = async () => {
                 if (watchAbortController) watchAbortController.abort();
@@ -1309,15 +1038,12 @@
             window.openExternalPlayer = (event, key) => {
                 const cfg = PLAYER_LINKS[key];
                 if (!cfg) return true;
-                const ua = navigator.userAgent || '';
-                const isAndroid = /Android/i.test(ua);
+                const isAndroid = /Android/i.test(navigator.userAgent || '');
                 if (event) event.preventDefault();
                 if (isAndroid && cfg.intent) {
                     window.location.href = cfg.intent;
                     if (cfg.fallback) {
-                        setTimeout(() => {
-                            if (!document.hidden) window.location.href = cfg.fallback;
-                        }, 1100);
+                        setTimeout(() => { if (!document.hidden) window.location.href = cfg.fallback; }, 1100);
                     }
                 } else if (cfg.scheme) {
                     window.location.href = cfg.scheme;
@@ -1349,7 +1075,7 @@
             }
 
             function applyMetadataPayload(data) {
-                if (!data || !data.metadata) return;
+                if (!data || !data.metadata) return false;
                 const m = data.metadata;
                 const langEl = document.getElementById('metaLanguage');
                 const audEl = document.getElementById('metaAudioTrack');
@@ -1362,9 +1088,9 @@
                 const subPanelList = document.getElementById('subPanelList');
                 const captionTextEl = document.getElementById('captionText');
 
-                if (langEl && m.language && m.language !== 'Undetermined') langEl.textContent = m.language;
+                if (langEl && m.language) langEl.textContent = m.language;
                 if (langPanelVal && m.language) langPanelVal.textContent = m.language;
-                if (audEl && m.audio_track && m.audio_track !== 'Default Audio') audEl.textContent = m.audio_track;
+                if (audEl && m.audio_track) audEl.textContent = m.audio_track;
                 if (audioPanelSum && m.audio_track) audioPanelSum.textContent = m.audio_track;
                 if (durEl && m.duration > 0) durEl.textContent = formatDuration(m.duration);
                 if (subEl && Array.isArray(m.subtitle_tracks)) subEl.textContent = m.subtitle_tracks.length + ' ᴛʀᴀᴄᴋ(s)';
@@ -1375,21 +1101,22 @@
 
                 if (audioPanelList && Array.isArray(m.audio_tracks) && m.audio_tracks.length > 0) {
                     audioPanelList.textContent = m.audio_tracks.map((tr, i) =>
-                        `• Track ${i + 1}: ${tr.language || tr.lang || 'Undetermined'} · ${tr.codec || 'AUDIO'} · ${tr.channels || 2}ch (${tr.channel_layout || 'stereo'})`
+                        `• Track ${i + 1}: ${tr.language || 'Undetermined'} · ${tr.codec || 'Undetermined'}${tr.channels ? ' · ' + tr.channels + 'ch' : ''} (${tr.channel_layout || 'Undetermined'})`
                     ).join('\n');
                 }
                 if (subPanelList && Array.isArray(m.subtitle_tracks) && m.subtitle_tracks.length > 0) {
                     subPanelList.textContent = m.subtitle_tracks.map((tr, i) =>
-                        `• Subtitle ${i + 1}: ${tr.language || tr.lang || 'Undetermined'} (${tr.codec || 'SUB'})`
+                        `• Subtitle ${i + 1}: ${tr.language || 'Undetermined'} (${tr.codec || 'Undetermined'})`
                     ).join('\n');
                 }
 
                 const audSelect = document.getElementById('audioTrackSelect');
                 if (audSelect && Array.isArray(m.audio_tracks) && m.audio_tracks.length > 0 && audSelect.options.length <= 1) {
+                    if (audSelect.options[0]) audSelect.options[0].textContent = '🎧 ᴀᴜᴅɪᴏ: ' + (m.audio_track || 'Undetermined');
                     m.audio_tracks.forEach((tr, i) => {
                         const opt = document.createElement('option');
                         opt.value = String(i);
-                        opt.textContent = `🎧 ${tr.language || tr.lang || 'Track ' + (i + 1)} (${tr.codec || 'AUDIO'} ${tr.channels || 2}ch)`;
+                        opt.textContent = `🎧 ${tr.language || 'Undetermined'} (${tr.codec || 'Undetermined'}${tr.channels ? ' ' + tr.channels + 'ch' : ''})`;
                         audSelect.appendChild(opt);
                     });
                 }
@@ -1398,33 +1125,39 @@
                     m.subtitle_tracks.forEach((tr, i) => {
                         const opt = document.createElement('option');
                         opt.value = String(i);
-                        opt.textContent = `💬 ${tr.language || tr.lang || 'Subtitle ' + (i + 1)}`;
+                        opt.textContent = `💬 ${tr.language || 'Undetermined'}`;
                         subSelect.appendChild(opt);
                         if (media && tr.url) {
                             const trackEl = document.createElement('track');
                             trackEl.kind = 'subtitles';
                             trackEl.src = tr.url;
                             trackEl.srclang = tr.lang_code || 'und';
-                            trackEl.label = tr.language || tr.lang || ('Subtitle ' + (i + 1));
+                            trackEl.label = tr.language || 'Undetermined';
                             media.appendChild(trackEl);
                         }
                     });
                 }
+                return Boolean((m.audio_tracks && m.audio_tracks.length > 0) || (m.language && m.language !== 'Undetermined'));
             }
 
-            async function refreshLiveMetadata() {
+            async function refreshLiveMetadata(forceFresh = false) {
                 if (!FILE_ID) return;
-                const cached = getCachedApiInfo(FILE_ID);
-                if (cached) {
-                    applyMetadataPayload(cached);
-                    return;
+                if (!forceFresh) {
+                    const cached = getCachedApiInfo(FILE_ID);
+                    if (cached && applyMetadataPayload(cached)) return;
                 }
                 try {
-                    const r = await fetch('/api/info/' + encodeURIComponent(FILE_ID));
+                    const url = '/api/info/' + encodeURIComponent(FILE_ID) + (forceFresh ? '?fresh=1' : '');
+                    const r = await fetch(url);
                     if (!r.ok) return;
                     const data = await r.json();
-                    setCachedApiInfo(FILE_ID, data);
-                    applyMetadataPayload(data);
+                    const resolved = applyMetadataPayload(data);
+                    if (resolved) {
+                        setCachedApiInfo(FILE_ID, data);
+                    } else if (metadataPollCount < 3) {
+                        metadataPollCount += 1;
+                        setTimeout(() => refreshLiveMetadata(true), metadataPollCount * 2200);
+                    }
                 } catch (_) {}
             }
 
@@ -1462,6 +1195,10 @@
                     if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '✅ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: sᴏɴɪᴄ ʀᴀɴɢᴇ ʀᴇᴀᴅʏ';
                     const durEl = document.getElementById('metaDuration');
                     if (durEl && media.duration > 0) durEl.textContent = formatDuration(media.duration);
+                    const mimeEl = document.getElementById('metaMimeType');
+                    if (mimeEl && media.videoWidth && media.videoHeight) {
+                        mimeEl.textContent = `${MIME_TYPE} (${media.videoWidth}×${media.videoHeight})`;
+                    }
                     attemptAutoPlay();
                 });
                 media.addEventListener('timeupdate', () => {
@@ -1486,12 +1223,9 @@
 
             if (media) {
                 bindMediaEvents();
-                setTimeout(attemptAutoPlay, 120);
+                setTimeout(attemptAutoPlay, 100);
             }
-
-            if (document.getElementById('inlineTextPreview')) {
-                loadInlineTextPreview();
-            }
+            if (document.getElementById('inlineTextPreview')) loadInlineTextPreview();
 
             document.addEventListener('pointerdown', () => {
                 if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
@@ -1622,7 +1356,8 @@
                 } catch (_) { notify('ᴡᴀᴋᴇ ʟᴏᴄᴋ ɴᴏᴛ ᴀᴠᴀɪʟᴀʙʟᴇ'); }
             };
             window.toggleScreenLock = () => {
-                const locked = document.body.classList.toggle('select-none');
+                const locked = playerContainer ? playerContainer.classList.toggle('touch-locked') : false;
+                document.body.classList.toggle('select-none', locked);
                 const btn = document.getElementById('lockBtn');
                 if (btn) btn.classList.toggle('active', locked);
                 notify(locked ? '⌧ ᴛᴏᴜᴄʜ ʟᴏᴄᴋᴇᴅ' : '⌧ ᴛᴏᴜᴄʜ ᴜɴʟᴏᴄᴋᴇᴅ');
@@ -1645,8 +1380,10 @@
             window.addEventListener('offline', updateNetwork);
             updateNetwork();
 
-            if (initialDur === 0 || {{ (metadata.language | default('Undetermined')) | tojson }} === 'Undetermined') {
-                setTimeout(refreshLiveMetadata, 2000);
+            if (MEDIA_KIND === 'video' || MEDIA_KIND === 'audio') {
+                if (initialDur === 0 || {{ (metadata.language | default('Undetermined')) | tojson }} === 'Undetermined' || {{ (metadata.audio_track | default('Undetermined')) | tojson }} === 'Undetermined') {
+                    setTimeout(() => refreshLiveMetadata(false), 1200);
+                }
             }
         })();
     </script>
