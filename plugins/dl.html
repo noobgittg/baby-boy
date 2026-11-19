@@ -1,29 +1,27 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="dark">
+    <meta name="color-scheme" content="light">
     <title>Download {{ file_name }} — MMW Ultra Max Stream</title>
     <style>
         .smallcap-ui { font-variant: small-caps; letter-spacing: 0.015em; }
         .smallcap-ui code, .smallcap-ui input, .smallcap-ui button { font-variant: normal; }
         :root {
-            --bg: #040711;
-            --card-bg: rgba(11, 18, 36, 0.86);
-            --card-border: rgba(56, 189, 248, 0.24);
-            --accent: #38bdf8;
-            --accent-glow: rgba(56, 189, 248, 0.38);
-            --accent-gradient: linear-gradient(135deg, #38bdf8 0%, #818cf8 55%, #c084fc 100%);
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
+            --bg: #ffffff;
+            --card-bg: #ffffff;
+            --surface-2: #f8fafc;
+            --card-border: rgba(14, 165, 233, 0.28);
+            --accent: #0284c7;
+            --accent-gradient: linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%);
+            --text-main: #0f172a;
+            --text-muted: #475569;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
         body {
             background-color: var(--bg);
-            background-image:
-                radial-gradient(at 15% 15%, rgba(56, 189, 248, 0.16) 0px, transparent 50%),
-                radial-gradient(at 85% 85%, rgba(168, 85, 247, 0.15) 0px, transparent 50%);
             color: var(--text-main);
             min-height: 100vh;
             display: flex;
@@ -33,162 +31,62 @@
         }
         .card {
             background: var(--card-bg);
-            backdrop-filter: blur(22px);
-            -webkit-backdrop-filter: blur(22px);
             border: 1px solid var(--card-border);
-            border-radius: 28px;
-            padding: 36px 28px;
+            border-radius: 24px;
+            padding: 32px 24px;
             max-width: 640px;
             width: 100%;
             text-align: center;
-            box-shadow: 0 28px 55px -12px rgba(0, 0, 0, 0.78);
+            box-shadow: 0 16px 40px -12px rgba(15, 23, 42, 0.12);
         }
         .badge-top {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 16px;
-            border-radius: 999px;
-            background: rgba(16, 185, 129, 0.15);
-            color: #34d399;
-            border: 1px solid rgba(16, 185, 129, 0.35);
-            font-size: 0.78rem;
-            font-weight: 800;
-            margin-bottom: 14px;
+            display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px;
+            border-radius: 999px; background: rgba(5, 150, 105, 0.12); color: #059669;
+            border: 1px solid rgba(5, 150, 105, 0.3); font-size: 0.78rem; font-weight: 800; margin-bottom: 14px;
         }
-        .icon { font-size: 3rem; margin-bottom: 10px; display: inline-block; }
-        h1 { font-size: 1.35rem; font-weight: 800; margin-bottom: 18px; word-break: break-all; line-height: 1.4; }
+        .icon { font-size: 2.8rem; margin-bottom: 10px; display: inline-block; }
+        h1 { font-size: 1.3rem; font-weight: 800; margin-bottom: 18px; word-break: break-all; line-height: 1.4; color: var(--text-main); }
         .file-meta-box {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 18px;
-            padding: 16px 20px;
-            margin-bottom: 18px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            text-align: left;
-            font-size: 0.92rem;
+            background: var(--surface-2); border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 16px;
+            padding: 16px 18px; margin-bottom: 18px; display: flex; flex-direction: column;
+            gap: 10px; text-align: left; font-size: 0.9rem;
         }
         .meta-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
         .meta-row .label { color: var(--text-muted); font-weight: 600; }
-        .meta-row .val { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; color: var(--accent); }
+        .meta-row .val { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; color: var(--accent); text-align: right; }
         .dl-progress-box {
-            background: rgba(0, 0, 0, 0.38);
-            border: 1px solid var(--card-border);
-            border-radius: 16px;
-            padding: 14px 16px;
-            margin-bottom: 16px;
-            text-align: left;
+            background: var(--surface-2); border: 1px solid var(--card-border); border-radius: 16px;
+            padding: 14px 16px; margin-bottom: 16px; text-align: left;
         }
-        .dl-progress-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 0.84rem;
-            margin-bottom: 8px;
-        }
-        .dl-progress-track {
-            width: 100%;
-            height: 10px;
-            background: rgba(255, 255, 255, 0.08);
-            border-radius: 999px;
-            overflow: hidden;
-        }
-        .dl-progress-fill {
-            height: 100%;
-            width: 0%;
-            background: linear-gradient(90deg, #38bdf8, #10b981);
-            transition: width 0.12s linear;
-        }
-        .dl-progress-meta {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 8px;
-            font-size: 0.78rem;
-            color: var(--text-muted);
-            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        }
-        .players-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            margin-bottom: 14px;
-        }
+        .dl-progress-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.84rem; margin-bottom: 8px; }
+        .dl-progress-track { width: 100%; height: 10px; background: rgba(15, 23, 42, 0.1); border-radius: 999px; overflow: hidden; }
+        .dl-progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #0ea5e9, #10b981); transition: width 0.12s linear; }
+        .dl-progress-meta { display: flex; justify-content: space-between; margin-top: 8px; font-size: 0.78rem; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+        .players-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
         .btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            width: 100%;
-            padding: 13px;
-            border-radius: 14px;
-            font-weight: 800;
-            font-size: 0.9rem;
-            text-decoration: none;
-            transition: all 0.2s ease;
-            cursor: pointer;
-            border: none;
+            display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+            padding: 13px; border-radius: 14px; font-weight: 800; font-size: 0.88rem;
+            text-decoration: none; transition: all 0.2s ease; cursor: pointer; border: none;
         }
-        .btn-primary {
-            background: var(--accent-gradient);
-            color: #040711;
-            box-shadow: 0 10px 25px -5px var(--accent-glow);
-            margin-bottom: 10px;
-        }
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 14px 30px -5px var(--accent-glow);
-        }
-        .btn-secondary {
-            background: rgba(255, 255, 255, 0.045);
-            color: var(--text-main);
-            border: 1px solid var(--card-border);
-        }
-        .btn-secondary:hover {
-            background: rgba(255, 255, 255, 0.09);
-            border-color: var(--accent);
-            transform: translateY(-2px);
-        }
-        .btn-danger {
-            background: rgba(239, 68, 68, 0.18);
-            color: #fca5a5;
-            border: 1px solid rgba(239, 68, 68, 0.45);
-            margin-bottom: 10px;
-        }
-        .section-label {
-            font-size: 0.78rem;
-            text-transform: uppercase;
-            letter-spacing: 0.8px;
-            color: var(--text-muted);
-            margin: 14px 0 10px;
-            font-weight: 800;
-        }
-        .footer { font-size: 0.85rem; color: var(--text-muted); margin-top: 16px; }
+        .btn-primary { background: var(--accent-gradient); color: #ffffff; margin-bottom: 10px; }
+        .btn-primary:hover { transform: translateY(-1px); opacity: 0.95; }
+        .btn-secondary { background: var(--surface-2); color: var(--text-main); border: 1px solid var(--card-border); }
+        .btn-secondary:hover { background: #e0f2fe; border-color: var(--accent); transform: translateY(-1px); }
+        .btn-danger { background: rgba(220, 38, 38, 0.1); color: #dc2626; border: 1px solid rgba(220, 38, 38, 0.35); margin-bottom: 10px; }
+        .section-label { font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-muted); margin: 14px 0 10px; font-weight: 800; }
+        .footer { font-size: 0.84rem; color: var(--text-muted); margin-top: 16px; }
         .footer a { color: var(--accent); text-decoration: none; font-weight: 700; }
         #toast {
-            visibility: hidden;
-            min-width: 240px;
-            background: rgba(16, 185, 129, 0.95);
-            color: #fff;
-            text-align: center;
-            border-radius: 12px;
-            padding: 12px 18px;
-            position: fixed;
-            bottom: 24px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-weight: 700;
-            font-size: 0.9rem;
-            opacity: 0;
-            transition: 0.25s;
+            visibility: hidden; min-width: 240px; background: #059669; color: #ffffff; text-align: center;
+            border-radius: 12px; padding: 12px 18px; position: fixed; bottom: 24px; left: 50%;
+            transform: translateX(-50%); font-weight: 700; font-size: 0.9rem; opacity: 0; transition: 0.25s;
         }
         #toast.show { visibility: visible; opacity: 1; }
     </style>
 </head>
 <body class="smallcap-ui">
     <div class="card">
-        <div class="badge-top">⚡ MMW ULTRA MAX HTTP 206 RANGE DELIVERY</div>
+        <div class="badge-top">⚡ MMW ULTRA MAX HTTP 206 ZERO-BUFFER DELIVERY</div>
         <div><span class="icon">📦</span></div>
         <h1>{{ file_name }}</h1>
 
@@ -203,7 +101,7 @@
             </div>
             <div class="meta-row">
                 <span class="label">⚡ sᴛʀᴇᴀᴍ sᴘᴇᴇᴅ:</span>
-                <span class="val">HTTP 206 Multi-Connection Range</span>
+                <span class="val">HTTP 206 Zero-Buffer Range</span>
             </div>
             <div class="meta-row">
                 <span class="label">🌐 ʟᴀɴɢᴜᴀɢᴇ:</span>
@@ -211,7 +109,7 @@
             </div>
             <div class="meta-row">
                 <span class="label">🎧 ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋ:</span>
-                <span class="val">{{ metadata.audio_track | default('Default Audio') }}</span>
+                <span class="val">{{ metadata.audio_track | default('Undetermined') }}</span>
             </div>
         </div>
 
@@ -230,9 +128,10 @@
         </div>
 
         <div class="players-grid">
-            {% if metadata.caption %}<a href="{{ watch_url }}#captionPanel" class="btn btn-secondary">📝 sᴇᴇ ᴄᴀᴘᴛɪᴏɴ</a>{% endif %}
-            {% if metadata.audio_track != 'Default Audio' or metadata.audio_tracks %}<a href="{{ watch_url }}#audioPanel" class="btn btn-secondary">🎧 sᴇᴇ ᴀᴜᴅɪᴏ</a>{% endif %}
-            {% if metadata.language != 'Undetermined' or metadata.audio_tracks or metadata.subtitle_tracks %}<a href="{{ watch_url }}#languagePanel" class="btn btn-secondary">🌐 sᴇᴇ ʟᴀɴɢᴜᴀɢᴇ</a>{% endif %}
+            <a href="{{ watch_url }}#captionPanel" class="btn btn-secondary">📝 sᴇᴇ ᴄᴀᴘᴛɪᴏɴ</a>
+            <a href="{{ watch_url }}#audioPanel" class="btn btn-secondary">🎧 sᴇᴇ ᴀᴜᴅɪᴏ</a>
+            <a href="{{ watch_url }}#languagePanel" class="btn btn-secondary">🌐 sᴇᴇ ʟᴀɴɢᴜᴀɢᴇ</a>
+            <a href="{{ watch_url }}" class="btn btn-secondary">🎬 ᴏᴘᴇɴ ᴘʟᴀʏᴇʀ</a>
         </div>
 
         <button type="button" class="btn btn-primary" onclick="streamSaveMedia()">
@@ -247,7 +146,7 @@
             ⚡ ɪɴsᴛᴀɴᴛ ᴅɪʀᴇᴄᴛ ʙʏᴛᴇ-ʀᴀɴɢᴇ ᴅᴏᴡɴʟᴏᴀᴅ
         </a>
 
-        <button type="button" class="btn btn-secondary" style="margin-bottom: 10px;" onclick="copyDirectUrl('{{ download_url }}')">
+        <button type="button" class="btn btn-secondary" style="margin-bottom: 10px;" onclick="copyDirectUrl()">
             📋 ᴄᴏᴘʏ ᴅɪʀᴇᴄᴛ ᴅᴏᴡɴʟᴏᴀᴅ ʟɪɴᴋ
         </button>
 
@@ -259,10 +158,6 @@
             <a href="{{ player_links.splayer if player_links else '#' }}" onclick="return openExternalPlayer(event, 'splayer')" class="btn btn-secondary">🚀 4. S Player</a>
         </div>
 
-        <a href="{{ watch_url }}" class="btn btn-secondary">
-            🌐 sᴛʀᴇᴀᴍ & ᴡᴀᴛᴄʜ ᴏɴʟɪɴᴇ
-        </a>
-
         <div class="footer">
             ⚡ ᴘᴏᴡᴇʀᴇᴅ ʙʏ <a href="{{ watermark_url }}" target="_blank" rel="noopener">{{ watermark }}</a> • <a href="/">🏠 ᴅᴀsʜʙᴏᴀʀᴅ</a>
         </div>
@@ -272,9 +167,9 @@
 
     <script>
         let dlAbortController = null;
-        const DL_URL = "{{ download_url }}";
-        const DL_FILE_NAME = "{{ file_name }}";
-        const DL_EXPECTED_BYTES = Number("{{ file_size_bytes | default(0) }}") || 0;
+        const DL_URL = {{ download_url | tojson }};
+        const DL_FILE_NAME = {{ file_name | tojson }};
+        const DL_EXPECTED_BYTES = Number({{ file_size_bytes | default(0) | tojson }}) || 0;
 
         function formatBytes(bytes) {
             const v = Number(bytes) || 0;
@@ -376,8 +271,8 @@
             }
         }
 
-        function copyDirectUrl(url) {
-            const fullUrl = new URL(url, window.location.origin).href;
+        function copyDirectUrl() {
+            const fullUrl = new URL(DL_URL, window.location.origin).href;
             if (navigator.clipboard && window.isSecureContext) {
                 navigator.clipboard.writeText(fullUrl);
             } else {
@@ -393,24 +288,25 @@
 
         const PLAYER_LINKS = {
             playit: {
-                intent: "{{ player_links.playit_intent if player_links else '' }}",
-                scheme: "{{ player_links.playit if player_links else '' }}"
+                intent: {{ (player_links.playit_intent if player_links else '') | tojson }},
+                scheme: {{ (player_links.playit if player_links else '') | tojson }}
             },
             mxplayer: {
-                intent: "{{ player_links.mxplayer if player_links else '' }}",
-                fallback: "{{ player_links.mxplayer_pro if player_links else '' }}",
-                scheme: "{{ player_links.mxplayer if player_links else '' }}"
+                intent: {{ (player_links.mxplayer if player_links else '') | tojson }},
+                fallback: {{ (player_links.mxplayer_pro if player_links else '') | tojson }},
+                scheme: {{ (player_links.mxplayer if player_links else '') | tojson }}
             },
             vlc: {
-                intent: "{{ player_links.vlc_intent if player_links else '' }}",
-                scheme: "{{ player_links.vlc if player_links else '' }}"
+                intent: {{ (player_links.vlc_intent if player_links else '') | tojson }},
+                scheme: {{ (player_links.vlc if player_links else '') | tojson }}
             },
             splayer: {
-                intent: "{{ player_links.splayer if player_links else '' }}",
-                fallback: "{{ player_links.splayer_alt if player_links else '' }}",
-                scheme: "{{ player_links.splayer if player_links else '' }}"
+                intent: {{ (player_links.splayer if player_links else '') | tojson }},
+                fallback: {{ (player_links.splayer_alt if player_links else '') | tojson }},
+                scheme: {{ (player_links.splayer if player_links else '') | tojson }}
             }
         };
+
         function openExternalPlayer(event, key) {
             const cfg = PLAYER_LINKS[key];
             if (!cfg) return true;
@@ -419,9 +315,7 @@
             if (isAndroid && cfg.intent) {
                 window.location.href = cfg.intent;
                 if (cfg.fallback) {
-                    setTimeout(() => {
-                        if (!document.hidden) window.location.href = cfg.fallback;
-                    }, 1100);
+                    setTimeout(() => { if (!document.hidden) window.location.href = cfg.fallback; }, 1100);
                 }
             } else if (cfg.scheme) {
                 window.location.href = cfg.scheme;
