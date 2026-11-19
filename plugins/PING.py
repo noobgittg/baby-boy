@@ -43,7 +43,6 @@ from plugins.core_utils import format_watermark
 
 logger = logging.getLogger("MMWPingMonitor")
 
-
 def _build_ping_text(latency_ms: float, uptime: str) -> str:
     cpu = psutil.cpu_percent(interval=None)
     ram = psutil.virtual_memory().percent
@@ -58,7 +57,6 @@ def _build_ping_text(latency_ms: float, uptime: str) -> str:
         f"• 💾 <b>{to_smallcaps('disk')}:</b> <code>{disk:.1f}%</code> [{make_progress_bar(disk)}]\n"
         f"• 🎬 <b>{to_smallcaps('stream engine')}:</b> <code>HTTP 206 Byte-Range (4 Players)</code>"
     )
-
 
 @Client.on_message(filters.command(["ping", "pong"], prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def ping_handler(client: Client, message: Message):
@@ -81,7 +79,6 @@ async def ping_handler(client: Client, message: Message):
     ])
     await safe_edit_message(msg, _build_ping_text(latency_ms, uptime), reply_markup=btn, parse_mode=enums.ParseMode.HTML)
 
-
 @Client.on_callback_query(filters.regex(r"^ping_refresh$"))
 async def ping_refresh_callback(client: Client, query: CallbackQuery):
     start = time.perf_counter()
@@ -95,7 +92,6 @@ async def ping_refresh_callback(client: Client, query: CallbackQuery):
         ]
     ])
     await safe_edit_message(query.message, _build_ping_text(latency_ms, uptime), reply_markup=btn, parse_mode=enums.ParseMode.HTML)
-
 
 @Client.on_message(filters.command("alive", prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def alive_handler(client: Client, message: Message):
@@ -111,7 +107,6 @@ async def alive_handler(client: Client, message: Message):
         await asyncio.gather(sent.delete(), message.delete())
     except Exception:
         pass
-
 
 @Client.on_message(filters.command(["usage", "now"], prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def live_system_usage(client: Client, message: Message):
@@ -169,7 +164,6 @@ async def live_system_usage(client: Client, message: Message):
         except Exception:
             pass
 
-
 MAIN_STATUS_BUTTONS = InlineKeyboardMarkup([
     [
         InlineKeyboardButton("🏓 ᴘɪɴɢ", callback_data="sys:ping"),
@@ -181,7 +175,6 @@ MAIN_STATUS_BUTTONS = InlineKeyboardMarkup([
     ],
 ])
 
-
 @Client.on_message(filters.command("check", prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def status_menu(client: Client, message: Message):
     await message.reply_text(
@@ -192,7 +185,6 @@ async def status_menu(client: Client, message: Message):
         reply_markup=MAIN_STATUS_BUTTONS,
         parse_mode=enums.ParseMode.HTML,
     )
-
 
 @Client.on_callback_query(filters.regex(r"^sys:"))
 async def status_buttons_cb(client: Client, query: CallbackQuery):
