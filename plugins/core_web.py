@@ -32,16 +32,139 @@ FIRST_FRAME_SLICE = 64 * 1024
 PREFETCH_QUEUE_SIZE = max(16, int(getattr(Config, "STREAM_BUFFER_CHUNKS", 64)))
 LOCAL_READ_CHUNK = max(CHUNK_SIZE, int(getattr(Config, "STREAM_CHUNK_SIZE", 4 * 1024 * 1024)))
 MAX_CONCURRENT_STREAMS = max(8, min(64, int(getattr(Config, "WORKERS", 32))))
+AUTO_CACHE_CLEAR_INTERVAL = 1.0
+MAX_LOCK_ENTRIES = 512
 
 _MSG_RESOLVE_LOCKS: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 _FILE_DOC_LOCKS: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 _CHUNK_FETCH_LOCKS: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 _STATS_LOCK = asyncio.Lock()
 _STREAM_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_STREAMS)
+_PROBE_SEMAPHORE = asyncio.Semaphore(2)
+_CACHE_CLEANER_TASK: Optional[asyncio.Task] = None
+
+_EXT_MIME_FALLBACK = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".mkv": "video/x-matroska",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".ts": "video/mp2t",
+    ".m2ts": "video/mp2t",
+    ".flv": "video/x-flv",
+    ".3gp": "video/3gpp",
+    ".wmv": "video/x-ms-wmv",
+    ".ogv": "video/ogg",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".wma": "audio/x-ms-wma",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".bmp": "image/bmp",
+    ".pdf": "application/pdf",
+    ".txt": "text/plain",
+    ".json": "application/json",
+    ".xml": "application/xml",
+    ".csv": "text/csv",
+    ".srt": "text/plain",
+    ".vtt": "text/vtt",
+}
+
+
+def _guess_mime_from_name(file_name: Optional[str], raw_mime: Optional[str]) -> str:
+    norm = normalize_mime(raw_mime)
+    if norm and norm != "application/octet-stream":
+        return norm
+    name = str(file_name or "").strip().lower()
+    if name:
+        _, ext = os.path.splitext(name)
+        if ext in _EXT_MIME_FALLBACK:
+            return _EXT_MIME_FALLBACK[ext]
+        guessed = mimetypes.guess_type(name)[0]
+        if guessed:
+            return normalize_mime(guessed)
+    return norm or "application/octet-stream"
+
+
+def _detect_real_media_kind(mime_type: str, file_name: Optional[str], raw_kind: Optional[str] = None) -> str:
+    guessed_mime = _guess_mime_from_name(file_name, mime_type)
+    detected = media_kind(guessed_mime, file_name)
+    if detected in ("video", "audio", "image", "code"):
+        return detected
+    if raw_kind in ("video", "audio", "image", "code"):
+        return raw_kind
+    return detected or "document"
+
+
+def _trim_unlocked_locks(lock_map: Dict[str, asyncio.Lock]) -> int:
+    if len(lock_map) <= MAX_LOCK_ENTRIES:
+        return 0
+    removed = 0
+    for key in list(lock_map.keys()):
+        lock = lock_map.get(key)
+        if lock is not None and not lock.locked():
+            lock_map.pop(key, None)
+            removed += 1
+    return removed
+
+
+async def auto_sweep_stream_cache_once() -> int:
+    removed = 0
+    try:
+        removed += cache.auto_clear_after_response_sync(preserve_workflows=True)
+    except Exception:
+        pass
+    removed += _trim_unlocked_locks(_FILE_DOC_LOCKS)
+    removed += _trim_unlocked_locks(_MSG_RESOLVE_LOCKS)
+    removed += _trim_unlocked_locks(_CHUNK_FETCH_LOCKS)
+    return removed
+
+
+async def _auto_cache_cleaner_loop():
+    while True:
+        try:
+            await asyncio.sleep(AUTO_CACHE_CLEAR_INTERVAL)
+            await auto_sweep_stream_cache_once()
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            await asyncio.sleep(AUTO_CACHE_CLEAR_INTERVAL)
+
+
+def start_auto_cache_cleaner() -> Optional[asyncio.Task]:
+    global _CACHE_CLEANER_TASK
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    if _CACHE_CLEANER_TASK is None or _CACHE_CLEANER_TASK.done():
+        _CACHE_CLEANER_TASK = loop.create_task(_auto_cache_cleaner_loop())
+    return _CACHE_CLEANER_TASK
+
+
+async def stop_auto_cache_cleaner() -> None:
+    global _CACHE_CLEANER_TASK
+    if _CACHE_CLEANER_TASK is not None and not _CACHE_CLEANER_TASK.done():
+        _CACHE_CLEANER_TASK.cancel()
+        try:
+            await _CACHE_CLEANER_TASK
+        except asyncio.CancelledError:
+            pass
+    _CACHE_CLEANER_TASK = None
 
 
 def parse_range_header(value: Optional[str], file_size: int):
-    """Parse HTTP Range header, including open-ended and suffix byte ranges."""
     if file_size <= 0:
         return None
     if not value:
@@ -96,13 +219,6 @@ FOUR_EXTERNAL_PLAYERS = [
 
 
 def build_4_external_player_links(stream_url: str, file_name: str = "video.mp4") -> Dict[str, str]:
-    """
-    Generates intent and scheme deep-links for the 4 external players:
-    1. PLAYit
-    2. MX Player (Ad & Pro with HW+ decode_mode=2)
-    3. VLC (Android Intent & Universal vlc:// scheme)
-    4. S Player (Simple Player & SPlayer fallback)
-    """
     clean_url_no_scheme = stream_url.replace("https://", "").replace("http://", "")
     scheme = "https" if stream_url.startswith("https://") else "http"
     safe_title = quote(file_name or "video.mp4")
@@ -128,40 +244,69 @@ def _safe_metadata_int(value: Any) -> int:
 
 
 def media_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize stored metadata for templates and JSON clients."""
     raw = dict(file_doc.get("metadata") or {})
     file_id = str(file_doc.get("file_id", ""))
-    audio_tracks = list(raw.get("audio_tracks") or raw.get("audio_streams") or [])
+    file_name = str(file_doc.get("file_name") or "")
+    mime_type = _guess_mime_from_name(file_name, file_doc.get("mime_type") or raw.get("mime_type"))
+    kind = _detect_real_media_kind(mime_type, file_name, raw.get("media_kind"))
+
+    audio_tracks = []
+    for idx, aud in enumerate(raw.get("audio_tracks") or raw.get("audio_streams") or []):
+        item = dict(aud)
+        lang_val = str(item.get("language") or item.get("lang") or "Undetermined").strip()
+        if not lang_val or lang_val.lower() in ("und", "unknown", "none"):
+            lang_val = "Undetermined"
+        item["language"] = lang_val
+        item["lang"] = lang_val
+        item["codec"] = str(item.get("codec") or "Undetermined").upper()
+        item["channels"] = _safe_metadata_int(item.get("channels") or 0)
+        item["channel_layout"] = str(item.get("channel_layout") or "Undetermined")
+        item["title"] = str(item.get("title") or f"Track {idx + 1}")
+        audio_tracks.append(item)
+
     subtitle_tracks = []
     for idx, sub in enumerate(raw.get("subtitle_tracks") or raw.get("subtitle_streams") or []):
         item = dict(sub)
+        lang_val = str(item.get("language") or item.get("lang") or "Undetermined").strip()
+        if not lang_val or lang_val.lower() in ("und", "unknown", "none"):
+            lang_val = "Undetermined"
+        item["language"] = lang_val
+        item["lang"] = lang_val
+        item["codec"] = str(item.get("codec") or "Undetermined").upper()
+        item["lang_code"] = str(item.get("lang_code") or "und").lower()
         if file_id and not item.get("url"):
             item["url"] = f"/api/subtitles/{file_id}/{idx}.vtt"
         subtitle_tracks.append(item)
 
-    language = raw.get("language") or "Undetermined"
-    if (not language or language == "Undetermined") and audio_tracks:
+    language = str(raw.get("language") or "").strip()
+    if not language or language.lower() in ("und", "unknown", "none"):
+        language = "Undetermined"
+    if language == "Undetermined" and audio_tracks:
         langs = [
-            str(a.get("language") or a.get("lang") or "").strip()
+            a["language"]
             for a in audio_tracks
-            if str(a.get("language") or a.get("lang") or "").strip() not in ("", "Undetermined", "und")
+            if a.get("language") and a["language"] != "Undetermined"
         ]
         if langs:
             language = ", ".join(dict.fromkeys(langs))
 
-    audio_track = raw.get("audio_track") or "Default Audio"
-    if (not audio_track or audio_track == "Default Audio") and audio_tracks:
+    audio_track = str(raw.get("audio_track") or "").strip()
+    if not audio_track or audio_track.lower() in ("default audio", "unknown", "none"):
+        audio_track = "Undetermined"
+    if audio_tracks:
         auds = [
-            f"{str(a.get('codec', 'AUDIO')).upper()} {int(a.get('channels', 2) or 2)}ch".strip()
+            f"{a['codec']} {a['channels']}ch ({a['language']})" if a["channels"] > 0 else f"{a['codec']} ({a['language']})"
             for a in audio_tracks
         ]
         if auds:
             audio_track = ", ".join(auds)
 
+    _, ext = os.path.splitext(file_name)
     return {
-        "media_kind": raw.get("media_kind") or media_kind(file_doc.get("mime_type") or raw.get("mime_type"), file_doc.get("file_name")),
-        "mime_type": normalize_mime(file_doc.get("mime_type") or raw.get("mime_type")),
-        "browser_supported": browser_media_supported(file_doc.get("mime_type") or raw.get("mime_type"), file_doc.get("file_name")),
+        "media_kind": kind,
+        "mime_type": mime_type,
+        "extension": ext.lstrip(".").upper() if ext else "Undetermined",
+        "browser_supported": browser_media_supported(mime_type, file_name),
         "duration": _safe_metadata_int(raw.get("duration")),
         "width": _safe_metadata_int(raw.get("width")),
         "height": _safe_metadata_int(raw.get("height")),
@@ -169,7 +314,7 @@ def media_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
         "audio_track": audio_track,
         "audio_tracks": audio_tracks,
         "subtitle_tracks": subtitle_tracks,
-        "caption": raw.get("caption") or "",
+        "caption": str(raw.get("caption") or "").strip(),
     }
 
 
@@ -188,9 +333,6 @@ async def get_cached_file_doc(file_id: str, force_refresh: bool = False) -> Opti
         if cached_doc is not None:
             return cached_doc
 
-    if len(_FILE_DOC_LOCKS) > 2000:
-        _FILE_DOC_LOCKS.clear()
-
     async with _FILE_DOC_LOCKS[file_id]:
         if not force_refresh:
             cached_doc = await cache.get(cache_key)
@@ -200,7 +342,7 @@ async def get_cached_file_doc(file_id: str, force_refresh: bool = False) -> Opti
         if doc is None:
             doc = await file_repo.get_file(file_id)
         if doc is not None:
-            await cache.set(cache_key, doc, ttl=300)
+            await cache.set(cache_key, doc, ttl=120)
         return doc
 
 
@@ -209,6 +351,7 @@ async def invalidate_file_cache(file_id: str) -> None:
         _cache_remove(f"file_doc_{file_id}"),
         _cache_remove(f"meta_view_{file_id}"),
         _cache_remove(f"api_info_{file_id}"),
+        _cache_remove(f"tg_msg_{file_id}"),
     )
 
 
@@ -221,7 +364,7 @@ async def get_cached_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
     if cached_view is not None:
         return cached_view
     view = media_metadata_view(file_doc)
-    await cache.set(cache_key, view, ttl=180)
+    await cache.set(cache_key, view, ttl=60)
     return view
 
 
@@ -230,7 +373,24 @@ async def get_cached_chunk(file_id: str, chunk_idx: int) -> Optional[bytes]:
 
 
 async def set_cached_chunk(file_id: str, chunk_idx: int, chunk: bytes, is_boundary: bool = False) -> None:
-    await cache.set(f"chunk_{file_id}_{chunk_idx}", chunk, ttl=900 if is_boundary else 300)
+    ttl = 60 if is_boundary else 5
+    await cache.set(f"chunk_{file_id}_{chunk_idx}", chunk, ttl=ttl, transient=not is_boundary)
+
+
+async def get_cached_health_payload() -> Dict[str, Any]:
+    cached_val = await cache.get("web_health_payload")
+    if cached_val is not None:
+        return cached_val
+    payload = {
+        "status": "healthy",
+        "service": "MMW-BOT-PRO",
+        "stream_speed": "ultra-fast HTTP 206 zero-buffer streaming",
+        "external_players": 4,
+        "timestamp": float(time.time()),
+        "watermark": Config.WATERMARK,
+    }
+    await cache.set("web_health_payload", payload, ttl=2, transient=True)
+    return payload
 
 
 async def get_cached_home_stats():
@@ -247,27 +407,28 @@ async def get_cached_home_stats():
             file_repo.get_total_files(),
         )
         result = (users_count, chats_count, files_count)
-        await cache.set("web_home_stats", result, ttl=15)
+        await cache.set("web_home_stats", result, ttl=10)
         return result
 
 
-async def get_cached_api_info(file_id: str) -> Optional[Dict[str, Any]]:
+async def get_cached_api_info(file_id: str, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
     cache_key = f"api_info_{file_id}"
-    cached_info = await cache.get(cache_key)
-    if cached_info is not None:
-        return cached_info
-    file_doc = await get_cached_file_doc(file_id)
+    if not force_refresh:
+        cached_info = await cache.get(cache_key)
+        if cached_info is not None:
+            return cached_info
+    file_doc = await get_cached_file_doc(file_id, force_refresh=force_refresh)
     if not file_doc:
         return None
     stream_url = f"{Config.BASE_URL}/stream/{file_id}"
     fname = file_doc.get("file_name", "video.mp4")
-    metadata = await get_cached_metadata_view(file_doc)
+    metadata = media_metadata_view(file_doc) if force_refresh else await get_cached_metadata_view(file_doc)
     payload = {
         "file_id": file_doc["file_id"],
         "file_name": fname,
         "file_size": file_doc.get("file_size"),
         "file_size_formatted": humanbytes(file_doc.get("file_size", 0)),
-        "mime_type": file_doc.get("mime_type"),
+        "mime_type": metadata.get("mime_type") or file_doc.get("mime_type"),
         "created_at": file_doc.get("created_at"),
         "stream_speed": "turbo HTTP 206 zero-buffer streaming",
         "stream_url": stream_url,
@@ -278,7 +439,7 @@ async def get_cached_api_info(file_id: str) -> Optional[Dict[str, Any]]:
         "metadata": metadata,
         "watermark": Config.WATERMARK,
     }
-    await cache.set(cache_key, payload, ttl=60)
+    await cache.set(cache_key, payload, ttl=30)
     return payload
 
 
@@ -301,7 +462,7 @@ async def get_cached_user_files(user_id: int, skip: int, limit: int) -> Dict[str
             "file_name": fname,
             "file_size": f.get("file_size", 0),
             "file_size_formatted": humanbytes(f.get("file_size", 0)),
-            "mime_type": f.get("mime_type", "video/mp4"),
+            "mime_type": _guess_mime_from_name(fname, f.get("mime_type")),
             "created_at": f.get("created_at"),
             "watch_url": f"{Config.BASE_URL}/watch/{fid}",
             "download_url": f"{Config.BASE_URL}/download/{fid}",
@@ -315,7 +476,7 @@ async def get_cached_user_files(user_id: int, skip: int, limit: int) -> Dict[str
         "limit": limit,
         "files": items,
     }
-    await cache.set(cache_key, payload, ttl=20)
+    await cache.set(cache_key, payload, ttl=15)
     return payload
 
 
@@ -329,24 +490,24 @@ async def get_cached_search_results(query: str) -> List[Dict[str, Any]]:
     results = []
     for f in files:
         fid = f.get("file_id")
+        fname = f.get("file_name", "Media")
         results.append({
             "file_id": fid,
-            "file_name": f.get("file_name", "Media"),
+            "file_name": fname,
             "file_size": f.get("file_size", 0),
             "file_size_formatted": humanbytes(f.get("file_size", 0)),
-            "mime_type": f.get("mime_type", "application/octet-stream"),
+            "mime_type": _guess_mime_from_name(fname, f.get("mime_type")),
             "created_at": f.get("created_at"),
             "stream_url": f"{Config.BASE_URL}/stream/{fid}",
             "watch_url": f"{Config.BASE_URL}/watch/{fid}",
             "download_url": f"{Config.BASE_URL}/download/{fid}",
             "direct_download_url": f"{Config.BASE_URL}/file/{fid}",
         })
-    await cache.set(cache_key, results, ttl=30)
+    await cache.set(cache_key, results, ttl=15)
     return results
 
 
 async def resolve_telegram_message(bot: Any, file_doc: Dict[str, Any], force_refresh: bool = False):
-    """Fetches and caches the Telegram message object with stampede lock protection and expired-reference refresh."""
     file_id = str(file_doc.get("file_id", ""))
     cache_key = f"tg_msg_{file_id}"
     if not force_refresh:
@@ -362,9 +523,6 @@ async def resolve_telegram_message(bot: Any, file_doc: Dict[str, Any], force_ref
     if not chat_id or not message_id:
         return None
 
-    if len(_MSG_RESOLVE_LOCKS) > 2000:
-        _MSG_RESOLVE_LOCKS.clear()
-
     async with _MSG_RESOLVE_LOCKS[file_id]:
         if not force_refresh:
             cached_msg = await cache.get(cache_key)
@@ -373,7 +531,7 @@ async def resolve_telegram_message(bot: Any, file_doc: Dict[str, Any], force_ref
         try:
             msg = await bot.get_messages(int(chat_id), int(message_id))
             if msg and msg.media:
-                await cache.set(cache_key, msg, ttl=1800)
+                await cache.set(cache_key, msg, ttl=600)
                 return msg
         except Exception as e:
             logger.warning(f"ByteStreamer failed resolving message {chat_id}:{message_id} -> {e}")
@@ -398,12 +556,6 @@ async def iter_12mbps_file_stream(
     end: int,
     request: Optional[Request] = None
 ) -> AsyncGenerator[bytes, None]:
-    """
-    Ultra-Fast Zero-Buffering Async Byte Streamer with Bounded Concurrency:
-    1. If local file exists on disk (`file_path`), streams directly via `aiofiles` with 64 KiB initial frame flush.
-    2. Otherwise, streams directly from Telegram (`bot.stream_media`) with zero queue buffering,
-       caching boundary chunks (first & last 1 MiB for MP4/MKV moov/cues headers) in RAM so player seeking is responsive.
-    """
     content_length = (end - start) + 1
     file_id = str(file_doc.get("file_id", ""))
     total_file_size = _safe_metadata_int(file_doc.get("file_size", 0))
@@ -501,9 +653,9 @@ async def iter_12mbps_file_stream(
                         break
                     chunk = bytes(raw_chunk) if not isinstance(raw_chunk, bytes) else raw_chunk
                     abs_chunk_idx = offset_chunks + current_part - 1
-                    if len(chunk) <= CHUNK_SIZE:
-                        is_boundary = abs_chunk_idx in (0, 1, max(0, last_chunk_index - 1), last_chunk_index)
-                        await set_cached_chunk(file_id, abs_chunk_idx, chunk, is_boundary=is_boundary)
+                    is_boundary = abs_chunk_idx in (0, 1, max(0, last_chunk_index - 1), last_chunk_index)
+                    if is_boundary and len(chunk) <= CHUNK_SIZE:
+                        await set_cached_chunk(file_id, abs_chunk_idx, chunk, is_boundary=True)
 
                     sliced = _slice_chunk(chunk, current_part, part_count, first_part_cut, last_part_cut)
                     if len(sliced) > remaining_bytes:
@@ -537,7 +689,7 @@ async def iter_12mbps_file_stream(
                         else:
                             from plugins.core_services import _clear_stale_media_sessions
                             await _clear_stale_media_sessions(bot)
-                        await asyncio.sleep(0.25)
+                        await asyncio.sleep(0.2)
                     refreshed = await resolve_telegram_message(bot, file_doc, force_refresh=True)
                     if refreshed is not None:
                         active_msg = refreshed
@@ -636,15 +788,7 @@ templates = Jinja2Templates(directory=_TEMPLATE_DIR)
 @pages_router.get("/health")
 @pages_router.head("/health")
 async def root_health():
-    """Root /health endpoint required by Render/Koyeb health checks and KeepAlive pinger."""
-    return {
-        "status": "healthy",
-        "service": "MMW-BOT-PRO",
-        "stream_speed": "ultra-fast HTTP 206 zero-buffer streaming",
-        "external_players": 4,
-        "timestamp": float(time.time()),
-        "watermark": Config.WATERMARK,
-    }
+    return await get_cached_health_payload()
 
 
 @pages_router.get("/stats")
@@ -658,7 +802,6 @@ async def root_stats_redirect(request: Request):
 @api_router.get("/bridge")
 @api_router.head("/bridge")
 async def native_gateway_endpoint(request: Request, action: str = "status", id: str = ""):
-    """Native Python HTTP 206 Stream & Telemetry Bridge."""
     act = (action or "status").strip().lower()
     clean_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(id or ""))
     base_url = str(request.base_url).rstrip("/")
@@ -730,21 +873,20 @@ async def code_preview_page(request: Request, file_id: str):
     download_url = f"{base_url}/download/{file_id}"
     watch_url = f"{base_url}/watch/{file_id}"
     html_page = f"""<!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
 <title>{_html.escape(file_name)} — MMW Code Pro Studio</title>
 <style>
 :root {{
-    --bg: #040711;
-    --card-bg: rgba(11, 18, 36, 0.88);
-    --card-border: rgba(56, 189, 248, 0.25);
-    --accent: #38bdf8;
-    --accent-2: #a855f7;
-    --accent-3: #10b981;
-    --text-main: #f8fafc;
-    --text-muted: #94a3b8;
+    --bg: #f8fafc;
+    --card-bg: #ffffff;
+    --card-border: rgba(14, 165, 233, 0.28);
+    --accent: #0284c7;
+    --text-main: #0f172a;
+    --text-muted: #475569;
 }}
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body.code-studio-body {{
@@ -752,64 +894,62 @@ body.code-studio-body {{
     color: var(--text-main);
     font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
     min-height: 100vh;
-    padding: 28px 16px;
+    padding: 24px 16px;
 }}
 .code-container {{
     max-width: 1120px;
     margin: 0 auto;
     background: var(--card-bg);
     border: 1px solid var(--card-border);
-    border-radius: 22px;
-    padding: 28px;
-    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.75);
+    border-radius: 20px;
+    padding: 24px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
 }}
 .code-header {{
     display: flex;
     flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
-    gap: 16px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    margin-bottom: 20px;
+    gap: 14px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.1);
+    margin-bottom: 16px;
 }}
 .lang-badge {{
     display: inline-block;
     padding: 4px 12px;
     border-radius: 999px;
-    background: rgba(56, 189, 248, 0.15);
+    background: #e0f2fe;
     color: var(--accent);
     font-size: 0.75rem;
-    font-weight: 700;
+    font-weight: 800;
     margin-bottom: 8px;
 }}
-.code-header h1 {{ font-size: 1.35rem; margin-bottom: 4px; word-break: break-all; }}
-.code-header p {{ color: var(--text-muted); font-size: 0.88rem; }}
-.code-actions {{ display: flex; flex-wrap: wrap; gap: 10px; }}
+.code-header h1 {{ font-size: 1.3rem; margin-bottom: 4px; word-break: break-all; color: var(--text-main); }}
+.code-header p {{ color: var(--text-muted); font-size: 0.86rem; }}
+.code-actions {{ display: flex; flex-wrap: wrap; gap: 8px; }}
 .btn-primary, .btn-secondary {{
     text-decoration: none;
-    padding: 10px 18px;
+    padding: 10px 16px;
     border-radius: 12px;
     font-weight: 700;
-    font-size: 0.88rem;
-    transition: transform 0.15s ease;
+    font-size: 0.86rem;
     cursor: pointer;
     border: none;
 }}
-.btn-primary {{ background: linear-gradient(135deg, #38bdf8, #818cf8); color: #040711; }}
-.btn-secondary {{ background: rgba(255, 255, 255, 0.06); color: var(--text-main); border: 1px solid var(--card-border); }}
-.btn-primary:hover, .btn-secondary:hover {{ transform: translateY(-2px); }}
+.btn-primary {{ background: linear-gradient(135deg, #0ea5e9, #4f46e5); color: #ffffff; }}
+.btn-secondary {{ background: #f1f5f9; color: var(--text-main); border: 1px solid var(--card-border); }}
 .progress-wrap {{
     margin-bottom: 16px;
-    background: rgba(255, 255, 255, 0.04);
+    background: #f8fafc;
     border: 1px solid var(--card-border);
     border-radius: 12px;
-    padding: 12px 16px;
+    padding: 12px 14px;
 }}
 .progress-track {{
     width: 100%;
     height: 8px;
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(15, 23, 42, 0.1);
     border-radius: 999px;
     overflow: hidden;
     margin: 8px 0;
@@ -817,25 +957,20 @@ body.code-studio-body {{
 .progress-fill {{
     height: 100%;
     width: 0%;
-    background: linear-gradient(90deg, #38bdf8, #10b981);
+    background: linear-gradient(90deg, #0ea5e9, #10b981);
     transition: width 0.12s linear;
 }}
-.progress-meta {{
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.8rem;
-    color: var(--text-muted);
-}}
+.progress-meta {{ display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-muted); }}
 .code-pre {{
-    background: #02040a;
-    border: 1px solid rgba(56, 189, 248, 0.18);
+    background: #f8fafc;
+    border: 1px solid var(--card-border);
     border-radius: 14px;
-    padding: 20px;
+    padding: 18px;
     overflow-x: auto;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.88rem;
+    font-size: 0.86rem;
     line-height: 1.55;
-    color: #e2e8f0;
+    color: #0f172a;
     max-height: 75vh;
 }}
 </style>
@@ -846,7 +981,7 @@ body.code-studio-body {{
     <div>
       <span class="lang-badge">⚡ {_html.escape(lang.upper())} CODE ENGINE</span>
       <h1>{_html.escape(file_name)}</h1>
-      <p>Size: {_html.escape(humanbytes(file_size))} • Instant HTTP 206 Byte-Range Stream</p>
+      <p>Size: {_html.escape(humanbytes(file_size))} • Instant HTTP 206 Zero-Buffer Stream</p>
     </div>
     <div class="code-actions">
       <button type="button" class="btn-primary" onclick="streamCodeDownload()">⬇️ Stream Save to Disk</button>
@@ -914,9 +1049,8 @@ async function loadCodePreview() {{
     pctEl.textContent = "100%";
     statusEl.textContent = "Status: Completed (" + received + " bytes streamed)";
   }} catch (e) {{
-    if (e && e.name === "AbortError") {{
-      statusEl.textContent = "Status: Cancelled by user";
-    }} else {{
+    if (e && e.name === "AbortError") statusEl.textContent = "Status: Cancelled by user";
+    else {{
       statusEl.textContent = "Status: Error (" + e + ")";
       box.textContent = "Preview error: " + e;
     }}
@@ -926,9 +1060,7 @@ async function loadCodePreview() {{
   }}
 }}
 
-function cancelCodeStream() {{
-  if (codeAbortCtrl) codeAbortCtrl.abort();
-}}
+function cancelCodeStream() {{ if (codeAbortCtrl) codeAbortCtrl.abort(); }}
 
 function copyCodeText() {{
   const txt = document.getElementById("code-box").textContent || "";
@@ -1010,43 +1142,52 @@ async def watch_page(request: Request, file_id: str):
     file_name = file_doc.get("file_name") or file_doc.get("name") or "Media Stream.mp4"
     file_size = _safe_metadata_int(file_doc.get("file_size") or file_doc.get("size", 0))
     file_size_str = humanbytes(file_size)
-    mime_type = file_doc.get("mime_type") or "video/mp4"
+    mime_type = _guess_mime_from_name(file_name, file_doc.get("mime_type"))
     file_path = file_doc.get("file_path")
     raw_meta = file_doc.get("metadata") or {}
+    metadata = await get_cached_metadata_view(file_doc)
     bot = getattr(request.app.state, "bot", None)
-    if bot is not None and (not raw_meta.get("duration") or (not raw_meta.get("audio_streams") and not raw_meta.get("audio_tracks"))):
+
+    needs_probe = (
+        metadata.get("media_kind") in ("video", "audio")
+        and (
+            not raw_meta.get("duration")
+            or (not raw_meta.get("audio_streams") and not raw_meta.get("audio_tracks"))
+        )
+    )
+    if bot is not None and needs_probe:
         async def _bg_probe_update(fid: str, fpath: Optional[str], meta_base: dict):
-            try:
-                from plugins.core_services import get_detailed_mediainfo, probe_stream_url_mediainfo
-                probed = None
-                if fpath and os.path.exists(fpath):
-                    probed = await get_detailed_mediainfo(fpath)
-                else:
-                    local_stream = f"http://127.0.0.1:{Config.PORT}/stream/{fid}"
-                    probed = await probe_stream_url_mediainfo(local_stream, timeout=8.0)
-                if probed:
-                    meta_base.update({
-                        "duration": probed.get("duration") or meta_base.get("duration", 0),
-                        "audio_tracks": probed.get("audio_streams") or meta_base.get("audio_tracks", []),
-                        "subtitle_tracks": probed.get("subtitle_streams") or meta_base.get("subtitle_tracks", []),
-                        "language": probed.get("language") or meta_base.get("language", "Undetermined"),
-                        "audio_track": probed.get("audio_track") or meta_base.get("audio_track", "Default Audio"),
-                    })
-                    if probed.get("video_streams"):
-                        meta_base["width"] = probed["video_streams"][0].get("width", meta_base.get("width", 0))
-                        meta_base["height"] = probed["video_streams"][0].get("height", meta_base.get("height", 0))
-                    await file_repo.update_file(fid, {"metadata": meta_base})
-                    await invalidate_file_cache(fid)
-            except Exception:
-                pass
+            async with _PROBE_SEMAPHORE:
+                try:
+                    from plugins.core_services import get_detailed_mediainfo, probe_stream_url_mediainfo
+                    probed = None
+                    if fpath and os.path.exists(fpath):
+                        probed = await get_detailed_mediainfo(fpath)
+                    else:
+                        local_stream = f"http://127.0.0.1:{Config.PORT}/stream/{fid}"
+                        probed = await probe_stream_url_mediainfo(local_stream, timeout=8.0)
+                    if probed:
+                        meta_base.update({
+                            "duration": probed.get("duration") or meta_base.get("duration", 0),
+                            "audio_tracks": probed.get("audio_streams") or meta_base.get("audio_tracks", []),
+                            "subtitle_tracks": probed.get("subtitle_streams") or meta_base.get("subtitle_tracks", []),
+                            "language": probed.get("language") or meta_base.get("language", "Undetermined"),
+                            "audio_track": probed.get("audio_track") or meta_base.get("audio_track", "Undetermined"),
+                        })
+                        if probed.get("video_streams"):
+                            meta_base["width"] = probed["video_streams"][0].get("width", meta_base.get("width", 0))
+                            meta_base["height"] = probed["video_streams"][0].get("height", meta_base.get("height", 0))
+                        await file_repo.update_file(fid, {"metadata": meta_base})
+                        await invalidate_file_cache(fid)
+                except Exception:
+                    pass
         if not await cache.get(f"probe_lock_{file_id}"):
-            await cache.set(f"probe_lock_{file_id}", True, ttl=30)
+            await cache.set(f"probe_lock_{file_id}", True, ttl=25)
             async def _delayed_probe():
                 if not (file_path and os.path.exists(file_path)):
-                    await asyncio.sleep(3.0)
+                    await asyncio.sleep(0.35)
                 await _bg_probe_update(file_id, file_path, dict(raw_meta))
             asyncio.create_task(_delayed_probe())
-    metadata = await get_cached_metadata_view(file_doc)
 
     base_url = str(request.base_url).rstrip("/")
     stream_url = f"{base_url}/stream/{file_id}"
@@ -1070,7 +1211,7 @@ async def watch_page(request: Request, file_id: str):
         "watermark": Config.WATERMARK,
         "watermark_url": Config.WATERMARK_URL,
     })
-    response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=300"
+    response.headers["Cache-Control"] = "public, max-age=30, stale-while-revalidate=120"
     return response
 
 
@@ -1087,7 +1228,7 @@ async def download_page(request: Request, file_id: str):
     metadata = await get_cached_metadata_view(file_doc)
     file_size_bytes = _safe_metadata_int(file_doc.get("file_size", 0))
     file_size = humanbytes(file_size_bytes)
-    mime_type = file_doc.get("mime_type", "video/mp4")
+    mime_type = metadata.get("mime_type") or _guess_mime_from_name(file_name, file_doc.get("mime_type"))
     base_url = str(request.base_url).rstrip("/")
     stream_url = f"{base_url}/stream/{file_id}"
     download_url = f"{base_url}/download/{file_id}"
@@ -1110,7 +1251,7 @@ async def download_page(request: Request, file_id: str):
         "watermark": Config.WATERMARK,
         "watermark_url": Config.WATERMARK_URL,
     })
-    response.headers["Cache-Control"] = "public, max-age=60, stale-while-revalidate=300"
+    response.headers["Cache-Control"] = "public, max-age=30, stale-while-revalidate=120"
     return response
 
 
@@ -1133,7 +1274,7 @@ async def stream_media_endpoint(request: Request, file_id: str, range: str = Hea
         raise HTTPException(status_code=404, detail="File size invalid or source unavailable.")
 
     file_name = file_doc.get("file_name", "video.mp4")
-    mime_type = normalize_mime(file_doc.get("mime_type") or mimetypes.guess_type(file_name)[0] or "video/mp4")
+    mime_type = _guess_mime_from_name(file_name, file_doc.get("mime_type"))
     etag = compute_etag(file_id, file_size)
 
     if not range and request.headers.get("if-none-match") == etag:
@@ -1185,7 +1326,6 @@ async def stream_media_endpoint(request: Request, file_id: str, range: str = Hea
 @stream_router.head("/download/{file_id}")
 @stream_router.head("/file/{file_id}")
 async def download_media_endpoint(request: Request, file_id: str, range: str = Header(None)):
-    """Handles high-speed multi-connection direct file downloads with HTTP 206 Range support."""
     file_doc = await get_cached_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="File not found or revoked.")
@@ -1202,7 +1342,7 @@ async def download_media_endpoint(request: Request, file_id: str, range: str = H
         raise HTTPException(status_code=404, detail="File missing on server.")
 
     file_name = file_doc.get("file_name", "download.mp4")
-    dl_mime = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+    dl_mime = _guess_mime_from_name(file_name, file_doc.get("mime_type"))
     etag = compute_etag(file_id, file_size)
 
     if not range and request.headers.get("if-none-match") == etag:
@@ -1269,6 +1409,7 @@ async def api_status(request: Request):
         "chats": chats_count,
         "files": files_count,
         "cache": cache_stats,
+        "auto_cache_clear_interval_sec": AUTO_CACHE_CLEAR_INTERVAL,
         "server_time": float(time.time()),
         "watermark": Config.WATERMARK,
         "watermark_url": Config.WATERMARK_URL,
@@ -1304,8 +1445,8 @@ async def api_ping():
 
 @api_router.get("/info/{file_id}")
 @api_router.head("/info/{file_id}")
-async def api_file_info(file_id: str):
-    payload = await get_cached_api_info(file_id)
+async def api_file_info(file_id: str, fresh: int = 0):
+    payload = await get_cached_api_info(file_id, force_refresh=bool(fresh))
     if not payload:
         raise HTTPException(status_code=404, detail="File not found")
     return payload
@@ -1313,7 +1454,6 @@ async def api_file_info(file_id: str):
 
 @api_router.get("/user/{user_id}/files")
 async def api_user_files(user_id: int, skip: int = 0, limit: int = 20):
-    """Return paginated JSON list of a user's indexed files and 4-player stream links."""
     lim = max(1, min(50, int(limit)))
     sk = max(0, int(skip))
     return await get_cached_user_files(user_id, sk, lim)
@@ -1321,21 +1461,18 @@ async def api_user_files(user_id: int, skip: int = 0, limit: int = 20):
 
 @api_router.get("/logs/summary")
 async def api_logs_summary():
-    """Return live application log analytics, RateLimitManager, and Task Recovery health."""
     from utils import get_log_analytics
     return get_log_analytics()
 
 
 @api_router.get("/tasks/report")
 async def api_tasks_report():
-    """Return persistent task recovery and completion execution report."""
     from plugins.compressor import generate_task_execution_report
     return await generate_task_execution_report()
 
 
 @api_router.get("/ratelimit")
 async def api_ratelimit_status():
-    """Return centralized TelegramRateLimitManager telemetry."""
     from plugins.core_utils import rate_limit_manager
     return rate_limit_manager.get_stats()
 
@@ -1355,7 +1492,7 @@ async def api_subtitle_vtt(file_id: str, sub_idx: int):
     vtt = await extract_webvtt_subtitle(source, sub_index=sub_idx, timeout=15.0)
     if not vtt:
         vtt = "WEBVTT\n\n"
-    await cache.set(cache_key, vtt, ttl=900)
+    await cache.set(cache_key, vtt, ttl=300)
     return Response(content=vtt, media_type="text/vtt; charset=utf-8")
 
 
@@ -1376,6 +1513,14 @@ def create_app(bot_instance=None) -> FastAPI:
     )
     fastapi_app.state.bot = bot_instance
     fastapi_app.state.start_time = float(time.time())
+
+    @fastapi_app.on_event("startup")
+    async def _startup_cache_cleaner():
+        start_auto_cache_cleaner()
+
+    @fastapi_app.on_event("shutdown")
+    async def _shutdown_cache_cleaner():
+        await stop_auto_cache_cleaner()
 
     fastapi_app.add_middleware(
         CORSMiddleware,
@@ -1414,11 +1559,11 @@ def create_app(bot_instance=None) -> FastAPI:
                     existing = {k.lower() for k, _ in raw_headers}
                     if b"cache-control" not in existing:
                         if path in {"/", "/stats"}:
-                            raw_headers.append((b"cache-control", b"public, max-age=60, stale-while-revalidate=600"))
+                            raw_headers.append((b"cache-control", b"public, max-age=30, stale-while-revalidate=300"))
                         elif path.startswith(("/watch/", "/dl/", "/code/")):
-                            raw_headers.append((b"cache-control", b"public, max-age=60, stale-while-revalidate=300"))
+                            raw_headers.append((b"cache-control", b"public, max-age=30, stale-while-revalidate=120"))
                         elif path.startswith("/api/info/"):
-                            raw_headers.append((b"cache-control", b"private, max-age=15"))
+                            raw_headers.append((b"cache-control", b"private, max-age=10"))
                         elif path.startswith("/api/search"):
                             raw_headers.append((b"cache-control", b"private, max-age=10"))
                         elif path == "/api/status":
