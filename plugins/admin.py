@@ -671,7 +671,7 @@ async def full_reboot_command(client: Client, message: Message):
     os.execl(sys.executable, sys.executable, *sys.argv)
 
 
-@Client.on_message(filters.command(["gbanlist", "setvar", "getvar", "delvar", "tunestream", "tasks", "killtask"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+@Client.on_message(filters.command(["gbanlist", "setvar", "getvar", "delvar", "tunestream", "admintasks", "killtask"], prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def extra_advanced_admin_cmds(client: Client, message: Message):
     if not message.from_user or not is_admin_sync(message.from_user.id):
         return await message.reply_text("⛔ <b>ᴀᴅᴍɪɴs ᴏɴʟʏ!</b>", parse_mode=enums.ParseMode.HTML)
@@ -753,7 +753,7 @@ async def extra_advanced_admin_cmds(client: Client, message: Message):
             parse_mode=enums.ParseMode.HTML,
         )
 
-    if cmd == "tasks":
+    if cmd == "admintasks":
         all_t = list(asyncio.all_tasks())
         return await message.reply_text(
             f"🔄 <b>{to_smallcaps('active runtime tasks & workers')}</b> ⚡\n"

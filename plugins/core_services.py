@@ -2436,6 +2436,14 @@ async def compress_file_to_zip(input_path: str, output_zip_path: str, arcname: s
         cache.auto_clear_after_response_sync(preserve_workflows=True)
 
 
+def has_ffmpeg() -> bool:
+    return bool(shutil.which(FFMPEG_BIN) or os.path.exists(FFMPEG_BIN))
+
+
+def has_ffprobe() -> bool:
+    return bool(shutil.which(FFPROBE_BIN) or os.path.exists(FFPROBE_BIN))
+
+
 async def probe_stream_url_mediainfo(stream_url: str, timeout: float = 8.0) -> Dict[str, Any]:
     if not stream_url or not has_ffprobe():
         return {}
@@ -2533,12 +2541,17 @@ async def extract_webvtt_subtitle(source: str, sub_index: int = 0, timeout: floa
         return ""
     cmd = [
         FFMPEG_BIN,
+        "-hide_banner",
+        "-loglevel", "error",
+        "-nostdin",
         "-y",
         "-i", source,
         "-map", f"0:s:{max(0, int(sub_index))}",
+        "-vn", "-an", "-dn",
         "-f", "webvtt",
         "pipe:1",
     ]
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -2549,5 +2562,10 @@ async def extract_webvtt_subtitle(source: str, sub_index: int = 0, timeout: floa
         if proc.returncode == 0 and stdout:
             return stdout.decode("utf-8", errors="replace")
     except Exception:
-        pass
+        if proc is not None and proc.returncode is None:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
     return ""

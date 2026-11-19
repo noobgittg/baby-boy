@@ -95,32 +95,96 @@ class MMWProBot(Client):
                     except Exception:
                         pass
 
+    def _resolve_target_dc(self, file_id):
+        dc = getattr(file_id, "dc_id", None)
+        if dc is not None:
+            return dc
+        if isinstance(file_id, str) and file_id:
+            try:
+                from pyrogram.file_id import FileId
+                decoded = FileId.decode(file_id)
+                return getattr(decoded, "dc_id", None)
+            except Exception:
+                return None
+        return None
+
     async def get_file(self, *args, **kwargs):
         file_id = args[0] if args else kwargs.get("file_id")
-        target_dc = getattr(file_id, "dc_id", None)
-        media_sessions = getattr(self, "media_sessions", None)
-        if target_dc is not None and isinstance(media_sessions, dict) and target_dc not in media_sessions:
-            async with self._dc_auth_lock:
-                pass
-        for attempt in range(3):
+        target_dc = self._resolve_target_dc(file_id)
+        for attempt in range(4):
+            yielded_any = False
+            gen = None
+            first_chunk = None
+            used_session = None
             try:
-                async for chunk in super().get_file(*args, **kwargs):
+                media_sessions = getattr(self, "media_sessions", None)
+                needs_init = isinstance(media_sessions, dict) and (target_dc is None or target_dc not in media_sessions)
+                if needs_init:
+                    async with self._dc_auth_lock:
+                        media_sessions = getattr(self, "media_sessions", None)
+                        still_missing = isinstance(media_sessions, dict) and (target_dc is None or target_dc not in media_sessions)
+                        gen = super().get_file(*args, **kwargs)
+                        if still_missing:
+                            try:
+                                first_chunk = await gen.__anext__()
+                            except StopAsyncIteration:
+                                return
+                        if isinstance(media_sessions, dict) and target_dc is not None:
+                            used_session = media_sessions.get(target_dc)
+                else:
+                    if isinstance(media_sessions, dict) and target_dc is not None:
+                        used_session = media_sessions.get(target_dc)
+                    gen = super().get_file(*args, **kwargs)
+
+                if first_chunk is not None:
+                    yielded_any = True
+                    yield first_chunk
+                async for chunk in gen:
+                    yielded_any = True
                     yield chunk
                 return
             except Exception as exc:
                 err_txt = f"{type(exc).__name__} {exc}".upper()
-                if "AUTH_BYTES_INVALID" in err_txt or "AUTHBYTESINVALID" in err_txt or "AUTH_KEY_UNREGISTERED" in err_txt:
+                is_auth_err = (
+                    "AUTH_BYTES_INVALID" in err_txt
+                    or "AUTHBYTESINVALID" in err_txt
+                    or "AUTH_KEY_UNREGISTERED" in err_txt
+                )
+                if is_auth_err and not yielded_any and attempt < 3:
                     logger.warning(
-                        "⚠️ [ᴍᴇᴅɪᴀ sᴇssɪᴏɴ ʀᴇᴄᴏᴠᴇʀʏ] %s on DC=%s (attempt %s/3) — resetting media session",
+                        "⚠️ [ᴍᴇᴅɪᴀ sᴇssɪᴏɴ ʀᴇᴄᴏᴠᴇʀʏ] %s on DC=%s (attempt %s/4) — resetting stale media session",
                         type(exc).__name__,
                         target_dc,
                         attempt + 1,
                     )
-                    await self.reset_media_sessions(target_dc)
-                    if attempt < 2:
-                        await asyncio.sleep(0.35 * (attempt + 1))
-                        continue
+                    async with self._dc_auth_lock:
+                        media_sessions = getattr(self, "media_sessions", None)
+                        if isinstance(media_sessions, dict):
+                            current = media_sessions.get(target_dc) if target_dc is not None else None
+                            if target_dc is None or current is None or current is used_session:
+                                keys = [target_dc] if (target_dc is not None and target_dc in media_sessions) else list(media_sessions.keys())
+                                for k in keys:
+                                    sess = media_sessions.pop(k, None)
+                                    if sess is not None:
+                                        try:
+                                            stop_fn = getattr(sess, "stop", None)
+                                            if callable(stop_fn):
+                                                res = stop_fn()
+                                                if asyncio.iscoroutine(res):
+                                                    await res
+                                        except Exception:
+                                            pass
+                    await asyncio.sleep(0.4 * (attempt + 1))
+                    continue
                 raise
+            finally:
+                if gen is not None:
+                    aclose = getattr(gen, "aclose", None)
+                    if callable(aclose):
+                        try:
+                            await aclose()
+                        except Exception:
+                            pass
 
     def add_handler(self, handler, group: int = 0):
         if hasattr(handler, "callback") and callable(handler.callback):

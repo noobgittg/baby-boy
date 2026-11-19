@@ -154,7 +154,7 @@ async def _build_group_stats_card(client: Client, chat_id: int, title: str = "")
     return text, kb
 
 
-@Client.on_message(filters.group & filters.command(["gstats", "groupstats"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+@Client.on_message(filters.group & filters.command(["gstats"], prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def group_stats_command(client: Client, message: Message):
     text, kb = await _build_group_stats_card(client, message.chat.id, message.chat.title or "")
     await safe_reply_text(message, text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)

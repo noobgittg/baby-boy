@@ -41,6 +41,8 @@ _CHUNK_FETCH_LOCKS: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 _STATS_LOCK = asyncio.Lock()
 _STREAM_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_STREAMS)
 _PROBE_SEMAPHORE = asyncio.Semaphore(2)
+_AUDIO_REMUX_SEMAPHORE = asyncio.Semaphore(2)
+_SUB_SEMAPHORE = asyncio.Semaphore(1)
 _CACHE_CLEANER_TASK: Optional[asyncio.Task] = None
 
 _EXT_MIME_FALLBACK = {
@@ -262,6 +264,8 @@ def media_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
         item["channels"] = _safe_metadata_int(item.get("channels") or 0)
         item["channel_layout"] = str(item.get("channel_layout") or "Undetermined")
         item["title"] = str(item.get("title") or f"Track {idx + 1}")
+        if file_id and not item.get("url"):
+            item["url"] = f"/api/audio/{file_id}/{idx}"
         audio_tracks.append(item)
 
     subtitle_tracks = []
@@ -1477,23 +1481,159 @@ async def api_ratelimit_status():
     return rate_limit_manager.get_stats()
 
 
+async def probe_and_cache_media_tracks(file_id: str, file_doc: Dict[str, Any], bot: Any) -> Dict[str, Any]:
+    meta = await get_cached_metadata_view(file_doc)
+    raw_meta = dict(file_doc.get("metadata") or {})
+    already_probed = bool(
+        await cache.get(f"tracks_probed_{file_id}")
+        or raw_meta.get("audio_tracks")
+        or raw_meta.get("audio_streams")
+        or raw_meta.get("subtitle_tracks")
+        or raw_meta.get("subtitle_streams")
+    )
+    if already_probed or meta.get("media_kind") not in ("video", "audio"):
+        return {**meta, "probed": True}
+
+    fpath = file_doc.get("file_path")
+    if bot is None and not (fpath and os.path.exists(fpath)):
+        return {**meta, "probed": False}
+
+    async with _PROBE_SEMAPHORE:
+        if await cache.get(f"tracks_probed_{file_id}"):
+            fresh_doc = await get_cached_file_doc(file_id)
+            fresh_meta = await get_cached_metadata_view(fresh_doc or file_doc)
+            return {**fresh_meta, "probed": True}
+        try:
+            from plugins.core_services import get_detailed_mediainfo, probe_stream_url_mediainfo
+            probed = None
+            if fpath and os.path.exists(fpath):
+                probed = await get_detailed_mediainfo(fpath)
+            else:
+                local_stream = f"http://127.0.0.1:{Config.PORT}/stream/{file_id}"
+                probed = await probe_stream_url_mediainfo(local_stream, timeout=6.0)
+            if probed:
+                raw_meta.update({
+                    "duration": probed.get("duration") or raw_meta.get("duration", 0),
+                    "audio_tracks": probed.get("audio_streams") or raw_meta.get("audio_tracks", []),
+                    "subtitle_tracks": probed.get("subtitle_streams") or raw_meta.get("subtitle_tracks", []),
+                    "language": probed.get("language") or raw_meta.get("language", "Undetermined"),
+                    "audio_track": probed.get("audio_track") or raw_meta.get("audio_track", "Undetermined"),
+                })
+                if probed.get("video_streams"):
+                    raw_meta["width"] = probed["video_streams"][0].get("width", raw_meta.get("width", 0))
+                    raw_meta["height"] = probed["video_streams"][0].get("height", raw_meta.get("height", 0))
+                await file_repo.update_file(file_id, {"metadata": raw_meta})
+                await invalidate_file_cache(file_id)
+                updated_doc = {**file_doc, "metadata": raw_meta}
+                await cache.set(f"tracks_probed_{file_id}", True, ttl=180)
+                return {**media_metadata_view(updated_doc), "probed": True}
+        except Exception:
+            pass
+    await cache.set(f"tracks_probed_{file_id}", True, ttl=30)
+    return {**meta, "probed": True}
+
+
+@api_router.get("/tracks/{file_id}")
+async def api_media_tracks(request: Request, file_id: str):
+    file_doc = await get_cached_file_doc(file_id)
+    if not file_doc:
+        raise HTTPException(status_code=404, detail="File not found")
+    bot = getattr(request.app.state, "bot", None)
+    data = await probe_and_cache_media_tracks(file_id, file_doc, bot)
+    return {
+        "file_id": file_id,
+        "probed": bool(data.get("probed", False)),
+        "metadata": data,
+    }
+
+
+@api_router.get("/audio/{file_id}/{audio_idx}")
+async def api_audio_track_stream(request: Request, file_id: str, audio_idx: int, t: float = 0.0):
+    file_doc = await get_cached_file_doc(file_id)
+    if not file_doc:
+        raise HTTPException(status_code=404, detail="Audio source not found")
+    from plugins.core_services import FFMPEG_BIN, has_ffmpeg
+    if not has_ffmpeg():
+        raise HTTPException(status_code=503, detail="Audio track switcher unavailable")
+    fpath = file_doc.get("file_path")
+    source = fpath if (fpath and os.path.exists(fpath)) else f"http://127.0.0.1:{Config.PORT}/stream/{file_id}"
+    seek_sec = max(0.0, float(t or 0.0))
+    idx = max(0, int(audio_idx))
+    cmd = [FFMPEG_BIN, "-hide_banner", "-loglevel", "error", "-nostdin"]
+    if seek_sec > 0.05:
+        cmd.extend(["-ss", f"{seek_sec:.3f}"])
+    cmd.extend([
+        "-i", source,
+        "-map", f"0:a:{idx}",
+        "-vn", "-sn", "-dn",
+        "-c:a", "aac",
+        "-b:a", "96k",
+        "-ac", "2",
+        "-f", "adts",
+        "pipe:1",
+    ])
+
+    async def _audio_gen():
+        async with _AUDIO_REMUX_SEMAPHORE:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    chunk = await proc.stdout.read(16384)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                if proc.returncode is None:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                try:
+                    await proc.wait()
+                except Exception:
+                    pass
+
+    return StreamingResponse(
+        _audio_gen(),
+        media_type="audio/aac",
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-store",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
 @api_router.get("/subtitles/{file_id}/{sub_idx}.vtt")
 async def api_subtitle_vtt(file_id: str, sub_idx: int):
     cache_key = f"sub_vtt_{file_id}_{sub_idx}"
     cached_vtt = await cache.get(cache_key)
+    vtt_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=300",
+    }
     if cached_vtt is not None:
-        return Response(content=cached_vtt, media_type="text/vtt; charset=utf-8")
+        return Response(content=cached_vtt, media_type="text/vtt; charset=utf-8", headers=vtt_headers)
     file_doc = await get_cached_file_doc(file_id)
     if not file_doc:
         raise HTTPException(status_code=404, detail="Subtitle source not found")
     fpath = file_doc.get("file_path")
     source = fpath if (fpath and os.path.exists(fpath)) else f"http://127.0.0.1:{Config.PORT}/stream/{file_id}"
     from plugins.core_services import extract_webvtt_subtitle
-    vtt = await extract_webvtt_subtitle(source, sub_index=sub_idx, timeout=15.0)
-    if not vtt:
-        vtt = "WEBVTT\n\n"
-    await cache.set(cache_key, vtt, ttl=300)
-    return Response(content=vtt, media_type="text/vtt; charset=utf-8")
+    async with _SUB_SEMAPHORE:
+        vtt = await extract_webvtt_subtitle(source, sub_index=sub_idx, timeout=12.0)
+    if vtt and len(vtt.strip()) > 10:
+        await cache.set(cache_key, vtt, ttl=600)
+        return Response(content=vtt, media_type="text/vtt; charset=utf-8", headers=vtt_headers)
+    empty_vtt = "WEBVTT\n\n"
+    await cache.set(cache_key, empty_vtt, ttl=10, transient=True)
+    return Response(content=empty_vtt, media_type="text/vtt; charset=utf-8", headers=vtt_headers)
 
 
 @api_router.get("/search")

@@ -472,7 +472,7 @@ async def render_user_dashboard_view(target_msg: Message, user_id: int, first_na
         await safe_reply_text(target_msg, text, reply_markup=InlineKeyboardMarkup(buttons))
 
 
-@Client.on_message(filters.command(["mytasks", "myprofile", "preset", "setpreset"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+@Client.on_message(filters.command(["myprofile", "preset", "setpreset"], prefixes=COMMAND_PREFIXES) & filters.incoming)
 async def user_dashboard_cmd_handler(client: Client, message: Message):
     user = message.from_user
     uid = user.id if user else 0

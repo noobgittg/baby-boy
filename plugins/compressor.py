@@ -3,7 +3,7 @@ import re
 import time
 import secrets
 import asyncio
-from typing import Tuple, Optional, Dict, Any, List, Tuple
+from typing import Tuple, Optional, Dict, Any, List
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 from pyrogram.types import (
