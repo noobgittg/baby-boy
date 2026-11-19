@@ -5,11 +5,11 @@ import io
 import json
 import logging
 import re
+import secrets
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from pyrogram import Client, enums, filters
-from pyrogram.errors import FloodWait, MessageNotModified
 from pyrogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -17,25 +17,55 @@ from pyrogram.types import (
     Message,
 )
 
+from config import Config
 from database.users_chats_db import db
 from info import ADMINS, COMMAND_PREFIXES, LOG_CHANNEL
 from plugins.channel_manager import resolve_target_channel_and_verify
+from plugins.core_db import mongo
+from plugins.core_utils import (
+    execute_with_floodwait,
+    safe_edit_text,
+    safe_reply_text,
+    to_smallcaps,
+)
 from utils import (
+    format_watermark_html,
     get_readable_time,
     is_admin_sync,
+    is_chat_or_global_admin,
     safe_edit_message,
-    to_smallcaps,
 )
 
 logger = logging.getLogger("MMWExtraChannelMgr")
 
 XM_SEP = "|"
-_URL_RE = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
-_TME_RE = re.compile(r"(?:https?://)?(?:t\.me|telegram\.me)/\S+", re.IGNORECASE)
-_USER_RE = re.compile(r"@[A-Za-z0-9_]{4,}")
-_HASH_RE = re.compile(r"#[A-Za-z0-9_]+")
+RP_SEP = "|"
+
+_URL_RE = re.compile(r"https?://\S+|www.\S+", re.IGNORECASE)
+_TME_RE = re.compile(r"(?:https?://)?(?:t.me|telegram.me)/\S+", re.IGNORECASE)
+USER_RE = re.compile(r"@[A-Za-z0-9]{4,}")
+HASH_RE = re.compile(r"#[A-Za-z0-9]+")
 _MULTI_NL_RE = re.compile(r"\n{3,}")
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F300-\U0001F5FF"
+    "\U0001F600-\U0001F64F"
+    "\U0001F680-\U0001F6FF"
+    "\U0001F700-\U0001F77F"
+    "\U0001F780-\U0001F7FF"
+    "\U0001F800-\U0001F8FF"
+    "\U0001F900-\U0001F9FF"
+    "\U0001FA00-\U0001FA6F"
+    "\U0001FA70-\U0001FAFF"
+    "\U00002600-\U000026FF"
+    "\U00002700-\U000027BF"
+    "\U0001F1E6-\U0001F1FF"
+    "]+",
+    flags=re.UNICODE,
+)
 _RECENT_POST_HASHES: Dict[int, Dict[str, float]] = {}
+_SCHEDULED_POST_TASKS: Dict[str, asyncio.Task] = {}
+_SCHEDULED_POST_META: Dict[str, Dict[str, Any]] = {}
 
 EXTRA_CHANNEL_CATEGORIES: Dict[str, Tuple[str, List[Tuple[str, str]]]] = {
     "format": (
@@ -43,16 +73,14 @@ EXTRA_CHANNEL_CATEGORIES: Dict[str, Tuple[str, List[Tuple[str, str]]]] = {
         [
             ("bold_title", "Bold First Line Title"),
             ("italic_footer", "Italic Last Line Footer"),
-            ("mono_filesize", "Monospace File Size"),
             ("smallcaps_caption", "SmallCaps Styled Caption"),
             ("strip_links", "Strip External URLs"),
             ("strip_usernames", "Strip @Usernames"),
             ("strip_hashtags", "Strip Tags"),
-            ("strip_emojis", "Strip Non-ASCII Symbols"),
+            ("strip_emojis", "Strip Emojis & Symbols"),
             ("trim_whitespace", "Trim Extra Whitespace"),
             ("uppercase_header", "Uppercase First Line"),
             ("add_separator_line", "Add Divider Line"),
-            ("add_bullet_prefix", "Add Bullet Prefix"),
             ("add_timestamp", "Append UTC Time Stamp"),
             ("add_date_stamp", "Append UTC Date Stamp"),
             ("add_post_number", "Append Post Sequence No."),
@@ -78,39 +106,12 @@ EXTRA_CHANNEL_CATEGORIES: Dict[str, Tuple[str, List[Tuple[str, str]]]] = {
             ("auto_animation_badge", "Auto GIF Animation Badge"),
             ("protect_content_copy", "Protect Forwarded Copies"),
             ("disable_web_preview", "Disable Link Previews"),
-            ("silent_notification", "Silent Channel Broadcasts"),
             ("auto_forward_backup", "Auto Copy to Log Channel"),
-            ("auto_mirror_channel", "Auto Mirror to Backup ID"),
             ("auto_pin_video", "Auto Pin New Videos"),
             ("auto_pin_audio", "Auto Pin New Audios"),
             ("auto_pin_document", "Auto Pin New Documents"),
             ("auto_pin_photo", "Auto Pin New Photos"),
             ("auto_pin_poll", "Auto Pin New Polls"),
-        ],
-    ),
-    "buttons": (
-        "🔘 Link, Button & CTA Engine",
-        [
-            ("btn_share_post", "Share Post URL Button"),
-            ("btn_channel_link", "Join Channel CTA Button"),
-            ("btn_request_group", "Request Group Button"),
-            ("btn_bot_start", "Open Bot CTA Button"),
-            ("btn_watch_stream", "Watch Online CTA Button"),
-            ("btn_fast_download", "Fast Download CTA Button"),
-            ("btn_download_hub", "Download Hub CTA Button"),
-            ("btn_backup_channel", "Backup Channel Button"),
-            ("btn_contact_admin", "Contact Admin Button"),
-            ("btn_feedback_url", "Feedback Link Button"),
-            ("btn_mirror_link", "Mirror Index Button"),
-            ("btn_copy_id", "Channel Post Link Button"),
-            ("btn_subscribe_cta", "Subscribe CTA Button"),
-            ("btn_report_broken", "Report Broken Link Button"),
-            ("btn_next_part", "Next Part Link Button"),
-            ("btn_prev_part", "Previous Part Button"),
-            ("btn_playlist_index", "Playlist Index Button"),
-            ("btn_vip_channel", "VIP Channel CTA Button"),
-            ("btn_rules_link", "Channel Rules Button"),
-            ("btn_support_desk", "Support Desk Button"),
         ],
     ),
     "guard": (
@@ -141,26 +142,19 @@ EXTRA_CHANNEL_CATEGORIES: Dict[str, Tuple[str, List[Tuple[str, str]]]] = {
     "retention": (
         "⏳ Auto-Delete & Retention",
         [
+            ("ttl_sticker_10m", "Auto-Del Sticker After 10m"),
+            ("ttl_gif_30m", "Auto-Del GIF After 30m"),
             ("ttl_text_1h", "Auto-Del Text After 1h"),
+            ("ttl_forwarded_1h", "Auto-Del Forwards After 1h"),
+            ("ttl_links_2h", "Auto-Del Link Posts 2h"),
+            ("ttl_promos_6h", "Auto-Del Promo Posts 6h"),
+            ("ttl_alerts_12h", "Auto-Del Alert Posts 12h"),
             ("ttl_text_24h", "Auto-Del Text After 24h"),
             ("ttl_photo_24h", "Auto-Del Photo After 24h"),
             ("ttl_video_24h", "Auto-Del Video After 24h"),
             ("ttl_doc_24h", "Auto-Del Doc After 24h"),
             ("ttl_audio_24h", "Auto-Del Audio After 24h"),
-            ("ttl_sticker_10m", "Auto-Del Sticker After 10m"),
-            ("ttl_gif_30m", "Auto-Del GIF After 30m"),
             ("ttl_poll_24h", "Auto-Del Poll After 24h"),
-            ("ttl_service_msgs", "Auto-Del Service Messages"),
-            ("ttl_pinned_notice", "Auto-Del Pin Notices"),
-            ("ttl_forwarded_1h", "Auto-Del Forwards After 1h"),
-            ("ttl_links_2h", "Auto-Del Link Posts 2h"),
-            ("ttl_promos_6h", "Auto-Del Promo Posts 6h"),
-            ("ttl_alerts_12h", "Auto-Del Alert Posts 12h"),
-            ("auto_purge_deleted_refs", "Purge Stale Hash Cache"),
-            ("auto_cleanup_empty", "Auto-Del Empty Posts"),
-            ("retention_7d_log", "Track 7-Day Retention"),
-            ("retention_30d_log", "Track 30-Day Retention"),
-            ("auto_expire_invites", "Single-Use Invite Flag"),
         ],
     ),
     "react": (
@@ -181,136 +175,20 @@ EXTRA_CHANNEL_CATEGORIES: Dict[str, Tuple[str, List[Tuple[str, str]]]] = {
             ("react_crown", "Auto React 👑"),
             ("react_gem", "Auto React 💎"),
             ("react_check", "Auto React ✅"),
-            ("auto_view_counter_log", "Log Post Views Telemetry"),
-            ("auto_milestone_100", "Log Every 100th Post"),
-            ("auto_milestone_1k", "Log Every 1000th Post"),
-            ("auto_milestone_10k", "Log Every 10000th Post"),
             ("auto_comment_prompt", "Append Comment Prompt"),
         ],
     ),
     "brand": (
         "🏷️ Metadata & Branding",
         [
-            ("brand_watermark", "Append Channel Watermark"),
             ("brand_channel_handle", "Append @Channel Handle"),
             ("brand_channel_title", "Append Channel Title"),
-            ("brand_copyright_line", "Append Copyright Notice"),
-            ("brand_verified_tag", "Append Verified Tag"),
-            ("brand_quality_tag", "Append HD Quality Label"),
-            ("brand_language_tag", "Append Language Label"),
-            ("brand_category_tag", "Append Category Label"),
-            ("brand_series_tag", "Append Series Label"),
-            ("brand_season_tag", "Append Season Label"),
-            ("brand_episode_tag", "Append Episode Label"),
-            ("brand_year_tag", "Append Release Year Tag"),
-            ("brand_source_tag", "Append Source Credit Tag"),
-            ("brand_credit_line", "Append Uploader Credit"),
-            ("brand_disclaimer_line", "Append Channel Disclaimer"),
-            ("brand_mirror_notice", "Append Mirror Notice"),
-            ("brand_dmca_notice", "Append DMCA Notice"),
-            ("brand_join_reminder", "Append Join Reminder"),
-            ("brand_share_reminder", "Append Share Reminder"),
-            ("brand_archive_id", "Append Archive Post ID"),
-        ],
-    ),
-    "schedule": (
-        "⏱️ Scheduling & Rate Control",
-        [
-            ("queue_mode_enabled", "Enable Queue Logging"),
-            ("queue_interval_5m", "5-Min Post Pacing Flag"),
-            ("queue_interval_15m", "15-Min Post Pacing Flag"),
-            ("queue_interval_30m", "30-Min Post Pacing Flag"),
-            ("queue_interval_60m", "60-Min Post Pacing Flag"),
-            ("night_quiet_hours", "Silent Mode 23:00-06:00 UTC"),
-            ("morning_digest_pin", "Morning Digest Pin Flag"),
-            ("evening_digest_pin", "Evening Digest Pin Flag"),
-            ("weekend_boost_mode", "Weekend Reaction Boost"),
-            ("batch_album_mode", "Album Group Tracking"),
-            ("auto_delay_5s", "5s Edit Delay"),
-            ("auto_delay_30s", "30s Edit Delay"),
-            ("auto_delay_60s", "60s Edit Delay"),
-            ("rate_limit_10_per_hr", "Warn > 10 Posts/Hour"),
-            ("rate_limit_30_per_hr", "Warn > 30 Posts/Hour"),
-            ("rate_limit_60_per_hr", "Warn > 60 Posts/Hour"),
-            ("auto_retry_failed_post", "Auto Retry FloodWait"),
-            ("auto_dedupe_queue", "Deduplicate Burst Posts"),
-            ("priority_pin_queue", "Priority Pin Queue Flag"),
-            ("auto_flush_queue", "Auto Flush Queue Flag"),
-        ],
-    ),
-    "analytics": (
-        "📊 Analytics, Audit & Reports",
-        [
-            ("track_post_count", "Track Total Post Count"),
-            ("track_video_count", "Track Video Post Count"),
-            ("track_audio_count", "Track Audio Post Count"),
-            ("track_doc_count", "Track Document Count"),
-            ("track_photo_count", "Track Photo Post Count"),
-            ("track_total_bytes", "Track Total Media Bytes"),
-            ("track_daily_posts", "Track Daily Post Counter"),
-            ("track_weekly_posts", "Track Weekly Counter"),
-            ("track_monthly_posts", "Track Monthly Counter"),
-            ("track_deleted_count", "Track Guard Deletions"),
-            ("track_edited_count", "Track Auto-Edited Posts"),
-            ("track_forwarded_count", "Track Backup Copies"),
-            ("track_pinned_count", "Track Auto-Pinned Posts"),
-            ("track_reacted_count", "Track Auto-Reactions"),
-            ("track_blocked_count", "Track Blocked Posts"),
-            ("track_top_extension", "Track Top File Extension"),
-            ("track_peak_hour", "Track Peak Posting Hour"),
-            ("audit_admin_edits", "Log Channel Post Audits"),
-            ("audit_link_changes", "Log Link Guard Events"),
-            ("export_json_snapshot", "Allow JSON Stats Export"),
         ],
     ),
     "sync": (
-        "🔄 Backup, Sync & Clone Tools",
+        "🔄 Backup & Sync",
         [
             ("sync_to_log_channel", "Sync Posts to Log Channel"),
-            ("sync_caption_edits", "Sync Edited Captions"),
-            ("sync_media_only", "Sync Media Posts Only"),
-            ("sync_text_only", "Sync Text Posts Only"),
-            ("sync_pinned_only", "Sync Pinned Posts Only"),
-            ("backup_post_index", "Index Post IDs in DB"),
-            ("backup_config_json", "Enable Config JSON Dump"),
-            ("backup_invite_links", "Track Generated Invites"),
-            ("backup_admin_list", "Snapshot Admin Roster"),
-            ("backup_word_filters", "Backup Bad-Word List"),
-            ("backup_replace_rules", "Backup Replace Rules"),
-            ("backup_button_presets", "Backup CTA Button Links"),
-            ("backup_header_footer", "Backup Header & Footer"),
-            ("clone_strip_forward_tag", "Copy Without Forward Tag"),
-            ("clone_preserve_buttons", "Preserve Reply Markup"),
-            ("clone_apply_watermark", "Apply Watermark on Copy"),
-            ("clone_skip_duplicates", "Skip Duplicate Copies"),
-            ("clone_skip_service", "Skip Service Messages"),
-            ("clone_throttle_safe", "FloodWait Safe Pacing"),
-            ("clone_verify_hash", "Verify Content Hash"),
-        ],
-    ),
-    "utilities": (
-        "🛠️ Live Channel Admin Controls",
-        [
-            ("cmd_quick_post", "Quick Channel Post Tool"),
-            ("cmd_quick_edit", "Quick Caption Edit Tool"),
-            ("cmd_quick_delete", "Quick Delete Post Tool"),
-            ("cmd_quick_pin", "Quick Pin Post Tool"),
-            ("cmd_quick_unpin", "Quick Unpin Tool"),
-            ("cmd_quick_poll", "Quick Channel Poll Tool"),
-            ("cmd_quick_invite", "Quick Invite Generator"),
-            ("cmd_quick_stats", "Live Channel Stats Card"),
-            ("cmd_quick_admins", "Live Admin List Card"),
-            ("cmd_quick_export", "Export Full JSON Backup"),
-            ("cmd_quick_clone", "Clone Post to Backup"),
-            ("cmd_quick_wipe_links", "Strip Links on Demand"),
-            ("cmd_quick_replace", "Find & Replace Engine"),
-            ("cmd_quick_watermark", "Custom Watermark Line"),
-            ("cmd_quick_protect", "Content Protection Mode"),
-            ("cmd_quick_silent", "Silent Publish Toggle"),
-            ("cmd_quick_backup", "Snapshot Channel Config"),
-            ("cmd_quick_restore", "Restore Default Presets"),
-            ("cmd_quick_reset", "Reset All Extra Flags"),
-            ("cmd_quick_health", "Channel Health Diagnostics"),
         ],
     ),
 }
@@ -380,11 +258,11 @@ def _build_main_panel(chat_id: int, title: str, feats: Dict[str, bool]) -> Tuple
     enabled_cnt = sum(1 for k in EXTRA_FEATURE_INDEX if feats.get(k))
     total_cnt = len(EXTRA_FEATURE_INDEX)
     text = (
-        f"⚡ <b>{to_smallcaps('channel extra manager pro')}</b>\n"
+        f"⚡ {to_smallcaps('channel extra manager pro')}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"• 📢 <b>{to_smallcaps('channel')}:</b> {html.escape(title or str(chat_id))}\n"
-        f"• 🆔 <b>{to_smallcaps('id')}:</b> <code>{chat_id}</code>\n"
-        f"• 🧩 <b>{to_smallcaps('features')}:</b> <code>{enabled_cnt}/{total_cnt} Active</code>\n\n"
+        f"• 📢 {to_smallcaps('channel')}: {html.escape(title or str(chat_id))}\n"
+        f"• 🆔 {to_smallcaps('id')}: {chat_id}\n"
+        f"• 🧩 {to_smallcaps('features')}: {enabled_cnt}/{total_cnt} Active\n\n"
         f"💡 {to_smallcaps('select a category below to toggle real-time channel-only automation:')}"
     )
     rows: List[List[InlineKeyboardButton]] = []
@@ -420,7 +298,6 @@ def _build_category_panel(chat_id: int, title: str, cat_key: str, page: int, fea
     page = max(0, min(total_pages - 1, int(page)))
     chunk = citems[page * per_page : (page + 1) * per_page]
     on_n = sum(1 for fk, _ in citems if feats.get(fk))
-
     text = (
         f"⚡ <b>{html.escape(ctitle)}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -441,7 +318,6 @@ def _build_category_panel(chat_id: int, title: str, cat_key: str, page: int, fea
                 )
             )
         rows.append(row)
-
     nav_row = []
     if page > 0:
         nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"xmgr{XM_SEP}cat{XM_SEP}{chat_id}{XM_SEP}{cat_key}{XM_SEP}{page - 1}"))
@@ -449,7 +325,6 @@ def _build_category_panel(chat_id: int, title: str, cat_key: str, page: int, fea
         nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"xmgr{XM_SEP}cat{XM_SEP}{chat_id}{XM_SEP}{cat_key}{XM_SEP}{page + 1}"))
     if nav_row:
         rows.append(nav_row)
-
     rows.append([
         InlineKeyboardButton(f"🟢 {to_smallcaps('enable all')}", callback_data=f"xmgr{XM_SEP}allon{XM_SEP}{chat_id}{XM_SEP}{cat_key}{XM_SEP}{page}"),
         InlineKeyboardButton(f"⚪ {to_smallcaps('disable all')}", callback_data=f"xmgr{XM_SEP}alloff{XM_SEP}{chat_id}{XM_SEP}{cat_key}{XM_SEP}{page}"),
@@ -484,7 +359,6 @@ async def extramanager_tools_cmd(client: Client, message: Message):
     ok, chat_obj, cfg = await resolve_target_channel_and_verify(client, message)
     if not ok or not chat_obj or not cfg:
         return
-
     cmd = message.command[0].lower()
     arg = message.text.split(None, 1)[1].strip() if message.text and len(message.text.split(None, 1)) > 1 else ""
     feats, stats, repls, bads = _get_extra_state(cfg)
@@ -522,8 +396,7 @@ async def extramanager_tools_cmd(client: Client, message: Message):
         await db.update_channel_config(chat_obj.id, {"extra_features": feats}, title=chat_obj.title or "")
         return await message.reply_text(
             f"{'🟢' if new_val else '⚪'} <code>{fkey}</code> → <b>{'ENABLED' if new_val else 'DISABLED'}</b>",
-            quote=True,
-            parse_mode=enums.ParseMode.HTML,
+            quote=True, parse_mode=enums.ParseMode.HTML,
         )
 
     if cmd == "xcat":
@@ -577,7 +450,7 @@ async def extramanager_tools_cmd(client: Client, message: Message):
         old_t, new_t = [x.strip() for x in arg.split("|", 1)]
         if old_t:
             repls[old_t] = new_t
-            await db.update_channel_config(chat_obj.id, {"extra_replace_rules": repls}, title=chat_obj.title or "")
+        await db.update_channel_config(chat_obj.id, {"extra_replace_rules": repls}, title=chat_obj.title or "")
         return await message.reply_text(f"✅ Rule saved: <code>{html.escape(old_t)}</code> → <code>{html.escape(new_t)}</code>", quote=True, parse_mode=enums.ParseMode.HTML)
 
     if cmd == "xbadword":
@@ -615,7 +488,6 @@ async def extramanager_callback_handler(client: Client, query: CallbackQuery):
         chat_id = int(parts[2])
     except ValueError:
         return await query.answer("Invalid channel ID", show_alert=True)
-
     cfg = await db.get_channel_config(chat_id)
     if not cfg:
         return await query.answer("Channel not connected!", show_alert=True)
@@ -737,6 +609,8 @@ async def extramanager_channel_post_engine(client: Client, message: Message):
         should_delete = True
     elif feats.get("block_forwarded_posts") and (message.forward_date or message.forward_from_chat or message.forward_from):
         should_delete = True
+    elif feats.get("block_bot_posts") and message.from_user and message.from_user.is_bot:
+        should_delete = True
     elif feats.get("block_stickers") and message.sticker:
         should_delete = True
     elif feats.get("block_gifs") and message.animation:
@@ -753,6 +627,10 @@ async def extramanager_channel_post_engine(client: Client, message: Message):
         should_delete = True
     elif feats.get("block_dice") and message.dice:
         should_delete = True
+    elif feats.get("block_games") and message.game:
+        should_delete = True
+    elif feats.get("block_venues") and message.venue:
+        should_delete = True
     elif feats.get("block_empty_captions") and message.media and not raw_text.strip():
         should_delete = True
     elif feats.get("block_non_media_text") and not message.media and raw_text.strip():
@@ -763,7 +641,8 @@ async def extramanager_channel_post_engine(client: Client, message: Message):
         should_delete = True
     elif feats.get("block_bad_words") and bads and any(w in lower_text for w in bads):
         should_delete = True
-    elif feats.get("block_duplicate_posts"):
+
+    if not should_delete and feats.get("block_duplicate_posts"):
         sig = hashlib.md5(f"{raw_text}|{file_name}|{file_size}".encode("utf-8", errors="ignore")).hexdigest()
         bucket = _RECENT_POST_HASHES.setdefault(chat_id, {})
         now_ts = time.time()
@@ -803,9 +682,11 @@ async def extramanager_channel_post_engine(client: Client, message: Message):
     if feats.get("strip_links"):
         new_text = _URL_RE.sub("", new_text)
     if feats.get("strip_usernames"):
-        new_text = _USER_RE.sub("", new_text)
+        new_text = USER_RE.sub("", new_text)
     if feats.get("strip_hashtags"):
-        new_text = _HASH_RE.sub("", new_text)
+        new_text = HASH_RE.sub("", new_text)
+    if feats.get("strip_emojis"):
+        new_text = _EMOJI_RE.sub("", new_text)
     if feats.get("replace_underscores"):
         new_text = new_text.replace("_", " ")
     if feats.get("clean_newlines"):
@@ -814,16 +695,60 @@ async def extramanager_channel_post_engine(client: Client, message: Message):
         new_text = new_text.strip()
     if feats.get("smallcaps_caption") and new_text:
         new_text = to_smallcaps(new_text)
+    if feats.get("uppercase_header") and new_text:
+        _lines = new_text.split("\n", 1)
+        _lines[0] = _lines[0].upper()
+        new_text = "\n".join(_lines)
+    if feats.get("bold_title") and new_text:
+        _lines = new_text.split("\n", 1)
+        _lines[0] = f"<b>{_lines[0]}</b>"
+        new_text = "\n".join(_lines)
+    if feats.get("italic_footer") and new_text:
+        _lines = new_text.rsplit("\n", 1)
+        _lines[-1] = f"<i>{_lines[-1]}</i>"
+        new_text = "\n".join(_lines)
+    if feats.get("wrap_blockquote") and new_text:
+        new_text = f"<blockquote>{new_text}</blockquote>"
+    if feats.get("wrap_spoiler_caption") and new_text:
+        new_text = f"<tg-spoiler>{new_text}</tg-spoiler>"
 
     extra_lines: List[str] = []
     if feats.get("auto_file_size_tag") and file_size > 0:
         extra_lines.append(f"📦 Size: {_human_size(file_size)}")
     if feats.get("auto_resolution_tag") and getattr(message.video, "height", 0):
         extra_lines.append(f"🎬 Resolution: {message.video.width}x{message.video.height}")
-    if feats.get("auto_duration_tag") and getattr(media_obj, "duration", 0):
-        extra_lines.append(f"⏱️ Duration: {get_readable_time(int(media_obj.duration))}")
+    if feats.get("auto_duration_tag"):
+        _dur = getattr(media_obj, "duration", 0) or 0
+        if _dur:
+            extra_lines.append(f"⏱️ Duration: {get_readable_time(int(_dur))}")
+    if feats.get("auto_mime_badge"):
+        _mime = getattr(media_obj, "mime_type", "") or ""
+        if _mime:
+            extra_lines.append(f"📄 {_mime}")
+    if feats.get("auto_video_badge") and message.video:
+        extra_lines.append("🎬 VIDEO")
+    if feats.get("auto_audio_badge") and message.audio:
+        extra_lines.append("🎵 AUDIO")
+    if feats.get("auto_doc_badge") and message.document:
+        extra_lines.append("📄 DOCUMENT")
+    if feats.get("auto_photo_badge") and message.photo:
+        extra_lines.append("🖼️ PHOTO")
+    if feats.get("auto_voice_badge") and message.voice:
+        extra_lines.append("🎤 VOICE NOTE")
+    if feats.get("auto_animation_badge") and message.animation:
+        extra_lines.append("🎞️ ANIMATION")
+    if feats.get("keep_extension_tag") and file_name and "." in file_name:
+        _ext = file_name.rsplit(".", 1)[-1]
+        if _ext and len(_ext) <= 6:
+            extra_lines.append(f"🔖 .{_ext.upper()}")
     if feats.get("add_post_number"):
         extra_lines.append(f"🔢 Post #{stats['posts']}")
+    if feats.get("add_timestamp"):
+        import datetime
+        extra_lines.append(f"🕐 {datetime.datetime.utcnow().strftime('%H:%M UTC')}")
+    if feats.get("add_date_stamp"):
+        import datetime
+        extra_lines.append(f"📅 {datetime.datetime.utcnow().strftime('%Y-%m-%d')}")
     if feats.get("brand_channel_handle") and message.chat.username:
         extra_lines.append(f"📢 @{message.chat.username}")
     if feats.get("brand_channel_title") and message.chat.title:
@@ -837,8 +762,6 @@ async def extramanager_channel_post_engine(client: Client, message: Message):
 
     if new_text != raw_text and new_text.strip():
         try:
-            if feats.get("auto_delay_5s"):
-                await asyncio.sleep(5)
             if message.media:
                 await message.edit_caption(new_text[:1024])
             else:
@@ -857,11 +780,11 @@ async def extramanager_channel_post_engine(client: Client, message: Message):
             break
 
     should_pin = (
-        (feats.get("auto_pin_video") and message.video)
-        or (feats.get("auto_pin_audio") and message.audio)
-        or (feats.get("auto_pin_document") and message.document)
-        or (feats.get("auto_pin_photo") and message.photo)
-        or (feats.get("auto_pin_poll") and message.poll)
+        (feats.get("auto_pin_video") and message.video) or
+        (feats.get("auto_pin_audio") and message.audio) or
+        (feats.get("auto_pin_document") and message.document) or
+        (feats.get("auto_pin_photo") and message.photo) or
+        (feats.get("auto_pin_poll") and message.poll)
     )
     if should_pin:
         try:
@@ -883,3 +806,534 @@ async def extramanager_channel_post_engine(client: Client, message: Message):
             break
 
     await db.update_channel_config(chat_id, {"extra_stats": stats}, title=message.chat.title or "")
+
+
+def _fed_col():
+    return mongo.active_db.federations
+
+
+def _parse_delay_seconds(raw: str) -> int:
+    m = re.fullmatch(r"(\d+)\s*([smhd]?)", str(raw or "").strip().lower())
+    if not m:
+        return 0
+    val = int(m.group(1))
+    unit = m.group(2) or "s"
+    mult = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(unit, 1)
+    return max(0, min(7 * 86400, val * mult))
+
+
+async def _get_fed(fed_id: str) -> Optional[Dict[str, Any]]:
+    doc = await _fed_col().find_one({"fed_id": str(fed_id)}, {"_id": 0})
+    if doc:
+        doc.pop("_id", None)
+    return doc
+
+
+async def _get_chat_fed(chat_id: int) -> Optional[Dict[str, Any]]:
+    cfg = await db.get_helpdesk_config(chat_id)
+    fid = cfg.get("fed_id")
+    if not fid:
+        return None
+    return await _get_fed(str(fid))
+
+
+@Client.on_message(filters.group & filters.command(["antichannel", "antich"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+async def antichannel_command(client: Client, message: Message):
+    cid = message.chat.id
+    uid = message.from_user.id if message.from_user else 0
+    scid = message.sender_chat.id if message.sender_chat else 0
+    if not await is_chat_or_global_admin(client, cid, user_id=uid, sender_chat_id=scid):
+        return await safe_reply_text(
+            message,
+            f"⛔ {to_smallcaps('only group admins or bot admins can toggle anti-channel!')}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+    cfg = await db.get_helpdesk_config(cid)
+    if len(message.command) > 1:
+        arg = message.command[1].strip().lower()
+        new_val = arg in ("on", "true", "1", "yes", "enable")
+    else:
+        new_val = not bool(cfg.get("antichannel_enabled", False))
+    await db.update_helpdesk_config(cid, {"antichannel_enabled": new_val})
+    badge = "🟢 ᴇɴᴀʙʟᴇᴅ" if new_val else "⚪ ᴅɪsᴀʙʟᴇᴅ"
+    logger.info("🛡️ /antichannel › ᴄʜᴀᴛ=%s sᴛᴀᴛᴇ=%s ʙʏ=%s", cid, new_val, uid)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🛡️ {to_smallcaps('toggle anti-channel')}", callback_data=f"rpro{RP_SEP}antich{RP_SEP}{cid}")],
+        [
+            InlineKeyboardButton(f"📊 {to_smallcaps('group stats')}", callback_data=f"rpro{RP_SEP}gstats{RP_SEP}{cid}"),
+            InlineKeyboardButton(f"❌ {to_smallcaps('close')}", callback_data="close_data"),
+        ],
+    ])
+    await safe_reply_text(
+        message,
+        f"✦ {to_smallcaps('rose anti-channel shield')} ✦ 🛡️\n\n"
+        f"• 📢 {to_smallcaps('status')}: {badge}\n"
+        f"• 💡 {to_smallcaps('blocks messages sent as external channels inside this group.')}"
+        f"{format_watermark_html()}",
+        reply_markup=kb,
+        parse_mode=enums.ParseMode.HTML,
+    )
+
+
+@Client.on_message(filters.group & filters.incoming, group=6)
+async def antichannel_enforcer(client: Client, message: Message):
+    if not message.sender_chat or not message.chat:
+        return
+    if int(message.sender_chat.id) == int(message.chat.id):
+        return
+    linked_chat_id = getattr(message.chat, "linked_chat", None)
+    if linked_chat_id and int(getattr(linked_chat_id, "id", 0) or 0) == int(message.sender_chat.id):
+        return
+    cfg = await db.get_helpdesk_config(message.chat.id)
+    if not cfg.get("antichannel_enabled", False):
+        return
+    try:
+        await message.delete()
+        await client.ban_chat_member(message.chat.id, message.sender_chat.id)
+        logger.info("🛡️ ᴀɴᴛɪ-ᴄʜᴀɴɴᴇʟ ʙʟᴏᴄᴋᴇᴅ › ɢʀᴏᴜᴘ=%s ᴄʜᴀɴɴᴇʟ=%s", message.chat.id, message.sender_chat.id)
+    except Exception as exc:
+        logger.debug("⚠️ ᴀɴᴛɪ-ᴄʜᴀɴɴᴇʟ ᴇɴғᴏʀᴄᴇ ɴᴏᴛɪᴄᴇ › %s", exc)
+
+
+async def _build_group_stats_card(client: Client, chat_id: int, title: str = "") -> Tuple[str, InlineKeyboardMarkup]:
+    cfg = await db.get_helpdesk_config(chat_id)
+    members = 0
+    try:
+        members = await client.get_chat_members_count(chat_id)
+    except Exception:
+        pass
+    locks = cfg.get("locks") or {}
+    active_locks = [k for k, v in locks.items() if v]
+    fed_id = cfg.get("fed_id") or "None"
+    text = (
+        f"✦ {to_smallcaps('group pro analytics & security')} ✦ 📊\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"• 💬 {to_smallcaps('group')}: {html.escape(title or str(chat_id))} ({chat_id})\n"
+        f"• 👥 {to_smallcaps('members')}: {members}\n"
+        f"• 🌐 {to_smallcaps('federation')}: {html.escape(str(fed_id))}\n"
+        f"• 🌊 {to_smallcaps('anti-flood')}: {'🟢 ᴏɴ' if cfg.get('antiflood_enabled') else '⚪ ᴏғғ'}\n"
+        f"• 🛡️ {to_smallcaps('anti-spam')}: {'🟢 ᴏɴ' if cfg.get('antispam_enabled') else '⚪ ᴏғғ'}\n"
+        f"• 📢 {to_smallcaps('anti-channel')}: {'🟢 ᴏɴ' if cfg.get('antichannel_enabled') else '⚪ ᴏғғ'}\n"
+        f"• 🚨 {to_smallcaps('raid mode')}: {'🔴 ᴏɴ' if cfg.get('raid_mode') else '⚪ ᴏғғ'}\n"
+        f"• 🔐 {to_smallcaps('active locks')}: {', '.join(active_locks) if active_locks else 'None'}"
+        f"{format_watermark_html()}"
+    )
+    kb = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(f"🛡️ {to_smallcaps('anti-channel')}", callback_data=f"rpro{RP_SEP}antich{RP_SEP}{chat_id}"),
+            InlineKeyboardButton(f"⚙️ {to_smallcaps('group editor')}", callback_data=f"gfeat|home|{chat_id}"),
+        ],
+        [
+            InlineKeyboardButton(f"🔄 {to_smallcaps('refresh')}", callback_data=f"rpro{RP_SEP}gstats{RP_SEP}{chat_id}"),
+            InlineKeyboardButton(f"❌ {to_smallcaps('close')}", callback_data="close_data"),
+        ],
+    ])
+    return text, kb
+
+
+@Client.on_message(filters.group & filters.command(["gstats"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+async def group_stats_command(client: Client, message: Message):
+    text, kb = await _build_group_stats_card(client, message.chat.id, message.chat.title or "")
+    await safe_reply_text(message, text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
+
+
+@Client.on_message(filters.command(["newfed"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+async def new_federation_command(client: Client, message: Message):
+    if not message.from_user:
+        return
+    if len(message.command) < 2:
+        return await safe_reply_text(
+            message,
+            f"📝 {to_smallcaps('usage')}: /newfed <federation_name>{format_watermark_html()}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+    fed_name = message.text.split(None, 1)[1].strip()[:64]
+    fed_id = f"fed_{secrets.token_hex(4)}"
+    doc = {
+        "fed_id": fed_id,
+        "name": fed_name,
+        "owner_id": int(message.from_user.id),
+        "admins": [int(message.from_user.id)],
+        "chats": [],
+        "banned_users": {},
+        "created_at": float(time.time()),
+    }
+    await _fed_col().update_one({"fed_id": fed_id}, {"$set": doc}, upsert=True)
+    logger.info("🌐 /newfed ᴄʀᴇᴀᴛᴇᴅ › ғᴇᴅ=%s ᴏᴡɴᴇʀ=%s", fed_id, message.from_user.id)
+    await safe_reply_text(
+        message,
+        f"✦ {to_smallcaps('federation created')} ✦ 🌐\n\n"
+        f"• 🏷️ {to_smallcaps('name')}: {html.escape(fed_name)}\n"
+        f"• 🆔 {to_smallcaps('fed id')}: {fed_id}\n"
+        f"• 💡 {to_smallcaps('link any group with')} /joinfed {fed_id}"
+        f"{format_watermark_html()}",
+        parse_mode=enums.ParseMode.HTML,
+    )
+
+
+@Client.on_message(filters.group & filters.command(["joinfed", "leavefed"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+async def join_leave_fed_command(client: Client, message: Message):
+    cid = message.chat.id
+    uid = message.from_user.id if message.from_user else 0
+    if not await is_chat_or_global_admin(client, cid, user_id=uid):
+        return await safe_reply_text(
+            message,
+            f"⛔ {to_smallcaps('only group admins or bot admins can manage federation links!')}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+    cmd = message.command[0].lower()
+    if cmd == "leavefed":
+        cfg = await db.get_helpdesk_config(cid)
+        old_fid = cfg.get("fed_id")
+        await db.update_helpdesk_config(cid, {"fed_id": None})
+        if old_fid:
+            fed = await _get_fed(str(old_fid))
+            if fed:
+                chats = [c for c in (fed.get("chats") or []) if int(c) != int(cid)]
+                await _fed_col().update_one({"fed_id": str(old_fid)}, {"$set": {"chats": chats}})
+        logger.info("🌐 /leavefed › ᴄʜᴀᴛ=%s ғᴇᴅ=%s", cid, old_fid)
+        return await safe_reply_text(
+            message,
+            f"✅ {to_smallcaps('group disconnected from federation!')}{format_watermark_html()}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+
+    if len(message.command) < 2:
+        return await safe_reply_text(
+            message,
+            f"📝 <b>{to_smallcaps('usage')}:</b> <code>/joinfed &lt;fed_id&gt;</code>{format_watermark_html()}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+    fid = message.command[1].strip()
+    fed = await _get_fed(fid)
+    if not fed:
+        return await safe_reply_text(
+            message,
+            f"❌ <b>{to_smallcaps('federation id not found!')}</b>{format_watermark_html()}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+    chats = list(dict.fromkeys(list(fed.get("chats") or []) + [int(cid)]))
+    await _fed_col().update_one({"fed_id": fid}, {"$set": {"chats": chats}})
+    await db.update_helpdesk_config(cid, {"fed_id": fid})
+    logger.info("🌐 /joinfed › ᴄʜᴀᴛ=%s ғᴇᴅ=%s", cid, fid)
+    await safe_reply_text(
+        message,
+        f"✅ <b>{to_smallcaps('group joined federation')}</b> <code>{html.escape(fed.get('name', fid))}</code> (<code>{fid}</code>)!"
+        f"{format_watermark_html()}",
+        parse_mode=enums.ParseMode.HTML,
+    )
+
+
+@Client.on_message(filters.command(["fban", "unfban", "finfo"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+async def federation_actions_command(client: Client, message: Message):
+    uid = message.from_user.id if message.from_user else 0
+    cmd = message.command[0].lower()
+    fed = await _get_chat_fed(message.chat.id) if message.chat.id < 0 else None
+
+    if cmd == "finfo":
+        if len(message.command) > 1:
+            fed = await _get_fed(message.command[1].strip())
+        if not fed:
+            return await safe_reply_text(
+                message,
+                f"ℹ️ {to_smallcaps('no federation linked. use /newfed or /finfo <fed_id>.')}{format_watermark_html()}",
+                parse_mode=enums.ParseMode.HTML,
+            )
+        return await safe_reply_text(
+            message,
+            f"✦ {to_smallcaps('federation info')} ✦ 🌐\n\n"
+            f"• 🏷️ {to_smallcaps('name')}: {html.escape(str(fed.get('name', 'Fed')))}\n"
+            f"• 🆔 {to_smallcaps('fed id')}: {fed.get('fed_id')}\n"
+            f"• 👑 {to_smallcaps('owner')}: {fed.get('owner_id')}\n"
+            f"• 💬 {to_smallcaps('linked chats')}: {len(fed.get('chats') or [])}\n"
+            f"• 🚫 {to_smallcaps('fed-banned users')}: {len(fed.get('banned_users') or {})}"
+            f"{format_watermark_html()}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+
+    if not fed:
+        return await safe_reply_text(
+            message,
+            f"⚠️ <b>{to_smallcaps('link this group to a federation first using /joinfed <fed_id>.')}</b>{format_watermark_html()}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+
+    fed_admins = set(int(x) for x in (fed.get("admins") or []))
+    if uid != int(fed.get("owner_id") or 0) and uid not in fed_admins and not is_admin_sync(uid):
+        return await safe_reply_text(
+            message,
+            f"⛔ <b>{to_smallcaps('only federation owner/admins or bot admins can run /fban or /unfban!')}</b>",
+            parse_mode=enums.ParseMode.HTML,
+        )
+
+    target_uid = 0
+    reason = "Federation Policy Violation"
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_uid = int(message.reply_to_message.from_user.id)
+        if len(message.command) > 1:
+            reason = message.text.split(None, 1)[1].strip()[:200]
+    elif len(message.command) > 1 and message.command[1].lstrip("-").isdigit():
+        target_uid = int(message.command[1])
+        if len(message.command) > 2:
+            reason = message.text.split(None, 2)[2].strip()[:200]
+
+    if target_uid <= 0 or target_uid in Config.ADMINS:
+        return await safe_reply_text(
+            message,
+            f"⚠️ <b>{to_smallcaps('reply to a user or provide a valid non-admin user id.')}</b>{format_watermark_html()}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+
+    banned_map = dict(fed.get("banned_users") or {})
+    linked_chats = list(fed.get("chats") or [])
+    affected = 0
+
+    if cmd == "fban":
+        banned_map[str(target_uid)] = {"reason": reason, "by": uid, "ts": float(time.time())}
+        await _fed_col().update_one({"fed_id": fed["fed_id"]}, {"$set": {"banned_users": banned_map}})
+        for gcid in linked_chats:
+            try:
+                await client.ban_chat_member(int(gcid), target_uid)
+                affected += 1
+            except Exception:
+                pass
+        logger.info("🔨 /fban › ғᴇᴅ=%s ᴛᴀʀɢᴇᴛ=%s ᴄʜᴀᴛs=%s", fed["fed_id"], target_uid, affected)
+        await safe_reply_text(
+            message,
+            f"🔨 <b>{to_smallcaps('federation ban applied')}</b>\n\n"
+            f"• 👤 <b>{to_smallcaps('user')}:</b> <code>{target_uid}</code>\n"
+            f"• 🌐 <b>{to_smallcaps('federation')}:</b> <code>{fed['fed_id']}</code>\n"
+            f"• 💬 <b>{to_smallcaps('enforced in')}:</b> <code>{affected}/{len(linked_chats)}</code> {to_smallcaps('chats')}\n"
+            f"• 📝 <b>{to_smallcaps('reason')}:</b> <code>{html.escape(reason)}</code>"
+            f"{format_watermark_html()}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+    else:
+        banned_map.pop(str(target_uid), None)
+        await _fed_col().update_one({"fed_id": fed["fed_id"]}, {"$set": {"banned_users": banned_map}})
+        for gcid in linked_chats:
+            try:
+                await client.unban_chat_member(int(gcid), target_uid)
+                affected += 1
+            except Exception:
+                pass
+        logger.info("🕊️ /unfban › ғᴇᴅ=%s ᴛᴀʀɢᴇᴛ=%s ᴄʜᴀᴛs=%s", fed["fed_id"], target_uid, affected)
+        await safe_reply_text(
+            message,
+            f"🕊️ <b>{to_smallcaps('federation ban lifted')}</b>\n\n"
+            f"• 👤 <b>{to_smallcaps('user')}:</b> <code>{target_uid}</code>\n"
+            f"• 💬 <b>{to_smallcaps('unbanned in')}:</b> <code>{affected}/{len(linked_chats)}</code> {to_smallcaps('chats')}"
+            f"{format_watermark_html()}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+
+
+@Client.on_message(filters.group & filters.new_chat_members, group=7)
+async def federation_join_enforcer(client: Client, message: Message):
+    fed = await _get_chat_fed(message.chat.id)
+    if not fed:
+        return
+    banned_map = fed.get("banned_users") or {}
+    for member in message.new_chat_members or []:
+        if str(member.id) in banned_map:
+            try:
+                await client.ban_chat_member(message.chat.id, member.id)
+                logger.info("🔨 ғᴇᴅ ᴀᴜᴛᴏ-ʙᴀɴ › ᴄʜᴀᴛ=%s ᴜsᴇʀ=%s ғᴇᴅ=%s", message.chat.id, member.id, fed.get("fed_id"))
+            except Exception:
+                pass
+
+
+@Client.on_message(filters.command(["schedulepost", "schedpost"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+async def schedule_post_command(client: Client, message: Message):
+    uid = message.from_user.id if message.from_user else 0
+    target_chat = message.chat.id
+    if message.chat.type == enums.ChatType.PRIVATE:
+        conn_cid = await db.get_user_connected_channel(uid)
+        if conn_cid:
+            target_chat = int(conn_cid)
+    if target_chat < 0 and not await is_chat_or_global_admin(client, target_chat, user_id=uid):
+        return await safe_reply_text(
+            message,
+            f"⛔ {to_smallcaps('only chat/channel admins or bot admins can schedule posts!')}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+    if len(message.command) < 2:
+        return await safe_reply_text(
+            message,
+            f"📝 {to_smallcaps('usage')}: /schedulepost 10m Hello everyone! {to_smallcaps('or reply to a message with')} /schedulepost 30m"
+            f"{format_watermark_html()}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+    delay_sec = _parse_delay_seconds(message.command[1])
+    if delay_sec <= 0:
+        return await safe_reply_text(
+            message,
+            f"⚠️ {to_smallcaps('invalid delay! use formats like 30s, 10m, 2h, 1d.')}{format_watermark_html()}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+    post_text = message.text.split(None, 2)[2].strip() if len(message.command) > 2 else ""
+    reply_src = message.reply_to_message
+    if not post_text and not reply_src:
+        return await safe_reply_text(
+            message,
+            f"⚠️ {to_smallcaps('provide post text or reply to a message to schedule.')}{format_watermark_html()}",
+            parse_mode=enums.ParseMode.HTML,
+        )
+
+    job_id = f"sp_{secrets.token_hex(3)}"
+    run_at = time.time() + delay_sec
+    _SCHEDULED_POST_META[job_id] = {
+        "job_id": job_id,
+        "user_id": uid,
+        "target_chat": target_chat,
+        "delay_sec": delay_sec,
+        "run_at": run_at,
+        "preview": (post_text or "[Replied Message]")[:48],
+    }
+
+    async def _runner():
+        try:
+            await asyncio.sleep(delay_sec)
+            if reply_src:
+                await execute_with_floodwait(reply_src.copy, chat_id=target_chat)
+            else:
+                await execute_with_floodwait(client.send_message, chat_id=target_chat, text=post_text)
+            logger.info("⏰ sᴄʜᴇᴅᴜʟᴇᴅ ᴘᴏsᴛ sᴇɴᴛ › ᴊᴏʙ=%s ᴄʜᴀᴛ=%s", job_id, target_chat)
+        except asyncio.CancelledError:
+            logger.info("🗑️ sᴄʜᴇᴅᴜʟᴇᴅ ᴘᴏsᴛ ᴄᴀɴᴄᴇʟʟᴇᴅ › ᴊᴏʙ=%s", job_id)
+        except Exception as exc:
+            logger.warning("⚠️ sᴄʜᴇᴅᴜʟᴇᴅ ᴘᴏsᴛ ᴇʀʀᴏʀ (%s): %s", job_id, exc)
+        finally:
+            _SCHEDULED_POST_TASKS.pop(job_id, None)
+            _SCHEDULED_POST_META.pop(job_id, None)
+
+    _SCHEDULED_POST_TASKS[job_id] = asyncio.create_task(_runner(), name=f"mmw-sched-{job_id}")
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"🗑️ {to_smallcaps('cancel scheduled post')}", callback_data=f"rpro{RP_SEP}delsched{RP_SEP}{job_id}")],
+    ])
+    await safe_reply_text(
+        message,
+        f"⏰ <b>{to_smallcaps('post scheduled successfully')}</b> ✨\n\n"
+        f"• 🆔 <b>{to_smallcaps('job id')}:</b> <code>{job_id}</code>\n"
+        f"• 💬 <b>{to_smallcaps('target chat')}:</b> <code>{target_chat}</code>\n"
+        f"• ⏳ <b>{to_smallcaps('sends in')}:</b> <code>{delay_sec}s</code>"
+        f"{format_watermark_html()}",
+        reply_markup=kb,
+        parse_mode=enums.ParseMode.HTML,
+    )
+
+
+@Client.on_message(filters.command(["listscheduled", "delscheduled"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+async def manage_scheduled_posts_command(client: Client, message: Message):
+    uid = message.from_user.id if message.from_user else 0
+    cmd = message.command[0].lower()
+    if cmd == "delscheduled":
+        if len(message.command) < 2:
+            return await safe_reply_text(
+                message,
+                f"📝 {to_smallcaps('usage')}: /delscheduled <job_id>",
+                parse_mode=enums.ParseMode.HTML,
+            )
+        jid = message.command[1].strip()
+        meta = _SCHEDULED_POST_META.get(jid)
+        if not meta:
+            return await safe_reply_text(message, f"❌ {to_smallcaps('scheduled job not found!')}", parse_mode=enums.ParseMode.HTML)
+        if int(meta.get("user_id", 0)) != uid and not is_admin_sync(uid):
+            return await safe_reply_text(message, f"⛔ {to_smallcaps('unauthorized!')}", parse_mode=enums.ParseMode.HTML)
+        task = _SCHEDULED_POST_TASKS.pop(jid, None)
+        if task and not task.done():
+            task.cancel()
+        _SCHEDULED_POST_META.pop(jid, None)
+        return await safe_reply_text(message, f"✅ {to_smallcaps('scheduled post cancelled')} ({jid})", parse_mode=enums.ParseMode.HTML)
+
+    items = [m for m in _SCHEDULED_POST_META.values() if is_admin_sync(uid) or int(m.get("user_id", 0)) == uid]
+    if not items:
+        return await safe_reply_text(message, f"ℹ️ <b>{to_smallcaps('no active scheduled posts.')}</b>", parse_mode=enums.ParseMode.HTML)
+    lines = [f"✦ <b>{to_smallcaps('active scheduled posts')}</b> ✦ ⏰\n"]
+    btns = []
+    now = time.time()
+    for m in items[:10]:
+        rem = max(0, int(m["run_at"] - now))
+        lines.append(f"• <code>{m['job_id']}</code> │ <code>{m['target_chat']}</code> │ <code>{rem}s</code> │ {html.escape(m['preview'])}")
+        btns.append([InlineKeyboardButton(f"🗑️ {to_smallcaps('cancel')} {m['job_id']}", callback_data=f"rpro{RP_SEP}delsched{RP_SEP}{m['job_id']}")])
+    await safe_reply_text(message, "\n".join(lines) + format_watermark_html(), reply_markup=InlineKeyboardMarkup(btns), parse_mode=enums.ParseMode.HTML)
+
+
+@Client.on_message(filters.private & filters.command(["mytools", "studio"], prefixes=COMMAND_PREFIXES) & filters.incoming)
+async def private_tools_studio_command(client: Client, message: Message):
+    uid = message.from_user.id if message.from_user else 0
+    is_adm = is_admin_sync(uid)
+    kb_rows = [
+        [
+            InlineKeyboardButton(f"⚡ {to_smallcaps('auto-set wizard')}", callback_data="autoset|home"),
+            InlineKeyboardButton(f"⚙️ {to_smallcaps('my settings')}", callback_data="nav_settings"),
+        ],
+        [
+            InlineKeyboardButton(f"♻️ {to_smallcaps('task recovery')}", callback_data="task_rec#report"),
+            InlineKeyboardButton(f"📦 {to_smallcaps('my file vault')}", callback_data="pvt_vault#page_0"),
+        ],
+        [
+            InlineKeyboardButton(f"🛡️ {to_smallcaps('group helpdesk')}", callback_data="hdesk|home"),
+            InlineKeyboardButton(f"📢 {to_smallcaps('channel manager')}", callback_data="chdesk|home"),
+        ],
+    ]
+    if is_adm:
+        kb_rows.append([
+            InlineKeyboardButton(f"👑 {to_smallcaps('admin panel')}", callback_data="adm_panel#home"),
+            InlineKeyboardButton(f"📋 {to_smallcaps('expanded logs')}", callback_data="logs_act#refresh"),
+        ])
+    kb_rows.append([
+        InlineKeyboardButton(f"🏠 {to_smallcaps('home')}", callback_data="nav_home"),
+        InlineKeyboardButton(f"❌ {to_smallcaps('close')}", callback_data="close_data"),
+    ])
+    await safe_reply_text(
+        message,
+        f"✦ {to_smallcaps('mmw private & admin quick studio')} ✦ ⚡\n\n"
+        f"• ✏️ /rename • 🗜️ /compress • 🎬 /stream\n"
+        f"• ♻️ /tasks • 🗑️ /delete_task • 🧹 /clear_tasks\n"
+        f"• 🌐 /newfed • 🛡️ /antichannel • ⏰ /schedulepost"
+        f"{format_watermark_html()}",
+        reply_markup=InlineKeyboardMarkup(kb_rows),
+        parse_mode=enums.ParseMode.HTML,
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^rpro\|"))
+async def rose_pro_callback_router(client: Client, query: CallbackQuery):
+    uid = query.from_user.id if query.from_user else 0
+    parts = query.data.split(RP_SEP)
+    action = parts[1] if len(parts) > 1 else ""
+    arg = parts[2] if len(parts) > 2 else ""
+
+    if action == "antich" and arg.lstrip("-").isdigit():
+        cid = int(arg)
+        if not await is_chat_or_global_admin(client, cid, user_id=uid):
+            return await query.answer(to_smallcaps("group admins only!"), show_alert=True)
+        cfg = await db.get_helpdesk_config(cid)
+        new_val = not bool(cfg.get("antichannel_enabled", False))
+        await db.update_helpdesk_config(cid, {"antichannel_enabled": new_val})
+        await query.answer(to_smallcaps(f"anti-channel {'enabled' if new_val else 'disabled'}!"))
+        text, kb = await _build_group_stats_card(client, cid, getattr(query.message.chat, "title", "") or "")
+        await safe_edit_message(query.message, text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
+        return
+
+    if action == "gstats" and arg.lstrip("-").isdigit():
+        cid = int(arg)
+        await query.answer(to_smallcaps("refreshed!"))
+        text, kb = await _build_group_stats_card(client, cid, getattr(query.message.chat, "title", "") or "")
+        await safe_edit_message(query.message, text, reply_markup=kb, parse_mode=enums.ParseMode.HTML)
+        return
+
+    if action == "delsched" and arg:
+        meta = _SCHEDULED_POST_META.get(arg)
+        if not meta:
+            return await query.answer(to_smallcaps("already sent or cancelled!"), show_alert=True)
+        if int(meta.get("user_id", 0)) != uid and not is_admin_sync(uid):
+            return await query.answer(to_smallcaps("unauthorized!"), show_alert=True)
+        task = _SCHEDULED_POST_TASKS.pop(arg, None)
+        if task and not task.done():
+            task.cancel()
+        _SCHEDULED_POST_META.pop(arg, None)
+        await query.answer(to_smallcaps("scheduled post cancelled!"), show_alert=True)
+        await safe_edit_text(query.message, f"✅ **{to_smallcaps('scheduled post cancelled')}** (`{arg}`)")
+        return await query.answer()
