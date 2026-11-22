@@ -13,7 +13,7 @@ def _install_fast_event_loop():
 _install_fast_event_loop()
 from config import Config
 from utils import auto_clean_expired_cache_job
-from plugins.core_utils import logger, to_smallcaps
+from plugins.core_utils import logger, to_smallcaps, task_manager
 from plugins.core_db import mongo
 from plugins.core_bot import MMWProBot
 from plugins.core_web import WebSupport
@@ -78,6 +78,7 @@ async def main():
         logger.info(f"🛑 {to_smallcaps('gracefully stopping engine & checkpointing active tasks...')}")
         try:
             await checkpoint_active_tasks_before_shutdown("server_shutdown")
+            await task_manager.cancel_all_background_tasks()
         except Exception:
             pass
         startup_task.cancel()
