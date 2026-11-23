@@ -2332,6 +2332,54 @@ async def schedule_24h_restart(bot, interval: int = 86400):
             await asyncio.sleep(3)
 
 
+
+
+KEEPALIVE_URL = os.environ.get("KEEPALIVE_URL") or "https://estimated-bellanca-mmwbotz-524cb510.koyeb.app/"
+KEEP_ALIVE_URL = KEEPALIVE_URL
+
+
+async def safe_http_get(session: Any, url: str, label: str = "keep-alive", retries: int = 2) -> bool:
+    if not url or session is None:
+        return False
+    attempts = max(1, int(retries))
+    for attempt in range(attempts):
+        try:
+            async with session.get(url) as resp:
+                await resp.read()
+                if resp.status < 500:
+                    return True
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if attempt < attempts - 1:
+                await asyncio.sleep(0.25 * (attempt + 1))
+    return False
+
+
+async def keep_live():
+    if not KEEPALIVE_URL or aiohttp is None:
+        return
+    timeout = aiohttp.ClientTimeout(total=10, connect=5)
+    connector = aiohttp.TCPConnector(limit=4, ttl_dns_cache=300)
+    async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+        while True:
+            try:
+                await safe_http_get(
+                    session,
+                    KEEP_ALIVE_URL,
+                    label="keep-alive",
+                    retries=2,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass
+            await asyncio.sleep(0.2)
+
+
+async def schedule_weekly_restart(bot, interval: int = 604800):
+    await schedule_24h_restart(bot, interval=max(3600, int(interval or 604800)))
+
 import ast
 import zipfile
 import gzip

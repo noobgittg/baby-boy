@@ -1688,7 +1688,7 @@ async def upannel_command(client: Client, message: Message):
 async def upannel_callback_handler(client: Client, query: CallbackQuery):
     uid = query.from_user.id if query.from_user else 0
     if not is_admin_sync(uid):
-        return await query.answer("🚫 Bot admins only", show_alert=True)
+        return await query.answer("🚫 ʙᴏᴛ ᴀᴅᴍɪɴs ᴏɴʟʏ", show_alert=True)
 
     target_uid = int(query.matches[0].group(1))
     act = query.matches[0].group(2)
@@ -1723,7 +1723,7 @@ async def upannel_callback_handler(client: Client, query: CallbackQuery):
         if act in field_map:
             k, v = field_map[act]
             await user_repo.update_user(target_uid, {k: v})
-            await query.answer(f"✅ Updated {k}")
+            await query.answer(f"✅ {to_smallcaps(k)} ᴜᴘᴅᴀᴛᴇᴅ")
         text, markup = await _render_upannel_settings(target_uid)
         return await safe_edit_message(query.message, text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
 
@@ -1738,7 +1738,7 @@ async def upannel_callback_handler(client: Client, query: CallbackQuery):
             "suffix": "",
             "auto_delete_time": 0,
         })
-        await query.answer("🔄 User settings reset")
+        await query.answer("🔄 ᴜsᴇʀ sᴇᴛᴛɪɴɢs ʀᴇsᴇᴛ")
         text, markup = await _render_upannel_settings(target_uid)
         return await safe_edit_message(query.message, text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
 

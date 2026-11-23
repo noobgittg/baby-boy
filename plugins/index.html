@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="light">
+    <meta name="color-scheme" content="light dark">
     <title>⚡ MMW Ultra Max v8.0 — {{ watermark }}</title>
     <style>
         .smallcap-ui { font-variant: small-caps; letter-spacing: 0.015em; }
@@ -22,6 +22,32 @@
             --badge-bg: rgba(56, 189, 248, 0.14);
             --success: #10b981;
             --danger: #ef4444;
+        }
+        [data-theme="dark"] {
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --card-border: rgba(56, 189, 248, 0.34);
+            --accent: #38bdf8;
+            --accent-2: #c084fc;
+            --accent-3: #34d399;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --badge-bg: rgba(56, 189, 248, 0.18);
+        }
+        .theme-fab {
+            position: fixed;
+            top: 14px;
+            right: 14px;
+            z-index: 999;
+            padding: 8px 14px;
+            border-radius: 999px;
+            border: 1px solid var(--card-border);
+            background: var(--card-bg);
+            color: var(--text-main);
+            font-size: 0.82rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
         body {
@@ -389,6 +415,7 @@
     </style>
 </head>
 <body class="smallcap-ui">
+    <button type="button" id="themeToggleBtn" class="theme-fab" onclick="toggleSiteTheme()">🌙 ᴅᴀʀᴋ</button>
     <div class="container">
         <div class="header-badge">
             <span class="pulse-dot"></span>
@@ -1014,6 +1041,20 @@
         detectStreamingCapabilities();
         fetchLiveMetrics();
         setInterval(fetchLiveMetrics, 6000);
+    
+            function applySiteTheme(mode) {
+                const isDark = mode === 'dark';
+                document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+                const btn = document.getElementById('themeToggleBtn');
+                if (btn) btn.textContent = isDark ? '☀️ ʟɪɢʜᴛ' : '🌙 ᴅᴀʀᴋ';
+            }
+            window.toggleSiteTheme = () => {
+                const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+                const next = cur === 'dark' ? 'light' : 'dark';
+                try { localStorage.setItem('mmw-theme', next); } catch (_) {}
+                applySiteTheme(next);
+            };
+            try { applySiteTheme(localStorage.getItem('mmw-theme') || 'light'); } catch (_) { applySiteTheme('light'); }
     </script>
 </body>
 </html>

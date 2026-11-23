@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="light">
+    <meta name="color-scheme" content="light dark">
     <title>{{ file_name | default("Watch Media") }} — MMW Sonic Ultra Stream</title>
     <style>
         :root {
@@ -20,6 +20,32 @@
             --muted: #475569;
             --header-bg: rgba(255, 255, 255, 0.98);
         }
+        [data-theme="dark"] {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --surface-2: #0b1220;
+            --border: rgba(56, 189, 248, 0.32);
+            --border-soft: rgba(148, 163, 184, 0.22);
+            --accent: #38bdf8;
+            --accent-2: #818cf8;
+            --emerald: #10b981;
+            --danger: #f87171;
+            --text: #f8fafc;
+            --muted: #94a3b8;
+            --header-bg: rgba(15, 23, 42, 0.96);
+        }
+        .theme-toggle-btn {
+            padding: 7px 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--surface-2);
+            color: var(--text);
+            font-size: 0.78rem;
+            font-weight: 700;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .theme-toggle-btn:hover { border-color: var(--accent); color: var(--accent); }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             background-color: var(--bg);
@@ -213,6 +239,7 @@
             </div>
         </div>
         <div class="topbar-actions">
+                <button type="button" id="themeToggleBtn" class="theme-toggle-btn" onclick="toggleSiteTheme()">🌙 ᴅᴀʀᴋ</button>
             <button type="button" onclick="streamSaveToDisk()" class="btn btn-emerald">
                 <span>🚀</span>
                 <span class="hide-sm">Stream to Disk</span>
@@ -939,7 +966,7 @@
                 } else if (!media.paused && !altAudio.paused && altAudio.readyState >= 2) {
                     const expectedAltTime = Math.max(0, (media.currentTime || 0) - altAudioOffset);
                     const drift = Math.abs((altAudio.currentTime || 0) - expectedAltTime);
-                    if (drift > 1.2) {
+                    if (drift > 0.65) {
                         altAudioOffset = Math.max(0, media.currentTime || 0);
                         altAudio.src = `${baseUrl}?t=${altAudioOffset.toFixed(2)}`;
                         altAudio.play().catch(() => {});
@@ -996,12 +1023,19 @@
                 el.src = `${baseUrl}?t=${altAudioOffset.toFixed(2)}`;
                 el.playbackRate = media.playbackRate || 1.0;
                 notify(`⏳ Switching Audio: ${tr ? (tr.language || 'Undetermined') : 'Track #' + (idx + 1)}...`);
-                if (!media.paused) {
-                    el.play().then(() => {
+                const wasPlaying = !media.paused;
+                if (wasPlaying) {
+                    try { media.pause(); } catch (_) {}
+                    let started = false;
+                    const startLockstep = () => {
+                        if (started || activeAudioTrackIdx !== idx) return;
+                        started = true;
+                        el.play().catch(() => {});
+                        media.play().catch(() => {});
                         notify(`🎧 Audio Active: ${tr ? (tr.language || 'Undetermined') : 'Track #' + (idx + 1)}`);
-                    }).catch(() => {
-                        notify('🎧 Audio switched — tap Play to start audio');
-                    });
+                    };
+                    el.addEventListener('canplay', startLockstep, { once: true });
+                    setTimeout(startLockstep, 1800);
                 } else {
                     notify(`🎧 Audio Ready: ${tr ? (tr.language || 'Undetermined') : 'Track #' + (idx + 1)}`);
                 }
@@ -1398,10 +1432,12 @@
                 media.addEventListener('volumechange', saveState, { passive: true });
                 media.addEventListener('canplay', attemptAutoPlay, { once: true });
                 media.addEventListener('waiting', () => {
+                    if (altAudioActive && altAudio && !altAudio.paused) { try { altAudio.pause(); } catch (_) {} }
                     notify('⏳ ʟᴏᴀᴅɪɴɢ sᴛʀᴇᴀᴍ…', true);
                     if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '⏳ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ʟᴏᴀᴅɪɴɢ ᴢᴇʀᴏ-ʙᴜғғᴇʀ ʀᴀɴɢᴇ…';
                 });
                 media.addEventListener('playing', () => {
+                    if (altAudioActive) syncAltAudio(false);
                     if (status) status.classList.add('hidden');
                     ensureAudioPipeline();
                     if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '🟢 sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: sᴛʀᴇᴀᴍɪɴɢ ʟɪᴠᴇ';
@@ -1414,6 +1450,7 @@
                     if (playBtn) playBtn.classList.remove('active');
                 });
                 media.addEventListener('ended', () => {
+                    if (altAudio && !altAudio.paused) { try { altAudio.pause(); } catch (_) {} }
                     if (watchStreamStatus && !watchAbortController) watchStreamStatus.textContent = '✅ sᴛʀᴇᴀᴍ sᴛᴀᴛᴜs: ᴘʟᴀʏʙᴀᴄᴋ ᴄᴏᴍᴘʟᴇᴛᴇᴅ';
                 });
                 media.addEventListener('error', () => {
@@ -1622,6 +1659,20 @@
             if (!['image', 'text', 'code', 'pdf'].includes(MEDIA_KIND)) {
                 setTimeout(() => refreshLiveMetadata(false), 250);
             }
+
+            function applySiteTheme(mode) {
+                const isDark = mode === 'dark';
+                document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+                const btn = document.getElementById('themeToggleBtn');
+                if (btn) btn.textContent = isDark ? '☀️ ʟɪɢʜᴛ' : '🌙 ᴅᴀʀᴋ';
+            }
+            window.toggleSiteTheme = () => {
+                const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+                const next = cur === 'dark' ? 'light' : 'dark';
+                try { localStorage.setItem('mmw-theme', next); } catch (_) {}
+                applySiteTheme(next);
+            };
+            try { applySiteTheme(localStorage.getItem('mmw-theme') || 'light'); } catch (_) { applySiteTheme('light'); }
         })();
     </script>
 </body>

@@ -1618,7 +1618,7 @@ async def api_audio_track_stream(request: Request, file_id: str, audio_idx: int,
                 while True:
                     if await request.is_disconnected():
                         break
-                    chunk = await proc.stdout.read(16384)
+                    chunk = await proc.stdout.read(65536)
                     if not chunk:
                         break
                     yield chunk

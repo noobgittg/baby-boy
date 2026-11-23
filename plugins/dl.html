@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="light">
+    <meta name="color-scheme" content="light dark">
     <title>Download {{ file_name }} — MMW Ultra Max Stream</title>
     <style>
         .smallcap-ui { font-variant: small-caps; letter-spacing: 0.015em; }
@@ -17,6 +17,30 @@
             --accent-gradient: linear-gradient(135deg, #0ea5e9 0%, #4f46e5 100%);
             --text-main: #0f172a;
             --text-muted: #475569;
+        }
+        [data-theme="dark"] {
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --surface-2: #0b1220;
+            --card-border: rgba(56, 189, 248, 0.34);
+            --accent: #38bdf8;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+        .theme-fab {
+            position: fixed;
+            top: 14px;
+            right: 14px;
+            z-index: 999;
+            padding: 8px 14px;
+            border-radius: 999px;
+            border: 1px solid var(--card-border);
+            background: var(--card-bg);
+            color: var(--text-main);
+            font-size: 0.82rem;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
         body {
@@ -84,6 +108,7 @@
     </style>
 </head>
 <body class="smallcap-ui">
+    <button type="button" id="themeToggleBtn" class="theme-fab" onclick="toggleSiteTheme()">🌙 ᴅᴀʀᴋ</button>
     <div class="card">
         <div class="badge-top">⚡ MMW ULTRA MAX HTTP 206 ZERO-BUFFER DELIVERY</div>
         <div><span class="icon">📦</span></div>
@@ -321,6 +346,20 @@
             }
             return false;
         }
+    
+            function applySiteTheme(mode) {
+                const isDark = mode === 'dark';
+                document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+                const btn = document.getElementById('themeToggleBtn');
+                if (btn) btn.textContent = isDark ? '☀️ ʟɪɢʜᴛ' : '🌙 ᴅᴀʀᴋ';
+            }
+            window.toggleSiteTheme = () => {
+                const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+                const next = cur === 'dark' ? 'light' : 'dark';
+                try { localStorage.setItem('mmw-theme', next); } catch (_) {}
+                applySiteTheme(next);
+            };
+            try { applySiteTheme(localStorage.getItem('mmw-theme') || 'light'); } catch (_) { applySiteTheme('light'); }
     </script>
 </body>
 </html>

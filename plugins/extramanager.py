@@ -459,7 +459,7 @@ def _render_home_panel(channel_id: int, title: str, cfg: Dict[str, Any]) -> Tupl
             c_on, c_tot = _count_enabled(cfg, ck)
             row.append(
                 InlineKeyboardButton(
-                    f"{c_title} ({c_on}/{c_tot})",
+                    f"{to_smallcaps(c_title)} ({c_on}/{c_tot})",
                     callback_data=f"xmgr{XMGR_SEP}cat{XMGR_SEP}{channel_id}{XMGR_SEP}{ck}:0",
                 )
             )
@@ -494,8 +494,8 @@ def _render_category_panel(
     feats = cfg["features"]
 
     text = (
-        f"✦ <b>{c_title}</b> ✦ • <code>{channel_id}</code>\n"
-        f"<i>{html.escape(c_desc)}</i>\n\n"
+        f"✦ <b>{to_smallcaps(c_title)}</b> ✦ • <code>{channel_id}</code>\n"
+        f"<i>{html.escape(to_smallcaps(c_desc))}</i>\n\n"
         f"• 🧩 <b>{to_smallcaps('enabled')}</b> : <code>{c_on}/{c_tot}</code> • "
         f"<b>{to_smallcaps('page')}</b> : <code>{page + 1}/{total_pages}</code>\n"
         f"• 💡 {to_smallcaps('tap any feature to toggle live in this channel:')}"
@@ -508,7 +508,7 @@ def _render_category_panel(
             icon = "🟢" if feats.get(fkey, False) else "⚪"
             row.append(
                 InlineKeyboardButton(
-                    f"{icon} {flabel}",
+                    f"{icon} {to_smallcaps(flabel)}",
                     callback_data=f"xmgr{XMGR_SEP}tog{XMGR_SEP}{channel_id}{XMGR_SEP}{fkey}:{page}",
                 )
             )
@@ -881,7 +881,7 @@ async def extramanager_callback(client: Client, query: CallbackQuery):
 
     uid = query.from_user.id if query.from_user else 0
     if not await _is_channel_admin(client, cid, uid):
-        return await query.answer("🚫 Channel admins only", show_alert=True)
+        return await query.answer("🚫 ᴄʜᴀɴɴᴇʟ ᴀᴅᴍɪɴs ᴏɴʟʏ", show_alert=True)
 
     if action == "close":
         await query.answer("🗑️ ᴄʟᴏsᴇᴅ")
@@ -921,7 +921,7 @@ async def extramanager_callback(client: Client, query: CallbackQuery):
         cfg["features"][fkey] = not bool(cfg["features"].get(fkey, False))
         await save_channel_xmgr_config(cid, cfg)
         state_lbl = "ON" if cfg["features"][fkey] else "OFF"
-        await query.answer(f"{flabel}: {state_lbl}")
+        await query.answer(f"⚡ {to_smallcaps(flabel)}: {to_smallcaps(state_lbl)}")
         text, markup = _render_category_panel(cid, cat_key, int(page_s or 0), cfg)
         return await safe_edit_message(query.message, text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
 
@@ -933,7 +933,7 @@ async def extramanager_callback(client: Client, query: CallbackQuery):
         for fkey, _, _ in XMGR_CATEGORIES[cat_key][2]:
             cfg["features"][fkey] = new_val
         await save_channel_xmgr_config(cid, cfg)
-        await query.answer(f"✅ Set all {cat_key} {'ON' if new_val else 'OFF'}")
+        await query.answer(f"✅ {to_smallcaps(cat_key)}: {'ᴏɴ' if new_val else 'ᴏғғ'}")
         text, markup = _render_category_panel(cid, cat_key, int(page_s or 0), cfg)
         return await safe_edit_message(query.message, text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
 
@@ -954,7 +954,7 @@ async def extramanager_callback(client: Client, query: CallbackQuery):
             if fk in cfg["features"]:
                 cfg["features"][fk] = True
         await save_channel_xmgr_config(cid, cfg)
-        await query.answer(f"✅ Applied {arg} preset")
+        await query.answer(f"✅ {to_smallcaps(arg)} ᴘʀᴇsᴇᴛ ᴀᴘᴘʟɪᴇᴅ")
         text, markup = _render_home_panel(cid, title, cfg)
         return await safe_edit_message(query.message, text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
 
@@ -1001,6 +1001,6 @@ async def extramanager_callback(client: Client, query: CallbackQuery):
     if action == "reset":
         fresh = get_default_xmgr_config()
         await save_channel_xmgr_config(cid, fresh)
-        await query.answer("🔄 All 220 channel features reset")
+        await query.answer("🔄 220 ғᴇᴀᴛᴜʀᴇs ʀᴇsᴇᴛ")
         text, markup = _render_home_panel(cid, title, fresh)
         return await safe_edit_message(query.message, text, reply_markup=markup, parse_mode=enums.ParseMode.HTML)
