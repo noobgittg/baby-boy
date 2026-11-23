@@ -507,23 +507,15 @@ class temp(object):
 
 
 async def auto_clean_expired_cache_job() -> None:
-    interval = max(30, int(getattr(Config, "CACHE_CLEANUP_INTERVAL", 300)))
-    logger.info("🧹 ᴄᴀᴄʜᴇ ᴄʟᴇᴀɴᴜᴘ ᴡᴏʀᴋᴇʀ ɪɴɪᴛɪᴀʟɪᴢᴇᴅ (%ss ᴄʏᴄʟᴇ)", interval)
     while True:
         try:
-            await asyncio.sleep(interval)
-            before = len(USER_CACHE._store)
+            await asyncio.sleep(1.0)
             USER_CACHE._purge_expired()
-            removed_shared = await cache.auto_clear_after_response(preserve_workflows=True)
-            after = len(USER_CACHE._store)
-            removed_user = max(0, before - after)
-            if removed_user or removed_shared:
-                logger.info("🧹 ᴄᴀᴄʜᴇ ᴘᴜʀɢᴇ ᴄʏᴄʟᴇ › ᴜsᴇʀ=%s sʜᴀʀᴇᴅ=%s ʀᴇᴍᴀɪɴɪɴɢ=%s", removed_user, removed_shared, after)
+            await cache.auto_clear_after_response(preserve_workflows=True)
         except asyncio.CancelledError:
-            logger.info("🛑 ᴄᴀᴄʜᴇ ᴄʟᴇᴀɴᴜᴘ ᴡᴏʀᴋᴇʀ sᴛᴏᴘᴘᴇᴅ")
             raise
         except Exception as e:
-            logger.debug("⚠️ ᴄᴀᴄʜᴇ ᴄʟᴇᴀɴᴜᴘ ɴᴏᴛɪᴄᴇ › %s", e)
+            logger.warning("⚠️ ᴄᴀᴄʜᴇ ᴄʟᴇᴀɴᴜᴘ ᴇʀʀᴏʀ › %s", e)
 
 
 def get_readable_time(seconds: Union[int, float]) -> str:
