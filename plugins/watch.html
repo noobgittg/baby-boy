@@ -928,6 +928,18 @@
                 altAudioOffset = 0;
             }
 
+            function withSeek(url, seconds) {
+                const raw = String(url || '');
+                const safeSeconds = Math.max(0, Number(seconds) || 0).toFixed(2);
+                try {
+                    const parsed = new URL(raw, window.location.href);
+                    parsed.searchParams.set('t', safeSeconds);
+                    return parsed.toString();
+                } catch (_) {
+                    return raw + (raw.includes('?') ? '&' : '?') + 't=' + safeSeconds;
+                }
+            }
+
             function ensureAltAudioElement() {
                 if (!altAudio) {
                     altAudio = document.createElement('audio');
@@ -953,7 +965,7 @@
                 const baseUrl = (tr && tr.url) ? tr.url : `/api/audio/${encodeURIComponent(FILE_ID)}/${activeAudioTrackIdx}`;
                 if (forceSeek) {
                     altAudioOffset = Math.max(0, media.currentTime || 0);
-                    altAudio.src = `${baseUrl}?t=${altAudioOffset.toFixed(2)}`;
+                    altAudio.src = withSeek(baseUrl, altAudioOffset);
                     altAudio.playbackRate = media.playbackRate || 1.0;
                     if (!media.paused) altAudio.play().catch(() => {});
                     return;
@@ -968,7 +980,7 @@
                     const drift = Math.abs((altAudio.currentTime || 0) - expectedAltTime);
                     if (drift > 0.65) {
                         altAudioOffset = Math.max(0, media.currentTime || 0);
-                        altAudio.src = `${baseUrl}?t=${altAudioOffset.toFixed(2)}`;
+                        altAudio.src = withSeek(baseUrl, altAudioOffset);
                         altAudio.play().catch(() => {});
                     }
                 }
@@ -978,6 +990,10 @@
                 if (!media || val === '') return;
                 const idx = Number(val);
                 if (!Number.isFinite(idx) || idx < 0) return;
+                if (serverAudioTracks.length > 0 && idx >= serverAudioTracks.length) {
+                    notify('⚠️ Requested audio track is unavailable');
+                    return;
+                }
                 ensureAudioPipeline();
                 if (audioCtx && audioCtx.state === 'suspended') {
                     try { await audioCtx.resume(); } catch (_) {}
@@ -1020,7 +1036,7 @@
                         notify('⚠️ Alternate audio stream unavailable — reverted to Track #1');
                     }
                 };
-                el.src = `${baseUrl}?t=${altAudioOffset.toFixed(2)}`;
+                el.src = withSeek(baseUrl, altAudioOffset);
                 el.playbackRate = media.playbackRate || 1.0;
                 notify(`⏳ Switching Audio: ${tr ? (tr.language || 'Undetermined') : 'Track #' + (idx + 1)}...`);
                 const wasPlaying = !media.paused;

@@ -254,7 +254,10 @@ def media_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
 
     audio_tracks = []
     for idx, aud in enumerate(raw.get("audio_tracks") or raw.get("audio_streams") or []):
-        item = dict(aud)
+        if isinstance(aud, dict):
+            item = dict(aud)
+        else:
+            item = {"title": str(aud or "")}
         lang_val = str(item.get("language") or item.get("lang") or "Undetermined").strip()
         if not lang_val or lang_val.lower() in ("und", "unknown", "none"):
             lang_val = "Undetermined"
@@ -277,7 +280,10 @@ def media_metadata_view(file_doc: Dict[str, Any]) -> Dict[str, Any]:
 
     subtitle_tracks = []
     for idx, sub in enumerate(raw.get("subtitle_tracks") or raw.get("subtitle_streams") or []):
-        item = dict(sub)
+        if isinstance(sub, dict):
+            item = dict(sub)
+        else:
+            item = {"title": str(sub or "")}
         lang_val = str(item.get("language") or item.get("lang") or "Undetermined").strip()
         if not lang_val or lang_val.lower() in ("und", "unknown", "none"):
             lang_val = "Undetermined"
@@ -1608,8 +1614,15 @@ async def api_audio_track_stream(request: Request, file_id: str, audio_idx: int,
         raise HTTPException(status_code=503, detail="Audio track switcher unavailable")
     fpath = file_doc.get("file_path")
     source = fpath if (fpath and os.path.exists(fpath)) else f"http://127.0.0.1:{Config.PORT}/stream/{file_id}"
-    seek_sec = max(0.0, float(t or 0.0))
-    idx = max(0, int(audio_idx))
+    meta_view = await get_cached_metadata_view(file_doc)
+    a_tracks = meta_view.get("audio_tracks") or []
+    idx = int(audio_idx)
+    if idx < 0 or idx >= len(a_tracks):
+        raise HTTPException(status_code=416, detail="Audio track index is not available")
+    try:
+        seek_sec = max(0.0, float(t or 0.0))
+    except (TypeError, ValueError):
+        seek_sec = 0.0
     cmd = [
         FFMPEG_BIN, "-hide_banner", "-loglevel", "error", "-nostdin",
         "-fflags", "+nobuffer+discardcorrupt", "-flags", "low_delay",
@@ -1618,8 +1631,6 @@ async def api_audio_track_stream(request: Request, file_id: str, audio_idx: int,
         cmd.extend(["-rw_timeout", "10000000"])
     if seek_sec > 0.05:
         cmd.extend(["-ss", f"{seek_sec:.3f}"])
-    meta_view = await get_cached_metadata_view(file_doc)
-    a_tracks = meta_view.get("audio_tracks") or []
     trk_channels = int(a_tracks[idx].get("channels", 0)) if (0 <= idx < len(a_tracks)) else 0
     if trk_channels >= 6:
         downmix_af = "aresample=async=1:first_pts=0,pan=stereo|FL=0.5*FC+0.707*FL+0.707*BL+0.5*LFE|FR=0.5*FC+0.707*FR+0.707*BR+0.5*LFE"

@@ -2361,6 +2361,9 @@ async def safe_http_get(session: Any, url: str, label: str = "keep-alive", retri
 async def keep_live():
     if not KEEPALIVE_URL or aiohttp is None:
         return
+    # Keep this helper safe to call independently without creating a 5-request/second
+    # self-ping loop. The main service uses run_keepalive_worker for the regular probe.
+    interval = max(5.0, float(getattr(Config, "KEEPALIVE_INTERVAL", 15) or 15))
     timeout = aiohttp.ClientTimeout(total=10, connect=5)
     connector = aiohttp.TCPConnector(limit=4, ttl_dns_cache=300)
     async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
@@ -2376,7 +2379,7 @@ async def keep_live():
                 raise
             except Exception:
                 pass
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(interval)
 
 
 async def schedule_weekly_restart(bot, interval: int = 604800):
