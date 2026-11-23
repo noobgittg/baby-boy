@@ -143,32 +143,76 @@ FLOODWAIT_STATS: Dict[str, Any] = {
 }
 
 
+EXTENDED_ISSUE_LOGS: List[Dict[str, Any]] = []
+
+
 class MemoryLogHandler(logging.Handler):
     def emit(self, record):
         try:
             msg = self.format(record)
             MEMORY_LOGS.append(msg)
-            if len(MEMORY_LOGS) > 2000:
-                del MEMORY_LOGS[: len(MEMORY_LOGS) - 2000]
+            if len(MEMORY_LOGS) > 4000:
+                del MEMORY_LOGS[: len(MEMORY_LOGS) - 4000]
+            if record.levelno >= logging.WARNING:
+                EXTENDED_ISSUE_LOGS.append({
+                    "ts": float(time.time()),
+                    "level": str(record.levelname),
+                    "logger": str(record.name),
+                    "location": f"{record.funcName}:{record.lineno}",
+                    "message": msg,
+                })
+                if len(EXTENDED_ISSUE_LOGS) > 2000:
+                    del EXTENDED_ISSUE_LOGS[: len(EXTENDED_ISSUE_LOGS) - 2000]
         except Exception:
             pass
 
 
+def log_extended_issue(
+    category: str,
+    detail: str,
+    exc: Optional[BaseException] = None,
+    chat_id: int = 0,
+    user_id: int = 0,
+) -> None:
+    try:
+        err_part = f" | exc={type(exc).__name__}: {exc}" if exc is not None else ""
+        ctx_part = f" | chat={chat_id} user={user_id}" if (chat_id or user_id) else ""
+        entry = redact_secrets(f"[{category.upper()}] {detail}{ctx_part}{err_part}")
+        logger.warning(entry)
+    except Exception:
+        pass
+
+
 def setup_logger(name: str = "MMW_PRO") -> logging.Logger:
+    logging.disable(logging.NOTSET)
+    fmt = logging.Formatter(
+        "⚡ %(asctime)s │ %(levelname)-7s │ %(name)s │ %(funcName)s:%(lineno)d │ %(message)s",
+        datefmt="%d-%m-%Y %H:%M:%S",
+    )
+    redact_filter = RedactSecretsFilter()
     root_logger = logging.getLogger()
     if not getattr(root_logger, "_mmw_unified_configured", False):
         root_logger.handlers.clear()
-        root_logger.addHandler(logging.NullHandler())
-        root_logger.setLevel(logging.CRITICAL + 10)
+        mem_h = MemoryLogHandler(level=logging.WARNING)
+        mem_h.setFormatter(fmt)
+        mem_h.addFilter(redact_filter)
+        err_h = logging.StreamHandler(sys.stderr)
+        err_h.setLevel(logging.WARNING)
+        err_h.setFormatter(fmt)
+        err_h.addFilter(redact_filter)
+        root_logger.addHandler(mem_h)
+        root_logger.addHandler(err_h)
+        root_logger.setLevel(logging.WARNING)
         root_logger.propagate = False
-        logging.disable(logging.CRITICAL)
+        for noisy in ("pyrogram", "pyrogram.session", "pyrogram.connection", "httpx", "uvicorn.access"):
+            nlg = logging.getLogger(noisy)
+            nlg.setLevel(logging.WARNING)
         setattr(root_logger, "_mmw_unified_configured", True)
         setattr(root_logger, "_goku_configured", True)
     lg = logging.getLogger(name)
     lg.handlers.clear()
-    lg.addHandler(logging.NullHandler())
-    lg.setLevel(logging.CRITICAL + 10)
-    lg.propagate = False
+    lg.setLevel(logging.WARNING)
+    lg.propagate = True
     return lg
 
 
@@ -1620,14 +1664,17 @@ MEDIA_JOB_SEMAPHORE = asyncio.Semaphore(_max_cfg if _max_cfg > 0 else max(2, _ff
 
 def bounded_media_job(func):
     """
-    Supports unlimited concurrent queued/active tasks while pacing heavy local FFmpeg/disk
-    operations and automatically clearing transient response cache upon completion.
+    Supports unlimited concurrent tasks per user when MAX_CONCURRENT_TASKS == 0,
+    or bounded concurrency when explicitly configured, and clears transient cache on completion.
     """
     @functools.wraps(func)
     async def wrapped(*args, **kwargs):
         try:
-            async with MEDIA_JOB_SEMAPHORE:
-                return await func(*args, **kwargs)
+            max_limit = int(getattr(Config, "MAX_CONCURRENT_TASKS", 0) or 0)
+            if max_limit > 0:
+                async with MEDIA_JOB_SEMAPHORE:
+                    return await func(*args, **kwargs)
+            return await func(*args, **kwargs)
         finally:
             cache.auto_clear_after_response_sync()
     return wrapped

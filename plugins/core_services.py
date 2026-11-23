@@ -2350,9 +2350,11 @@ async def safe_http_get(session: Any, url: str, label: str = "keep-alive", retri
                     return True
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as err:
             if attempt < attempts - 1:
                 await asyncio.sleep(0.25 * (attempt + 1))
+            else:
+                logger.warning("⚠️ %s ʜᴛᴛᴘ ɢᴇᴛ ғᴀɪʟᴇᴅ (%s) › %s", label, url, err)
     return False
 
 

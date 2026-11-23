@@ -335,7 +335,11 @@ async def _process_incoming_file(client: Client, message: Message, user):
 
     if u.get("auto_compress") and is_compressible:
         from plugins.compressor import run_auto_compress_workflow
-        return await run_auto_compress_workflow(client, message, uid)
+        spawn_mega_task(
+            run_auto_compress_workflow(client, message, uid),
+            name=f"auto-compress-{uid}-{message.id}",
+        )
+        return
 
     if file_size_bytes > MAX_BOT_FILE_SIZE:
         logger.info("📦 >2ɢʙ ᴍᴇᴅɪᴀ ᴅᴇᴛᴇᴄᴛᴇᴅ (%s ʙʏᴛᴇs) › ʀᴇɴᴀᴍᴇ ʀᴇsᴛʀɪᴄᴛᴇᴅ; ᴘʀᴏᴍᴘᴛɪɴɢ ᴄᴏᴍᴘʀᴇss / ғɪʟᴇ sᴛʀᴇᴀᴍ", file_size_bytes)
@@ -351,7 +355,11 @@ async def _process_incoming_file(client: Client, message: Message, user):
             upload_mode = "aud"
         else:
             upload_mode = "doc"
-        return await run_rename_workflow(client, message, message, uid, message.id, auto_target, upload_mode)
+        spawn_mega_task(
+            run_rename_workflow(client, message, message, uid, message.id, auto_target, upload_mode),
+            name=f"auto-rename-{uid}-{message.id}",
+        )
+        return
 
     await render_media_studio_card(client, message, uid, is_edit=False)
 

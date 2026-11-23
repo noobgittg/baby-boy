@@ -902,7 +902,7 @@ async def code_preview_page(request: Request, file_id: str):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="color-scheme" content="light">
+<meta name="color-scheme" content="light dark">
 <title>{_html.escape(file_name)} — MMW Code Pro Studio</title>
 <style>
 :root {{
@@ -912,6 +912,20 @@ async def code_preview_page(request: Request, file_id: str):
     --accent: #0284c7;
     --text-main: #0f172a;
     --text-muted: #475569;
+    --surface-soft: #f1f5f9;
+    --pre-bg: #f8fafc;
+    --badge-bg: #e0f2fe;
+}}
+html[data-theme="dark"] {{
+    --bg: #0b1120;
+    --card-bg: #111827;
+    --card-border: rgba(56, 189, 248, 0.28);
+    --accent: #38bdf8;
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    --surface-soft: #1e293b;
+    --pre-bg: #0f172a;
+    --badge-bg: rgba(56, 189, 248, 0.16);
 }}
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body.code-studio-body {{
@@ -944,7 +958,7 @@ body.code-studio-body {{
     display: inline-block;
     padding: 4px 12px;
     border-radius: 999px;
-    background: #e0f2fe;
+    background: var(--badge-bg);
     color: var(--accent);
     font-size: 0.75rem;
     font-weight: 800;
@@ -963,10 +977,10 @@ body.code-studio-body {{
     border: none;
 }}
 .btn-primary {{ background: linear-gradient(135deg, #0ea5e9, #4f46e5); color: #ffffff; }}
-.btn-secondary {{ background: #f1f5f9; color: var(--text-main); border: 1px solid var(--card-border); }}
+.btn-secondary {{ background: var(--surface-soft); color: var(--text-main); border: 1px solid var(--card-border); }}
 .progress-wrap {{
     margin-bottom: 16px;
-    background: #f8fafc;
+    background: var(--pre-bg);
     border: 1px solid var(--card-border);
     border-radius: 12px;
     padding: 12px 14px;
@@ -987,7 +1001,7 @@ body.code-studio-body {{
 }}
 .progress-meta {{ display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-muted); }}
 .code-pre {{
-    background: #f8fafc;
+    background: var(--pre-bg);
     border: 1px solid var(--card-border);
     border-radius: 14px;
     padding: 18px;
@@ -995,7 +1009,7 @@ body.code-studio-body {{
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.86rem;
     line-height: 1.55;
-    color: #0f172a;
+    color: var(--text-main);
     max-height: 75vh;
 }}
 </style>
@@ -1014,6 +1028,7 @@ body.code-studio-body {{
       <button type="button" class="btn-secondary" onclick="copyCodeText()">📋 Copy Code</button>
       <button type="button" id="cancelCodeBtn" class="btn-secondary" onclick="cancelCodeStream()" style="display:none;">🛑 Cancel</button>
       <a href="{_html.escape(watch_url)}" class="btn-secondary">🎬 Watch Studio</a>
+      <button type="button" id="themeToggleBtn" class="btn-secondary" onclick="toggleSiteTheme()">🌙 Dark</button>
     </div>
   </div>
   <div class="progress-wrap">
@@ -1026,6 +1041,22 @@ body.code-studio-body {{
   <pre id="code-box" class="code-pre">Loading code stream...</pre>
 </div>
 <script>
+function applySiteTheme(theme) {{
+  const t = theme === "dark" ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", t);
+  try {{ localStorage.setItem("mmw_theme", t); }} catch (e) {{}}
+  const btn = document.getElementById("themeToggleBtn");
+  if (btn) btn.textContent = t === "dark" ? "☀️ Light" : "🌙 Dark";
+}}
+function toggleSiteTheme() {{
+  const cur = document.documentElement.getAttribute("data-theme") || "light";
+  applySiteTheme(cur === "dark" ? "light" : "dark");
+}}
+(function() {{
+  let saved = "light";
+  try {{ saved = localStorage.getItem("mmw_theme") || "light"; }} catch (e) {{}}
+  applySiteTheme(saved);
+}})();
 let codeAbortCtrl = null;
 const STREAM_URL = {_js_safe_str(stream_url)};
 const FILE_NAME = {_js_safe_str(file_name)};

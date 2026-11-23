@@ -29,8 +29,6 @@ from plugins.core_utils import safe_reply_text, execute_with_floodwait, MEMORY_L
 setup_logging()
 logger = logging.getLogger("GokuWebLogs")
 
-if not os.path.exists(LOG_FILE_PATH):
-    open(LOG_FILE_PATH, "a", encoding="utf-8").close()
 
 HEADERS = {
     "User-Agent": (
