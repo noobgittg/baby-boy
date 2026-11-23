@@ -22,7 +22,6 @@ from plugins.core_services import (
     run_keepalive_worker,
     schedule_24h_restart,
     schedule_weekly_restart,
-    keep_live,
     send_restart_notification,
     RESTART_MARKER_FILE
 )
@@ -56,7 +55,6 @@ async def start_bot_and_services(bot: MMWProBot, service_tasks=None):
         service_tasks.extend([
             asyncio.create_task(run_autodelete_sweeper(bot), name="mmw-autodelete"),
             asyncio.create_task(run_keepalive_worker(bot, interval=Config.KEEPALIVE_INTERVAL), name="mmw-keepalive"),
-            asyncio.create_task(keep_live(), name="keepalive"),
             asyncio.create_task(schedule_weekly_restart(bot, interval=604800), name="mmw-weekly-restart"),
             asyncio.create_task(auto_clean_expired_cache_job(), name="mmw-cache-cleanup"),
             asyncio.create_task(run_task_recovery_watchdog(bot, interval=Config.TASK_WATCHDOG_INTERVAL), name="mmw-task-recovery"),
